@@ -1,0 +1,19 @@
+services:
+  api:
+    image: ${MATEMCP_API_IMAGE:-vrassouli/matemcp-api:dev}
+    container_name: matemcp-api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:8081
+      MateMCP__PublicUrl: ${MATEMCP_API_PUBLIC_URL:-https://api.matemcp.com}
+      MateMCP__RelayResource: ${MATEMCP_RELAY_RESOURCE:-https://relay.matemcp.com}
+      MateMCP__AdminEmail: ${MATEMCP_API_ADMIN_EMAIL}
+      MateMCP__AdminPassword: ${MATEMCP_API_ADMIN_PASSWORD}
+      MateMCP__DataPath: /data/matemcp-api.db
+    volumes:
+      - matemcp-api-data:/data
+    ports:
+      - "${MATEMCP_API_BIND:-0.0.0.0}:${MATEMCP_API_PORT:-8081}:8081"
+
+volumes:
+  matemcp-api-data:
