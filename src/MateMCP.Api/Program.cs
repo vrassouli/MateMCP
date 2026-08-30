@@ -64,7 +64,12 @@ builder.Services.AddOpenIddict()
         options.AllowRefreshTokenFlow();
         options.RequireProofKeyForCodeExchange();
         options.RegisterScopes("mcp:read", "mcp:write", "mcp:shell", OpenIddictConstants.Scopes.OfflineAccess);
-        options.RegisterResources(relayResource);
+
+        // MCP clients send the RFC 8707 resource indicator. MateMCP resolves the
+        // allowed Relay resource dynamically from configuration and validates it
+        // explicitly in the authorization endpoint below.
+        options.DisableResourceValidation();
+        options.IgnoreResourcePermissions();
 
         options.AddSigningKey(new RsaSecurityKey(signingKey));
         options.AddEncryptionKey(new RsaSecurityKey(encryptionKey));
@@ -99,7 +104,8 @@ app.Use(async (context, next) =>
             grant_types_supported = new[] { "authorization_code", "refresh_token" },
             code_challenge_methods_supported = new[] { "S256" },
             token_endpoint_auth_methods_supported = new[] { "none" },
-            scopes_supported = new[] { "mcp:read", "mcp:write", "mcp:shell", "offline_access" }
+            scopes_supported = new[] { "mcp:read", "mcp:write", "mcp:shell", "offline_access" },
+            authorization_response_iss_parameter_supported = true
         });
         return;
     }
@@ -154,6 +160,16 @@ app.MapPost("/login", async (HttpContext context) =>
 app.MapMethods("/connect/authorize", new[] { "GET", "POST" }, async (HttpContext context) =>
 {
     var request = context.GetOpenIddictServerRequest() ?? throw new InvalidOperationException("OpenID Connect request unavailable.");
+
+    var requestedResources = request.GetResources();
+    if (requestedResources.Any(resource => !string.Equals(resource, relayResource, StringComparison.Ordinal)))
+    {
+        return Results.BadRequest(new
+        {
+            error = OpenIddictConstants.Errors.InvalidTarget,
+            error_description = "The requested resource is not allowed."
+        });
+    }
 
     if (context.User.Identity?.IsAuthenticated != true)
     {
