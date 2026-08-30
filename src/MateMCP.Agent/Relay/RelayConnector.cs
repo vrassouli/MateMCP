@@ -51,8 +51,19 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
         {
             using var message = new HttpRequestMessage(new HttpMethod(request.Method), $"http://127.0.0.1:{current.Port}{request.Path}");
             message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", current.AccessToken);
-            foreach (var h in request.Headers) if (!message.Headers.TryAddWithoutValidation(h.Key, h.Value)) { message.Content ??= new ByteArrayContent([]); message.Content.Headers.TryAddWithoutValidation(h.Key, h.Value); }
-            if (request.BodyBase64 is not null) message.Content = new ByteArrayContent(Convert.FromBase64String(request.BodyBase64));
+
+            if (request.BodyBase64 is not null)
+                message.Content = new ByteArrayContent(Convert.FromBase64String(request.BodyBase64));
+
+            foreach (var h in request.Headers)
+            {
+                if (message.Headers.TryAddWithoutValidation(h.Key, h.Value))
+                    continue;
+
+                message.Content ??= new ByteArrayContent([]);
+                message.Content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+            }
+
             using var upstream = await _http.SendAsync(message, HttpCompletionOption.ResponseContentRead, ct);
             var body = await upstream.Content.ReadAsByteArrayAsync(ct);
             var headers = upstream.Headers.Concat(upstream.Content.Headers).ToDictionary(h => h.Key, h => h.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
