@@ -2,6 +2,7 @@ using System.Net;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Projects;
+using MateMCP.Agent.Relay;
 using MateMCP.Agent.Security;
 using Microsoft.AspNetCore.RateLimiting;
 using ModelContextProtocol.AspNetCore;
@@ -36,6 +37,7 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 builder.Services.AddSingleton<ProjectRegistry>();
 builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<ApprovalService>();
+builder.Services.AddHostedService<RelayConnector>();
 builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("mcp", limiter =>
 {
     limiter.PermitLimit = 120;
@@ -59,7 +61,8 @@ app.MapGet("/status", (HttpContext context) =>
         endpoint = $"{(options.AllowInsecureHttp ? "http" : "https")}://{options.BindAddress}:{options.Port}/mcp",
         configuration = userConfigPath,
         projects = options.Projects.Select(p => p.Name).ToArray(),
-        shellApproval = options.RequireShellApproval
+        shellApproval = options.RequireShellApproval,
+        relay = new { options.Relay.Enabled, options.Relay.Url, options.Relay.DeviceId }
     });
 });
 app.MapGet("/approvals", (HttpContext context, ApprovalService approvals) =>

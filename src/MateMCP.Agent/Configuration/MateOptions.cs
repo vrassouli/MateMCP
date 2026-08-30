@@ -11,7 +11,17 @@ public sealed class MateOptions
     public string? AccessToken { get; set; }
     public bool RequireShellApproval { get; set; } = true;
     public int ApprovalTimeoutSeconds { get; set; } = 120;
+    public RelayOptions Relay { get; set; } = new();
     public List<ProjectOptions> Projects { get; set; } = [];
+}
+
+public sealed class RelayOptions
+{
+    public bool Enabled { get; set; }
+    public string Url { get; set; } = "https://relay.matemcp.com";
+    public string? DeviceId { get; set; }
+    public string? AgentToken { get; set; }
+    public int MaxMessageBytes { get; set; } = 8 * 1024 * 1024;
 }
 
 public sealed class ProjectOptions
