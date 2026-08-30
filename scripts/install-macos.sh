@@ -22,6 +22,11 @@ if [[ -f "$PACKAGE_DIR/uninstall-macos.sh" ]]; then
   chmod +x "$TARGET/uninstall-macos.sh"
 fi
 
+if [[ -f "$PACKAGE_DIR/prepare-external-test-macos.sh" ]]; then
+  cp "$PACKAGE_DIR/prepare-external-test-macos.sh" "$TARGET/prepare-external-test-macos.sh"
+  chmod +x "$TARGET/prepare-external-test-macos.sh"
+fi
+
 ln -sfn "$TARGET/MateMCP.Agent" "$BIN/matemcp"
 
 echo "MateMCP installed/upgraded."
@@ -29,6 +34,9 @@ echo "Binary: $BIN/matemcp"
 echo "Config: $CONFIG/appsettings.json"
 if [[ -x "$TARGET/uninstall-macos.sh" ]]; then
   echo "Uninstall: $TARGET/uninstall-macos.sh"
+fi
+if [[ -x "$TARGET/prepare-external-test-macos.sh" ]]; then
+  echo "External test setup: $TARGET/prepare-external-test-macos.sh <public-ipv4> [port]"
 fi
 echo
 if [[ ":$PATH:" != *":$BIN:"* ]]; then
