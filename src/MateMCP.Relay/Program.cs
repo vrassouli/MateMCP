@@ -2,13 +2,14 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text.Json;
 using MateMCP.Relay;
+using Microsoft.AspNetCore.Authentication;
+using OpenIddict.Validation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection(RelayOptions.SectionName));
 builder.Services.AddSingleton<AgentRegistry>();
-var app = builder.Build();
-app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
-var options = app.Configuration.GetSection(RelayOptions.SectionName).Get<RelayOptions>() ?? new RelayOptions();
+
+var options = builder.Configuration.GetSection(RelayOptions.SectionName).Get<RelayOptions>() ?? new RelayOptions();
 if (options.AgentToken == "change-me" || options.ClientToken == "change-me")
     throw new InvalidOperationException("Configure Relay:AgentToken and Relay:ClientToken.");
 
@@ -17,6 +18,17 @@ var authorizationServerUrl = options.AuthorizationServerUrl.TrimEnd('/');
 var resourceMetadataUrl = $"{publicBaseUrl}/.well-known/oauth-protected-resource";
 var scopeValue = string.Join(' ', options.OAuthScopes);
 
+builder.Services.AddOpenIddict().AddValidation(validation =>
+{
+    validation.SetIssuer(new Uri(authorizationServerUrl + "/"));
+    validation.AddAudiences(publicBaseUrl);
+    validation.UseSystemNetHttp();
+    validation.UseAspNetCore();
+});
+
+var app = builder.Build();
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
+
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Relay", status = "ok" }));
 
 app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
@@ -24,6 +36,7 @@ app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
     resource = publicBaseUrl,
     authorization_servers = new[] { authorizationServerUrl },
     scopes_supported = options.OAuthScopes,
+    bearer_methods_supported = new[] { "header" },
     resource_documentation = "https://github.com/vrassouli/MateMCP"
 }));
 
@@ -62,7 +75,7 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
 
 app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], async (HttpContext context, string deviceId, AgentRegistry registry) =>
 {
-    if (!BearerEquals(context, options.ClientToken))
+    if (!BearerEquals(context, options.ClientToken) && !await HasValidOAuthTokenAsync(context))
     {
         context.Response.Headers.WWWAuthenticate = $"Bearer resource_metadata=\"{resourceMetadataUrl}\", scope=\"{scopeValue}\"";
         return Results.Unauthorized();
@@ -96,6 +109,12 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], asy
 });
 
 app.Run();
+
+static async Task<bool> HasValidOAuthTokenAsync(HttpContext context)
+{
+    var result = await context.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+    return result.Succeeded && result.Principal?.Identity?.IsAuthenticated == true;
+}
 
 static bool BearerEquals(HttpContext context, string expected)
 {
