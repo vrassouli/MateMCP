@@ -18,14 +18,20 @@ Future capabilities include desktop viewing/control, richer local approval UI, p
 
 > MateMCP treats configured project roots and its own policy engine as security boundaries. MCP Roots are not used as an authorization boundary.
 
-## macOS install from a CI artifact
+## macOS install
 
-Download the artifact matching your Mac (`MateMCP-osx-arm64` for Apple Silicon or `MateMCP-osx-x64` for Intel), extract the archive, then run:
+On Apple Silicon and Intel Macs, install or upgrade MateMCP Agent with one command:
 
 ```bash
-chmod +x install-macos.sh
-./install-macos.sh
-$HOME/.local/bin/matemcp
+curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/feat/relay-mvp/scripts/bootstrap-macos.sh | bash
+```
+
+The bootstrap detects `arm64` vs `x86_64`, downloads the matching package from the latest successful `feat/relay-mvp` CI build, and runs the packaged installer. Existing user configuration is preserved during upgrades.
+
+Then start MateMCP with:
+
+```bash
+matemcp
 ```
 
 The first run creates a private configuration file at:
@@ -78,4 +84,4 @@ docker compose up -d
 
 By default Relay listens on `0.0.0.0:8080`. Do not expose port `8080` directly to the Internet. Put it behind the intended reverse proxy/firewall and expose only HTTPS (normally `443`) externally.
 
-For development/testing, the installer uses the `feat/relay-mvp` Git ref and Docker image tag `dev`. After Relay is merged to `main`, the stable install command and default image tag should be switched to `main`/`latest`.
+For development/testing, the installers use the `feat/relay-mvp` Git ref and the Relay uses Docker image tag `dev`. After Relay is merged to `main`, the stable install commands and default image tag should be switched to `main`/`latest`.
