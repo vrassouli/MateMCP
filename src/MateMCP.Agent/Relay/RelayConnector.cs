@@ -24,11 +24,15 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
 
     private async Task RunConnectionAsync(Configuration.MateOptions current, CancellationToken ct)
     {
+        var relayUrl = current.Relay.Url!;
+        var deviceId = current.Relay.DeviceId!;
+        var agentToken = current.Relay.AgentToken!;
+
         using var socket = new ClientWebSocket();
-        socket.Options.SetRequestHeader("Authorization", $"Bearer {current.Relay.AgentToken}");
-        var uri = new Uri($"{current.Relay.Url.TrimEnd('/')}/relay/agent/{Uri.EscapeDataString(current.Relay.DeviceId)}".Replace("https://", "wss://").Replace("http://", "ws://"));
+        socket.Options.SetRequestHeader("Authorization", $"Bearer {agentToken}");
+        var uri = new Uri($"{relayUrl.TrimEnd('/')}/relay/agent/{Uri.EscapeDataString(deviceId)}".Replace("https://", "wss://").Replace("http://", "ws://"));
         await socket.ConnectAsync(uri, ct);
-        logger.LogInformation("Connected to MateMCP Relay as {DeviceId}", current.Relay.DeviceId);
+        logger.LogInformation("Connected to MateMCP Relay as {DeviceId}", deviceId);
         var buffer = new byte[Math.Max(64 * 1024, current.Relay.MaxMessageBytes)];
         while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
