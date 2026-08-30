@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ARCH="$(uname -m)"
-case "$ARCH" in
-  arm64) RID=osx-arm64 ;;
-  x86_64) RID=osx-x64 ;;
-  *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
-esac
-SOURCE="${1:-./artifacts/$RID}"
+
+SOURCE="${1:-./payload}"
 TARGET="$HOME/.local/share/matemcp"
 BIN="$HOME/.local/bin"
-mkdir -p "$TARGET" "$BIN" "$HOME/Library/Application Support/MateMCP"
+CONFIG="$HOME/Library/Application Support/MateMCP"
+
+if [[ ! -x "$SOURCE/MateMCP.Agent" ]]; then
+  echo "MateMCP payload not found at: $SOURCE" >&2
+  exit 1
+fi
+
+mkdir -p "$TARGET" "$BIN" "$CONFIG"
+rm -rf "$TARGET"/*
 cp -R "$SOURCE"/* "$TARGET"/
-ln -sf "$TARGET/MateMCP.Agent" "$BIN/matemcp"
 chmod +x "$TARGET/MateMCP.Agent"
-echo "Installed MateMCP to $TARGET"
-echo "Ensure $BIN is in PATH, configure appsettings.json, then run: matemcp"
+ln -sfn "$TARGET/MateMCP.Agent" "$BIN/matemcp"
+
+echo "MateMCP installed."
+echo "Binary: $BIN/matemcp"
+echo "Config: $CONFIG/appsettings.json (created securely on first run)"
+echo
+if [[ ":$PATH:" != *":$BIN:"* ]]; then
+  echo "Note: add $BIN to PATH, or run $BIN/matemcp directly."
+fi
+echo "Start MateMCP once to generate configuration:"
+echo "  $BIN/matemcp"
