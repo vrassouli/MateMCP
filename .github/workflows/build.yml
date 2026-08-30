@@ -1,0 +1,28 @@
+name: build
+
+on:
+  push:
+    branches: [ main, 'feat/**' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore MateMCP.slnx
+      - run: dotnet build MateMCP.slnx -c Release --no-restore
+      - run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o artifacts/${{ matrix.rid }}
+      - run: tar -czf MateMCP-${{ matrix.rid }}.tar.gz -C artifacts/${{ matrix.rid }} .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MateMCP-${{ matrix.rid }}
+          path: MateMCP-${{ matrix.rid }}.tar.gz
