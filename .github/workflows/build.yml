@@ -20,8 +20,14 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet restore MateMCP.slnx
       - run: dotnet build MateMCP.slnx -c Release --no-restore
-      - run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o artifacts/${{ matrix.rid }}
-      - run: tar -czf MateMCP-${{ matrix.rid }}.tar.gz -C artifacts/${{ matrix.rid }} .
+      - name: Publish self-contained agent
+        run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
+      - name: Build installable archive
+        run: |
+          cp scripts/install-macos.sh package/install-macos.sh
+          cp scripts/uninstall-macos.sh package/uninstall-macos.sh
+          chmod +x package/install-macos.sh package/uninstall-macos.sh package/payload/MateMCP.Agent
+          tar -czf MateMCP-${{ matrix.rid }}.tar.gz -C package .
       - uses: actions/upload-artifact@v4
         with:
           name: MateMCP-${{ matrix.rid }}
