@@ -3,6 +3,7 @@ using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Projects;
 using MateMCP.Agent.Security;
+using Microsoft.AspNetCore.RateLimiting;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
 
