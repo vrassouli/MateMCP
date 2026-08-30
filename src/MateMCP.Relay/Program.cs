@@ -12,7 +12,20 @@ var options = app.Configuration.GetSection(RelayOptions.SectionName).Get<RelayOp
 if (options.AgentToken == "change-me" || options.ClientToken == "change-me")
     throw new InvalidOperationException("Configure Relay:AgentToken and Relay:ClientToken.");
 
+var publicBaseUrl = options.PublicBaseUrl.TrimEnd('/');
+var authorizationServerUrl = options.AuthorizationServerUrl.TrimEnd('/');
+var resourceMetadataUrl = $"{publicBaseUrl}/.well-known/oauth-protected-resource";
+var scopeValue = string.Join(' ', options.OAuthScopes);
+
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Relay", status = "ok" }));
+
+app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
+{
+    resource = publicBaseUrl,
+    authorization_servers = new[] { authorizationServerUrl },
+    scopes_supported = options.OAuthScopes,
+    resource_documentation = "https://github.com/vrassouli/MateMCP"
+}));
 
 app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, AgentRegistry registry) =>
 {
@@ -49,7 +62,11 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
 
 app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], async (HttpContext context, string deviceId, AgentRegistry registry) =>
 {
-    if (!BearerEquals(context, options.ClientToken)) return Results.Unauthorized();
+    if (!BearerEquals(context, options.ClientToken))
+    {
+        context.Response.Headers.WWWAuthenticate = $"Bearer resource_metadata=\"{resourceMetadataUrl}\", scope=\"{scopeValue}\"";
+        return Results.Unauthorized();
+    }
     if (!registry.TryGet(deviceId, out var agent)) return Results.NotFound(new { error = "device_offline" });
     if (context.Request.ContentLength > options.MaxBodyBytes) return Results.StatusCode(413);
 
