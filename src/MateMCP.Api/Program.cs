@@ -76,6 +76,36 @@ builder.Services.AddOpenIddict()
 var app = builder.Build();
 
 app.UseForwardedHeaders();
+
+// OpenIddict publishes its own discovery document, but MCP clients such as ChatGPT
+// need the Dynamic Client Registration endpoint and public-client ("none") token
+// authentication to be advertised explicitly. Serve the standards-based metadata
+// before OpenIddict's middleware can handle the request.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Method == HttpMethods.Get &&
+        (context.Request.Path.Equals("/.well-known/oauth-authorization-server") ||
+         context.Request.Path.Equals("/.well-known/openid-configuration")))
+    {
+        await context.Response.WriteAsJsonAsync(new
+        {
+            issuer = publicUrl + "/",
+            authorization_endpoint = publicUrl + "/connect/authorize",
+            token_endpoint = publicUrl + "/connect/token",
+            registration_endpoint = publicUrl + "/connect/register",
+            jwks_uri = publicUrl + "/.well-known/jwks",
+            response_types_supported = new[] { "code" },
+            grant_types_supported = new[] { "authorization_code", "refresh_token" },
+            code_challenge_methods_supported = new[] { "S256" },
+            token_endpoint_auth_methods_supported = new[] { "none" },
+            scopes_supported = new[] { "mcp:read", "mcp:write", "mcp:shell", "offline_access" }
+        });
+        return;
+    }
+
+    await next();
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -88,20 +118,6 @@ app.MapGet("/", () => Results.Ok(new
     relay_resource = relayResource
 }));
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "ok" }));
-
-app.MapGet("/.well-known/oauth-authorization-server", () => Results.Ok(new
-{
-    issuer = publicUrl + "/",
-    authorization_endpoint = publicUrl + "/connect/authorize",
-    token_endpoint = publicUrl + "/connect/token",
-    registration_endpoint = publicUrl + "/connect/register",
-    jwks_uri = publicUrl + "/.well-known/jwks",
-    response_types_supported = new[] { "code" },
-    grant_types_supported = new[] { "authorization_code", "refresh_token" },
-    code_challenge_methods_supported = new[] { "S256" },
-    token_endpoint_auth_methods_supported = new[] { "none" },
-    scopes_supported = new[] { "mcp:read", "mcp:write", "mcp:shell", "offline_access" }
-}));
 
 app.MapGet("/login", (string? returnUrl) => Results.Content($$"""
 <!doctype html>
