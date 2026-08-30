@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
@@ -42,7 +43,7 @@ builder.Services.AddOpenIddict()
         options.SetIssuer(new Uri(publicUrl + "/"));
         options.SetAuthorizationEndpointUris("/connect/authorize");
         options.SetTokenEndpointUris("/connect/token");
-        options.SetCryptographyEndpointUris("/.well-known/jwks");
+        options.SetJsonWebKeySetEndpointUris("/.well-known/jwks");
 
         options.AllowAuthorizationCodeFlow();
         options.AllowRefreshTokenFlow();
