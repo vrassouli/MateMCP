@@ -36,21 +36,43 @@ jobs:
         with:
           name: MateMCP-${{ matrix.rid }}
           path: MateMCP-${{ matrix.rid }}.tar.gz
-      - name: Publish development release asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/relay-mvp'
+
+  publish-agent-release:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/feat/relay-mvp' || github.ref == 'refs/heads/main')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download arm64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-osx-arm64
+          path: release
+      - name: Download x64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-osx-x64
+          path: release
+      - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          TAG="agent-dev"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            TAG="agent-latest"
+            TITLE="MateMCP Agent Latest"
+            NOTES="Latest stable build from main. Assets are replaced on each successful push."
+            EXTRA=()
+          else
+            TAG="agent-dev"
+            TITLE="MateMCP Agent Development"
+            NOTES="Latest development build from feat/relay-mvp. Assets are replaced on each successful push."
+            EXTRA=(--prerelease)
+          fi
+
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --prerelease --title "MateMCP Agent Development" --notes "Latest development build from feat/relay-mvp. Assets are replaced on each successful push."
-          gh release upload "$TAG" "MateMCP-${{ matrix.rid }}.tar.gz" --clobber
-      - name: Publish stable release asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="agent-latest"
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --title "MateMCP Agent Latest" --notes "Latest stable build from main. Assets are replaced on each successful push."
-          gh release upload "$TAG" "MateMCP-${{ matrix.rid }}.tar.gz" --clobber
+            gh release create "$TAG" "${EXTRA[@]}" --title "$TITLE" --notes "$NOTES"
+
+          gh release upload "$TAG" \
+            release/MateMCP-osx-arm64.tar.gz \
+            release/MateMCP-osx-x64.tar.gz \
+            --clobber
