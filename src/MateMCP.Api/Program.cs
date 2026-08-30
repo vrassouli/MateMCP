@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
-using OpenIddict.EntityFrameworkCore.Models;
 using OpenIddict.Server.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -65,6 +64,12 @@ app.UseAuthorization();
 
 await EnsureDatabaseAsync(app.Services);
 
+app.MapGet("/", () => Results.Ok(new
+{
+    service = "MateMCP.Api",
+    authorization_server = publicUrl,
+    relay_resource = relayResource
+}));
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "ok" }));
 
 app.MapGet("/.well-known/oauth-authorization-server", () => Results.Ok(new
@@ -130,11 +135,7 @@ app.MapMethods("/connect/authorize", new[] { "GET", "POST" }, async (HttpContext
     var allowedScopes = new[] { "mcp:read", "mcp:write", "mcp:shell", OpenIddictConstants.Scopes.OfflineAccess };
     identity.SetScopes(requestedScopes.Intersect(allowedScopes, StringComparer.Ordinal));
     identity.SetResources(relayResource);
-    identity.SetDestinations(claim => claim.Type switch
-    {
-        OpenIddictConstants.Claims.Name => new[] { OpenIddictConstants.Destinations.AccessToken },
-        _ => new[] { OpenIddictConstants.Destinations.AccessToken }
-    });
+    identity.SetDestinations(_ => new[] { OpenIddictConstants.Destinations.AccessToken });
 
     return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
