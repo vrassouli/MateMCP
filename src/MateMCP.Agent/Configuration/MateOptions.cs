@@ -9,6 +9,8 @@ public sealed class MateOptions
     public string? CertificatePath { get; set; }
     public string? CertificatePassword { get; set; }
     public string? AccessToken { get; set; }
+    public bool RequireShellApproval { get; set; } = true;
+    public int ApprovalTimeoutSeconds { get; set; } = 120;
     public List<ProjectOptions> Projects { get; set; } = [];
 }
 
