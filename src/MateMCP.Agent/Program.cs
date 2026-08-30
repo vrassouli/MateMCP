@@ -7,12 +7,14 @@ using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
 
 var builder = WebApplication.CreateBuilder(args);
+var userConfigPath = ConfigurationBootstrap.EnsureUserConfiguration();
+builder.Configuration.AddJsonFile(userConfigPath, optional: false, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables(prefix: "MATEMCP_");
 builder.Services.Configure<MateOptions>(builder.Configuration.GetSection(MateOptions.SectionName));
 var options = builder.Configuration.GetSection(MateOptions.SectionName).Get<MateOptions>() ?? new MateOptions();
 
-if (string.IsNullOrWhiteSpace(options.AccessToken))
-    throw new InvalidOperationException("Mate:AccessToken must be configured before starting MateMCP.");
+if (string.IsNullOrWhiteSpace(options.AccessToken) || options.AccessToken == "change-me-before-exposing")
+    throw new InvalidOperationException($"A secure Mate:AccessToken is required. Edit '{userConfigPath}'.");
 if (!options.AllowInsecureHttp && string.IsNullOrWhiteSpace(options.CertificatePath))
     throw new InvalidOperationException("HTTPS is required. Configure Mate:CertificatePath or explicitly set Mate:AllowInsecureHttp=true for local development.");
 
@@ -43,5 +45,12 @@ var app = builder.Build();
 app.UseRateLimiter();
 app.UseMiddleware<BearerTokenMiddleware>();
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP", status = "ok" }));
+app.MapGet("/status", () => Results.Ok(new
+{
+    service = "MateMCP",
+    endpoint = $"{(options.AllowInsecureHttp ? "http" : "https")}://{options.BindAddress}:{options.Port}/mcp",
+    configuration = userConfigPath,
+    projects = options.Projects.Select(p => p.Name).ToArray()
+}));
 app.MapMcp("/mcp").RequireRateLimiting("mcp");
 app.Run();
