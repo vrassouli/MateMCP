@@ -26,7 +26,8 @@ jobs:
         run: |
           cp scripts/install-macos.sh package/install-macos.sh
           cp scripts/uninstall-macos.sh package/uninstall-macos.sh
-          chmod +x package/install-macos.sh package/uninstall-macos.sh package/payload/MateMCP.Agent
+          cp scripts/prepare-external-test-macos.sh package/prepare-external-test-macos.sh
+          chmod +x package/install-macos.sh package/uninstall-macos.sh package/prepare-external-test-macos.sh package/payload/MateMCP.Agent
           tar -czf MateMCP-${{ matrix.rid }}.tar.gz -C package .
       - uses: actions/upload-artifact@v4
         with:
