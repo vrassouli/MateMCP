@@ -1,0 +1,13 @@
+services:
+  relay:
+    image: ${MATEMCP_RELAY_IMAGE:-vrassouli/matemcp-relay:dev}
+    container_name: matemcp-relay
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Relay__AgentToken: ${MATEMCP_RELAY_AGENT_TOKEN}
+      Relay__ClientToken: ${MATEMCP_RELAY_CLIENT_TOKEN}
+      Relay__MaxBodyBytes: ${MATEMCP_RELAY_MAX_BODY_BYTES:-4194304}
+      Relay__RequestTimeoutSeconds: ${MATEMCP_RELAY_REQUEST_TIMEOUT_SECONDS:-120}
+    ports:
+      - "${MATEMCP_RELAY_BIND:-0.0.0.0}:${MATEMCP_RELAY_PORT:-8080}:8080"
