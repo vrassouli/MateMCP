@@ -64,6 +64,7 @@ builder.Services.AddOpenIddict()
         options.AllowRefreshTokenFlow();
         options.RequireProofKeyForCodeExchange();
         options.RegisterScopes("mcp:read", "mcp:write", "mcp:shell", OpenIddictConstants.Scopes.OfflineAccess);
+        options.RegisterResources(relayResource);
 
         options.AddSigningKey(new RsaSecurityKey(signingKey));
         options.AddEncryptionKey(new RsaSecurityKey(encryptionKey));
