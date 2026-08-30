@@ -1,8 +1,11 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 
@@ -13,9 +16,21 @@ var relayResource = builder.Configuration["MateMCP:RelayResource"]?.TrimEnd('/')
 var adminEmail = builder.Configuration["MateMCP:AdminEmail"] ?? "admin@matemcp.local";
 var adminPassword = builder.Configuration["MateMCP:AdminPassword"];
 var dataPath = builder.Configuration["MateMCP:DataPath"] ?? "/data/matemcp-api.db";
+var dataDirectory = Path.GetDirectoryName(dataPath) ?? "/data";
 
 if (string.IsNullOrWhiteSpace(adminPassword))
     throw new InvalidOperationException("Configure MateMCP:AdminPassword.");
+
+Directory.CreateDirectory(dataDirectory);
+var signingKey = LoadOrCreateRsaKey(Path.Combine(dataDirectory, "signing-key.pem"));
+var encryptionKey = LoadOrCreateRsaKey(Path.Combine(dataDirectory, "encryption-key.pem"));
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 builder.Services.AddDbContext<OAuthDbContext>(options =>
 {
@@ -50,8 +65,8 @@ builder.Services.AddOpenIddict()
         options.RequireProofKeyForCodeExchange();
         options.RegisterScopes("mcp:read", "mcp:write", "mcp:shell", OpenIddictConstants.Scopes.OfflineAccess);
 
-        options.AddEphemeralEncryptionKey();
-        options.AddEphemeralSigningKey();
+        options.AddSigningKey(new RsaSecurityKey(signingKey));
+        options.AddEncryptionKey(new RsaSecurityKey(encryptionKey));
         options.DisableAccessTokenEncryption();
 
         options.UseAspNetCore()
@@ -60,6 +75,7 @@ builder.Services.AddOpenIddict()
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -196,11 +212,24 @@ static async Task EnsureDatabaseAsync(IServiceProvider services)
     await db.Database.EnsureCreatedAsync();
 }
 
+static RSA LoadOrCreateRsaKey(string path)
+{
+    var rsa = RSA.Create(3072);
+    if (File.Exists(path))
+    {
+        rsa.ImportFromPem(File.ReadAllText(path));
+        return rsa;
+    }
+
+    File.WriteAllText(path, rsa.ExportPkcs8PrivateKeyPem());
+    return rsa;
+}
+
 static bool FixedTimeEquals(string supplied, string expected)
 {
     var a = System.Text.Encoding.UTF8.GetBytes(supplied);
     var b = System.Text.Encoding.UTF8.GetBytes(expected);
-    return a.Length == b.Length && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(a, b);
+    return a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
 }
 
 static bool IsLocalReturnUrl(string value) => !string.IsNullOrEmpty(value) && value[0] == '/' && (value.Length == 1 || value[1] != '/' && value[1] != '\\');
