@@ -43,17 +43,18 @@ if [[ ! -f "$CONFIG_PATH" ]]; then
   exit 1
 fi
 
-if ! command -v certbot >/dev/null 2>&1; then
+CERTBOT_BIN="$(command -v certbot || true)"
+OPENSSL_BIN="$(command -v openssl || true)"
+if [[ -z "$CERTBOT_BIN" ]]; then
   echo "Certbot is required. Install it with: brew install certbot" >&2
   exit 1
 fi
-
-if ! command -v openssl >/dev/null 2>&1; then
+if [[ -z "$OPENSSL_BIN" ]]; then
   echo "OpenSSL is required." >&2
   exit 1
 fi
 
-CERTBOT_VERSION="$(certbot --version 2>&1 | awk '{print $2}' || true)"
+CERTBOT_VERSION="$($CERTBOT_BIN --version 2>&1 | awk '{print $2}' || true)"
 CERTBOT_MAJOR="${CERTBOT_VERSION%%.*}"
 CERTBOT_MINOR="$(printf '%s' "$CERTBOT_VERSION" | cut -d. -f2)"
 if [[ "$CERTBOT_MAJOR" =~ ^[0-9]+$ && "$CERTBOT_MINOR" =~ ^[0-9]+$ ]]; then
@@ -91,7 +92,7 @@ if [[ ! "$answer" =~ ^[Yy]$ ]]; then
 fi
 
 echo "Requesting a short-lived, publicly trusted Let's Encrypt certificate for $PUBLIC_IP ..."
-sudo certbot certonly \
+sudo "$CERTBOT_BIN" certonly \
   --standalone \
   --preferred-profile shortlived \
   --ip-address "$PUBLIC_IP" \
@@ -102,12 +103,12 @@ if [[ ! -f "$LE_LIVE_DIR/fullchain.pem" || ! -f "$LE_LIVE_DIR/privkey.pem" ]]; t
   exit 1
 fi
 
-TOKEN="matemcp_$(openssl rand -hex 32)"
-PFX_PASSWORD="$(openssl rand -hex 24)"
+TOKEN="matemcp_$($OPENSSL_BIN rand -hex 32)"
+PFX_PASSWORD="$($OPENSSL_BIN rand -hex 24)"
 TMP_PFX="$(mktemp -t matemcp-external.XXXXXX.pfx)"
 trap 'rm -f "$TMP_PFX"' EXIT
 
-sudo openssl pkcs12 -export \
+sudo "$OPENSSL_BIN" pkcs12 -export \
   -out "$TMP_PFX" \
   -inkey "$LE_LIVE_DIR/privkey.pem" \
   -in "$LE_LIVE_DIR/fullchain.pem" \
