@@ -59,7 +59,10 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], asy
 
     var headers = context.Request.Headers
         .Where(h => !string.Equals(h.Key, "Authorization", StringComparison.OrdinalIgnoreCase))
-        .ToDictionary(h => h.Key, h => h.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
+        .ToDictionary(
+            h => h.Key,
+            h => h.Value.Select(v => v ?? string.Empty).ToArray(),
+            StringComparer.OrdinalIgnoreCase);
     var request = new RelayRequest(Guid.NewGuid().ToString("N"), context.Request.Method, "/mcp" + context.Request.QueryString, headers, ms.Length == 0 ? null : Convert.ToBase64String(ms.ToArray()));
 
     RelayResponse response;
