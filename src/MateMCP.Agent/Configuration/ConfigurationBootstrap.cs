@@ -26,6 +26,8 @@ public static class ConfigurationBootstrap
                 AccessToken = token,
                 CertificatePath = (string?)null,
                 CertificatePassword = (string?)null,
+                RequireShellApproval = true,
+                ApprovalTimeoutSeconds = 120,
                 Projects = Array.Empty<object>()
             }
         };
