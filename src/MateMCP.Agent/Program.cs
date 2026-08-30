@@ -16,13 +16,16 @@ var options = builder.Configuration.GetSection(MateOptions.SectionName).Get<Mate
 
 if (string.IsNullOrWhiteSpace(options.AccessToken) || options.AccessToken == "change-me-before-exposing")
     throw new InvalidOperationException($"A secure Mate:AccessToken is required. Edit '{userConfigPath}'.");
+if (!IPAddress.TryParse(options.BindAddress, out var bindIp))
+    throw new InvalidOperationException("Mate:BindAddress must be an IP address.");
+if (options.AllowInsecureHttp && !IPAddress.IsLoopback(bindIp))
+    throw new InvalidOperationException("Insecure HTTP is only allowed on a loopback address. Use HTTPS for direct exposure, or keep MateMCP on 127.0.0.1 behind a local TLS reverse proxy such as Caddy.");
 if (!options.AllowInsecureHttp && string.IsNullOrWhiteSpace(options.CertificatePath))
-    throw new InvalidOperationException("HTTPS is required. Configure Mate:CertificatePath or explicitly set Mate:AllowInsecureHttp=true for local development.");
+    throw new InvalidOperationException("HTTPS is required. Configure Mate:CertificatePath or use loopback HTTP behind a trusted local TLS reverse proxy.");
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
-    var ip = IPAddress.Parse(options.BindAddress);
-    kestrel.Listen(ip, options.Port, listen =>
+    kestrel.Listen(bindIp, options.Port, listen =>
     {
         if (!options.AllowInsecureHttp)
             listen.UseHttps(options.CertificatePath!, options.CertificatePassword);
@@ -32,6 +35,7 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 
 builder.Services.AddSingleton<ProjectRegistry>();
 builder.Services.AddSingleton<AuditLog>();
+builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("mcp", limiter =>
 {
     limiter.PermitLimit = 120;
@@ -46,12 +50,38 @@ var app = builder.Build();
 app.UseRateLimiter();
 app.UseMiddleware<BearerTokenMiddleware>();
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP", status = "ok" }));
-app.MapGet("/status", () => Results.Ok(new
+app.MapGet("/status", (HttpContext context) =>
 {
-    service = "MateMCP",
-    endpoint = $"{(options.AllowInsecureHttp ? "http" : "https")}://{options.BindAddress}:{options.Port}/mcp",
-    configuration = userConfigPath,
-    projects = options.Projects.Select(p => p.Name).ToArray()
-}));
+    if (!IsLoopback(context)) return Results.NotFound();
+    return Results.Ok(new
+    {
+        service = "MateMCP",
+        endpoint = $"{(options.AllowInsecureHttp ? "http" : "https")}://{options.BindAddress}:{options.Port}/mcp",
+        configuration = userConfigPath,
+        projects = options.Projects.Select(p => p.Name).ToArray(),
+        shellApproval = options.RequireShellApproval
+    });
+});
+app.MapGet("/approvals", (HttpContext context, ApprovalService approvals) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return Results.Ok(approvals.GetPending());
+});
+app.MapPost("/approvals/{id}/allow", (string id, HttpContext context, ApprovalService approvals) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return approvals.Decide(id, true) ? Results.Ok(new { status = "allowed" }) : Results.NotFound();
+});
+app.MapPost("/approvals/{id}/deny", (string id, HttpContext context, ApprovalService approvals) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return approvals.Decide(id, false) ? Results.Ok(new { status = "denied" }) : Results.NotFound();
+});
 app.MapMcp("/mcp").RequireRateLimiting("mcp");
 app.Run();
+
+static bool IsLoopback(HttpContext context)
+{
+    var remote = context.Connection.RemoteIpAddress;
+    return remote is not null && IPAddress.IsLoopback(remote);
+}
