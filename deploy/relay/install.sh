@@ -81,6 +81,10 @@ if [ -f "${ENV_FILE}" ]; then
     echo "Backup created at ${ENV_BACKUP}"
   else
     echo "Using existing Relay configuration from ${ENV_FILE}"
+    if grep -q '^MATEMCP_RELAY_IMAGE=vrassouli/matemcp-relay:dev$' "${ENV_FILE}"; then
+      sed -i 's#^MATEMCP_RELAY_IMAGE=vrassouli/matemcp-relay:dev$#MATEMCP_RELAY_IMAGE=vrassouli/matemcp-relay:latest#' "${ENV_FILE}"
+      echo "Migrated Relay image from vrassouli/matemcp-relay:dev to :latest"
+    fi
   fi
 fi
 
@@ -102,7 +106,7 @@ if [ ! -f "${ENV_FILE}" ]; then
   [[ -n "${INTERNAL_API_KEY:-}" ]] || { echo "The internal API key from /opt/matemcp-api/.env is required." >&2; exit 1; }
   umask 077
   cat > "${ENV_FILE}" <<EOF
-MATEMCP_RELAY_IMAGE=${MATEMCP_RELAY_IMAGE:-vrassouli/matemcp-relay:dev}
+MATEMCP_RELAY_IMAGE=${MATEMCP_RELAY_IMAGE:-vrassouli/matemcp-relay:latest}
 MATEMCP_RELAY_BIND=${MATEMCP_RELAY_BIND:-0.0.0.0}
 MATEMCP_RELAY_PORT=${MATEMCP_RELAY_PORT:-8080}
 MATEMCP_RELAY_PUBLIC_URL=${RELAY_PUBLIC_URL}
