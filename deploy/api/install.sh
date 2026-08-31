@@ -40,6 +40,10 @@ if [[ -f "$ENV_FILE" ]]; then
     echo "The API must be reconfigured for the multi-user control plane."
   else
     echo "Using existing API configuration from $ENV_FILE"
+    if grep -q '^MATEMCP_API_IMAGE=vrassouli/matemcp-api:dev$' "$ENV_FILE"; then
+      sed -i 's#^MATEMCP_API_IMAGE=vrassouli/matemcp-api:dev$#MATEMCP_API_IMAGE=vrassouli/matemcp-api:latest#' "$ENV_FILE"
+      echo "Migrated API image from vrassouli/matemcp-api:dev to :latest"
+    fi
   fi
 fi
 
@@ -72,7 +76,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   if [[ -n "${ADMIN_EMAIL:-}" ]]; then ask_secret 'Bootstrap account password (minimum 10 characters)'; ADMIN_PASSWORD="$ANSWER"; [[ ${#ADMIN_PASSWORD} -ge 10 ]] || { echo 'Password is too short.' >&2; exit 1; }; fi
   umask 077
   {
-    printf 'MATEMCP_API_IMAGE=%s\n' "${MATEMCP_API_IMAGE:-vrassouli/matemcp-api:dev}"
+    printf 'MATEMCP_API_IMAGE=%s\n' "${MATEMCP_API_IMAGE:-vrassouli/matemcp-api:latest}"
     printf 'MATEMCP_API_BIND=0.0.0.0\nMATEMCP_API_PORT=8081\n'
     printf 'MATEMCP_API_PUBLIC_URL=%s\nMATEMCP_RELAY_URL=%s\n' "$API_URL" "$RELAY_URL"
     printf 'MATEMCP_INTERNAL_API_KEY=%s\n' "$(generate_secret)"
