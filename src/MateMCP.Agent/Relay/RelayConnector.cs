@@ -6,7 +6,7 @@ using MateMCP.Agent.Security;
 
 namespace MateMCP.Agent.Relay;
 
-public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> options, AgentCredentialStore credentials, ILogger<RelayConnector> logger) : BackgroundService
+public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> options, AgentCredentialStore credentials, LocalAccessCredential localAccess, ILogger<RelayConnector> logger) : BackgroundService
 {
     private readonly HttpClient _http = new();
 
@@ -51,7 +51,7 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
         try
         {
             using var message = new HttpRequestMessage(new HttpMethod(request.Method), $"http://127.0.0.1:{current.Port}{request.Path}");
-            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", current.AccessToken);
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", localAccess.Token);
 
             if (request.BodyBase64 is not null)
                 message.Content = new ByteArrayContent(Convert.FromBase64String(request.BodyBase64));
