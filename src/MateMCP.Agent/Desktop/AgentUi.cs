@@ -13,11 +13,11 @@ public static class AgentUi
 </style>
 </head>
 <body>
-<h1>MateMCP Agent</h1><div class="muted">Local management · only available from this Mac</div>
+<h1>MateMCP Agent</h1><div class="muted">Local management · only available from this computer</div>
 <div id="message" class="msg"></div>
 <section id="approvals"><h2>Pending approvals <span id="approvalCount"></span></h2><div id="approvalList"></div></section>
 <section id="projects"><h2>Projects</h2>
-<form id="projectForm" class="card"><input type="hidden" id="originalName"><div class="row"><input id="name" type="text" placeholder="Project name" required><input id="root" type="text" placeholder="/path/to/project" required></div><div class="row" style="margin-top:10px"><label><input id="read" type="checkbox" checked>Read</label><label><input id="write" type="checkbox" checked>Write</label><label><input id="shell" type="checkbox" checked>Shell</label><button type="submit">Save project</button><button type="button" id="cancelEdit" hidden>Cancel edit</button></div></form>
+<form id="projectForm" class="card"><input type="hidden" id="originalName"><div class="row"><input id="name" type="text" placeholder="Project name" required><input id="root" type="text" placeholder="Project folder path" required></div><div class="row" style="margin-top:10px"><label><input id="read" type="checkbox" checked>Read</label><label><input id="write" type="checkbox" checked>Write</label><label><input id="shell" type="checkbox" checked>Shell</label><button type="submit">Save project</button><button type="button" id="cancelEdit" hidden>Cancel edit</button></div></form>
 <div id="projectList"></div></section>
 <script>
 const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));

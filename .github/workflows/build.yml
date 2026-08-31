@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-macos:
     runs-on: macos-14
     strategy:
       fail-fast: false
@@ -37,20 +37,57 @@ jobs:
           name: MateMCP-${{ matrix.rid }}
           path: MateMCP-${{ matrix.rid }}.tar.gz
 
+  build-windows:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore MateMCP.slnx
+      - run: dotnet build MateMCP.slnx -c Release --no-restore
+      - name: Publish self-contained agent
+        shell: pwsh
+        run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
+      - name: Build installable archive
+        shell: pwsh
+        run: |
+          Copy-Item scripts/install-windows.ps1 package/install-windows.ps1
+          Copy-Item scripts/uninstall-windows.ps1 package/uninstall-windows.ps1
+          Compress-Archive -Path package/* -DestinationPath MateMCP-${{ matrix.rid }}.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MateMCP-${{ matrix.rid }}
+          path: MateMCP-${{ matrix.rid }}.zip
+
   publish-agent-release:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/feat/relay-mvp' || github.ref == 'refs/heads/feat/multi-user-control-plane' || github.ref == 'refs/heads/main')
-    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/feat/relay-mvp' || github.ref == 'refs/heads/feat/multi-user-control-plane' || github.ref == 'refs/heads/feat/windows-agent-v0.1' || github.ref == 'refs/heads/main')
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
-      - name: Download arm64 package
+      - name: Download macOS arm64 package
         uses: actions/download-artifact@v4
         with:
           name: MateMCP-osx-arm64
           path: release
-      - name: Download x64 package
+      - name: Download macOS x64 package
         uses: actions/download-artifact@v4
         with:
           name: MateMCP-osx-x64
+          path: release
+      - name: Download Windows x64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-win-x64
+          path: release
+      - name: Download Windows arm64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-win-arm64
           path: release
       - name: Publish release assets
         env:
@@ -65,7 +102,7 @@ jobs:
           else
             TAG="agent-dev"
             TITLE="MateMCP Agent Development"
-            NOTES="Latest development build. Assets are replaced on each successful feature-branch push."
+            NOTES="Latest development build for macOS and Windows. Assets are replaced on each successful feature-branch push."
             EXTRA=(--prerelease)
           fi
 
@@ -75,4 +112,6 @@ jobs:
           gh release upload "$TAG" \
             release/MateMCP-osx-arm64.tar.gz \
             release/MateMCP-osx-x64.tar.gz \
+            release/MateMCP-win-x64.zip \
+            release/MateMCP-win-arm64.zip \
             --clobber

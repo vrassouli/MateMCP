@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -21,16 +23,8 @@ public sealed class AgentCredentialStore
 
     public async Task<string> ResolveLocalAccessTokenAsync(string? configuredToken, string configurationPath, CancellationToken ct)
     {
-        // Explicit environment overrides are intentionally ephemeral and are never persisted.
         var environmentToken = Environment.GetEnvironmentVariable("MATEMCP_Mate__AccessToken");
         if (!string.IsNullOrWhiteSpace(environmentToken)) return environmentToken;
-
-        if (!OperatingSystem.IsMacOS())
-        {
-            if (!string.IsNullOrWhiteSpace(configuredToken) && configuredToken != "change-me-before-exposing")
-                return configuredToken;
-            return "matemcp_" + Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        }
 
         var existing = await GetSecretAsync(LocalAccessAccount, ct);
         if (!string.IsNullOrWhiteSpace(existing))
@@ -43,34 +37,106 @@ public sealed class AgentCredentialStore
             ? configuredToken
             : "matemcp_" + Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
 
-        await SaveSecretAsync(LocalAccessAccount, token, ct);
-        RemovePlaintextAccessToken(configurationPath);
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows())
+        {
+            await SaveSecretAsync(LocalAccessAccount, token, ct);
+            RemovePlaintextAccessToken(configurationPath);
+        }
+
         return token;
     }
 
     private static async Task SaveSecretAsync(string account, string credential, CancellationToken ct)
     {
-        if (!OperatingSystem.IsMacOS())
-            throw new PlatformNotSupportedException("Secure credential storage is currently implemented for macOS Keychain.");
-
-        using var process = NewSecurityProcess("add-generic-password", "-U", "-s", Service, "-a", account, "-w", credential);
-        process.Start();
-        await process.WaitForExitAsync(ct);
-        if (process.ExitCode != 0)
+        if (OperatingSystem.IsMacOS())
         {
-            var error = await process.StandardError.ReadToEndAsync(ct);
-            throw new InvalidOperationException($"Could not save a MateMCP credential in macOS Keychain: {error.Trim()}");
+            using var process = NewSecurityProcess("add-generic-password", "-U", "-s", Service, "-a", account, "-w", credential);
+            process.Start();
+            await process.WaitForExitAsync(ct);
+            if (process.ExitCode != 0)
+            {
+                var error = await process.StandardError.ReadToEndAsync(ct);
+                throw new InvalidOperationException($"Could not save a MateMCP credential in macOS Keychain: {error.Trim()}");
+            }
+            return;
         }
+
+        if (OperatingSystem.IsWindows())
+        {
+            SaveWindowsCredential(account, credential);
+            return;
+        }
+
+        throw new PlatformNotSupportedException("Secure credential storage is currently implemented for macOS Keychain and Windows Credential Manager.");
     }
 
     private static async Task<string?> GetSecretAsync(string account, CancellationToken ct)
     {
-        if (!OperatingSystem.IsMacOS()) return null;
-        using var process = NewSecurityProcess("find-generic-password", "-s", Service, "-a", account, "-w");
-        process.Start();
-        var value = await process.StandardOutput.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        return process.ExitCode == 0 ? value.Trim() : null;
+        if (OperatingSystem.IsMacOS())
+        {
+            using var process = NewSecurityProcess("find-generic-password", "-s", Service, "-a", account, "-w");
+            process.Start();
+            var value = await process.StandardOutput.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+            return process.ExitCode == 0 ? value.Trim() : null;
+        }
+
+        if (OperatingSystem.IsWindows())
+            return ReadWindowsCredential(account);
+
+        return null;
+    }
+
+    private static void SaveWindowsCredential(string account, string credential)
+    {
+        var target = $"{Service}/{account}";
+        var bytes = Encoding.UTF8.GetBytes(credential);
+        var blob = Marshal.AllocHGlobal(bytes.Length);
+        try
+        {
+            Marshal.Copy(bytes, 0, blob, bytes.Length);
+            var native = new NativeCredential
+            {
+                Type = 1,
+                TargetName = target,
+                CredentialBlobSize = (uint)bytes.Length,
+                CredentialBlob = blob,
+                Persist = 2,
+                UserName = Environment.UserName
+            };
+
+            if (!CredWrite(ref native, 0))
+                throw new InvalidOperationException($"Could not save a MateMCP credential in Windows Credential Manager. Win32 error: {Marshal.GetLastWin32Error()}");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            Marshal.FreeHGlobal(blob);
+        }
+    }
+
+    private static string? ReadWindowsCredential(string account)
+    {
+        var target = $"{Service}/{account}";
+        if (!CredRead(target, 1, 0, out var pointer))
+        {
+            var error = Marshal.GetLastWin32Error();
+            return error == 1168 ? null : throw new InvalidOperationException($"Could not read a MateMCP credential from Windows Credential Manager. Win32 error: {error}");
+        }
+
+        try
+        {
+            var native = Marshal.PtrToStructure<NativeCredential>(pointer);
+            if (native.CredentialBlob == IntPtr.Zero || native.CredentialBlobSize == 0) return string.Empty;
+            var bytes = new byte[checked((int)native.CredentialBlobSize)];
+            Marshal.Copy(native.CredentialBlob, bytes, 0, bytes.Length);
+            try { return Encoding.UTF8.GetString(bytes); }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
+        }
+        finally
+        {
+            CredFree(pointer);
+        }
     }
 
     private static void RemovePlaintextAccessToken(string path)
@@ -97,4 +163,32 @@ public sealed class AgentCredentialStore
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         return new Process { StartInfo = start };
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NativeCredential
+    {
+        public uint Flags;
+        public uint Type;
+        public string? TargetName;
+        public string? Comment;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+        public uint CredentialBlobSize;
+        public IntPtr CredentialBlob;
+        public uint Persist;
+        public uint AttributeCount;
+        public IntPtr Attributes;
+        public string? TargetAlias;
+        public string? UserName;
+    }
+
+    [DllImport("Advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CredWrite([In] ref NativeCredential credential, uint flags);
+
+    [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CredRead(string target, uint type, uint reservedFlag, out IntPtr credentialPtr);
+
+    [DllImport("Advapi32.dll", SetLastError = false)]
+    private static extern void CredFree(IntPtr buffer);
 }
