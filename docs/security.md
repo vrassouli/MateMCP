@@ -10,11 +10,23 @@ MateMCP v0.1 is intentionally powerful software. The user explicitly grants an A
 - MCP Roots are discovery hints only and are never used as authorization boundaries.
 - Requests outside configured scopes must be denied or routed through explicit local approval.
 
+## Credentials
+
+On macOS, the local MCP bearer credential and the enrolled Agent credential are stored in **macOS Keychain** under the `MateMCP.Agent` service. New installations do not write the local access token to `appsettings.json`.
+
+At startup, an existing plaintext `Mate:AccessToken` is migrated into Keychain and removed from the JSON configuration. An explicit `MATEMCP_Mate__AccessToken` environment override remains supported for automation/testing and is never written back to disk.
+
+Credential values must never be written to normal logs, audit records, status responses, or the local management UI.
+
 ## Direct exposure
 
 The v0.1 transport is designed for deliberate router/firewall port forwarding. Public exposure requires HTTPS and bearer authentication. The bearer token must be treated as a secret and must never appear in normal logs.
 
-Safe first-run defaults bind only to loopback over HTTP. Public HTTP is not an acceptable production configuration.
+Safe first-run defaults bind only to loopback over HTTP. Public HTTP is not an acceptable production configuration. Local management and approval endpoints are loopback-only even when the MCP endpoint is otherwise exposed.
+
+## Project configuration
+
+The local management UI can add, edit, and remove project roots and read/write/shell permissions without hand-editing configuration files. Project configuration is non-secret and is persisted with user-only file permissions where supported. The Agent reloads project definitions from configuration changes.
 
 ## Filesystem
 
