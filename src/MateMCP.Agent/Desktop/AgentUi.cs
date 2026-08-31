@@ -3,36 +3,26 @@ namespace MateMCP.Agent.Desktop;
 public static class AgentUi
 {
     public const string Html = """
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MateMCP Agent</title>
-<style>
-:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark}body{max-width:980px;margin:32px auto;padding:0 20px}h1{margin-bottom:4px}.muted{opacity:.65}.card{border:1px solid #8886;border-radius:12px;padding:16px;margin:12px 0}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button,input{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid #8888}button{cursor:pointer}.danger{color:#d33}.ok{color:#16803c}.approval{border-left:4px solid #d88b00}label{display:flex;gap:6px;align-items:center}input[type=text]{min-width:240px;flex:1}.project{display:grid;grid-template-columns:1fr auto;gap:12px}.empty{padding:18px;text-align:center;opacity:.6}code{word-break:break-all}.msg{min-height:20px;margin:8px 0}
-</style>
-</head>
-<body>
-<h1>MateMCP Agent</h1><div class="muted">Local management · only available from this computer</div>
-<div id="message" class="msg"></div>
-<section id="approvals"><h2>Pending approvals <span id="approvalCount"></span></h2><div id="approvalList"></div></section>
-<section id="projects"><h2>Projects</h2>
-<form id="projectForm" class="card"><input type="hidden" id="originalName"><div class="row"><input id="name" type="text" placeholder="Project name" required><input id="root" type="text" placeholder="Project folder path" required></div><div class="row" style="margin-top:10px"><label><input id="read" type="checkbox" checked>Read</label><label><input id="write" type="checkbox" checked>Write</label><label><input id="shell" type="checkbox" checked>Shell</label><button type="submit">Save project</button><button type="button" id="cancelEdit" hidden>Cancel edit</button></div></form>
-<div id="projectList"></div></section>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MateMCP Agent</title>
+<style>:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark}body{max-width:980px;margin:32px auto;padding:0 20px}.muted{opacity:.65}.card{border:1px solid #8886;border-radius:12px;padding:16px;margin:12px 0}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button,input{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid #8888}button{cursor:pointer}.danger{color:#d33}.ok{color:#16803c}.approval{border-left:4px solid #d88b00}label{display:flex;gap:6px;align-items:center}input[type=text]{min-width:240px;flex:1}.project{display:grid;grid-template-columns:1fr auto;gap:12px}.empty{padding:18px;text-align:center;opacity:.6}code{word-break:break-all}.msg{min-height:20px;margin:8px 0}</style></head>
+<body><h1>MateMCP Agent</h1><div class="muted">Local management · only available from this computer</div><div id="message" class="msg"></div>
+<section><h2>Pending approvals <span id="approvalCount"></span></h2><div id="approvalList"></div></section>
+<section><h2>Always-allow rules</h2><div id="policyList"></div></section>
+<section><h2>Projects</h2><form id="projectForm" class="card"><input type="hidden" id="originalName"><div class="row"><input id="name" type="text" placeholder="Project name" required><input id="root" type="text" placeholder="Project folder path" required></div><div class="row" style="margin-top:10px"><label><input id="read" type="checkbox" checked>Read</label><label><input id="write" type="checkbox" checked>Write</label><label><input id="shell" type="checkbox" checked>Shell</label><button type="submit">Save project</button><button type="button" id="cancelEdit" hidden>Cancel edit</button></div></form><div id="projectList"></div></section>
 <script>
-const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 function message(text,bad=false){$('message').textContent=text;$('message').className='msg '+(bad?'danger':'ok');if(text)setTimeout(()=>{$('message').textContent=''},4000)}
 async function json(url,options){const r=await fetch(url,options);if(!r.ok){let t=await r.text();try{t=JSON.parse(t).detail||t}catch{}throw new Error(t||r.statusText)}return r.status===204?null:r.json()}
-async function loadApprovals(){try{const list=await json('/approvals');$('approvalCount').textContent=list.length?`(${list.length})`:'';$('approvalList').innerHTML=list.length?list.map(a=>`<div class="card approval"><b>${esc(a.capability)}</b> · <code>${esc(a.target)}</code><p>${esc(a.summary)}</p><div class="muted">Expires ${new Date(a.expiresAt).toLocaleTimeString()}</div><div class="row" style="margin-top:10px"><button onclick="decide('${a.id}',true)">Approve</button><button class="danger" onclick="decide('${a.id}',false)">Deny</button></div></div>`).join(''):'<div class="empty">No pending approvals</div>'}catch(e){message(e.message,true)}}
-async function decide(id,allow){try{await json(`/approvals/${id}/${allow?'allow':'deny'}`,{method:'POST'});await loadApprovals()}catch(e){message(e.message,true)}}
+async function loadApprovals(){try{const list=await json('/approvals');$('approvalCount').textContent=list.length?`(${list.length})`:'';$('approvalList').innerHTML=list.length?list.map(a=>`<div class="card approval"><b>${esc(a.capability)}</b> · <code>${esc(a.target)}</code><p>${esc(a.summary)}</p><div class="muted">Expires ${new Date(a.expiresAt).toLocaleTimeString()}</div><div class="row" style="margin-top:10px"><button onclick="decide('${a.id}','allow')">Allow once</button><button onclick="decide('${a.id}','allow-session')">Allow for session</button><button onclick="decide('${a.id}','allow-always')">Always allow</button><button class="danger" onclick="decide('${a.id}','deny')">Deny</button></div></div>`).join(''):'<div class="empty">No pending approvals</div>'}catch(e){message(e.message,true)}}
+async function decide(id,decision){try{await json(`/approvals/${id}/${decision}`,{method:'POST'});await Promise.all([loadApprovals(),loadPolicies()])}catch(e){message(e.message,true)}}
+async function loadPolicies(){try{const list=await json('/approval-policies');$('policyList').innerHTML=list.length?list.map(p=>`<div class="card project"><div><b>${esc(p.capability)}</b><div><code>${esc(p.target)}</code></div></div><button class="danger" onclick="removePolicy('${encodeURIComponent(p.capability)}','${encodeURIComponent(p.target)}')">Remove</button></div>`).join(''):'<div class="empty">No persistent approval rules</div>'}catch(e){message(e.message,true)}}
+async function removePolicy(c,t){try{await json(`/approval-policies?capability=${c}&target=${t}`,{method:'DELETE'});message('Approval rule removed');await loadPolicies()}catch(e){message(e.message,true)}}
 let projects=[];async function loadProjects(){try{projects=await json('/projects');$('projectList').innerHTML=projects.length?projects.map(p=>`<div class="card project"><div><b>${esc(p.name)}</b><div><code>${esc(p.root)}</code></div><div class="muted">${p.read?'Read ':''}${p.write?'Write ':''}${p.shell?'Shell':''}</div></div><div class="row"><button onclick="editProject('${encodeURIComponent(p.name)}')">Edit</button><button class="danger" onclick="removeProject('${encodeURIComponent(p.name)}')">Remove</button></div></div>`).join(''):'<div class="empty">No projects configured</div>'}catch(e){message(e.message,true)}}
 function editProject(encoded){const name=decodeURIComponent(encoded),p=projects.find(x=>x.name===name);if(!p)return;$('originalName').value=p.name;$('name').value=p.name;$('root').value=p.root;$('read').checked=p.read;$('write').checked=p.write;$('shell').checked=p.shell;$('cancelEdit').hidden=false;$('projectForm').scrollIntoView({behavior:'smooth'})}
-function resetForm(){$('projectForm').reset();$('read').checked=$('write').checked=$('shell').checked=true;$('originalName').value='';$('cancelEdit').hidden=true}
-$('cancelEdit').onclick=resetForm;
+function resetForm(){$('projectForm').reset();$('read').checked=$('write').checked=$('shell').checked=true;$('originalName').value='';$('cancelEdit').hidden=true}$('cancelEdit').onclick=resetForm;
 $('projectForm').onsubmit=async e=>{e.preventDefault();const original=$('originalName').value,p={name:$('name').value,root:$('root').value,read:$('read').checked,write:$('write').checked,shell:$('shell').checked};try{await json(original?`/projects/${encodeURIComponent(original)}`:'/projects',{method:original?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});resetForm();message('Project saved');await loadProjects()}catch(e){message(e.message,true)}};
 async function removeProject(encoded){const name=decodeURIComponent(encoded);if(!confirm(`Remove project "${name}"?`))return;try{await json(`/projects/${encodeURIComponent(name)}`,{method:'DELETE'});message('Project removed');await loadProjects()}catch(e){message(e.message,true)}}
-loadApprovals();loadProjects();setInterval(loadApprovals,2500);
-</script>
-</body></html>
+loadApprovals();loadPolicies();loadProjects();setInterval(loadApprovals,2500);
+</script></body></html>
 """;
 }
