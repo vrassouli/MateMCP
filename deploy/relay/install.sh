@@ -48,6 +48,20 @@ generate_token() {
   fi
 }
 
+ask() {
+  local prompt="$1" default="$2"
+  printf '%s [%s]: ' "$prompt" "$default" >/dev/tty
+  IFS= read -r ANSWER </dev/tty || true
+  ANSWER="${ANSWER:-$default}"
+}
+
+ask_secret() {
+  local prompt="$1"
+  printf '%s: ' "$prompt" >/dev/tty
+  IFS= read -r -s ANSWER </dev/tty || true
+  printf '\n' >/dev/tty
+}
+
 install_docker
 
 log "Preparing ${INSTALL_DIR}"
@@ -55,15 +69,35 @@ install -d -m 0750 "${INSTALL_DIR}"
 curl -fsSL "${COMPOSE_URL}" -o "${INSTALL_DIR}/docker-compose.yml"
 
 ENV_FILE="${INSTALL_DIR}/.env"
+if [ -f "${ENV_FILE}" ]; then
+  if ! grep -q '^MATEMCP_INTERNAL_API_KEY=.' "${ENV_FILE}" || \
+     ! grep -q '^MATEMCP_API_INTERNAL_URL=.' "${ENV_FILE}"; then
+    ENV_BACKUP="${ENV_FILE}.pre-multi-user-$(date -u +%Y%m%dT%H%M%SZ)"
+    cp "${ENV_FILE}" "${ENV_BACKUP}"
+    chmod 600 "${ENV_BACKUP}"
+    rm "${ENV_FILE}"
+    echo "Legacy MateMCP Relay configuration detected."
+    echo "Backup created at ${ENV_BACKUP}"
+  else
+    echo "Using existing Relay configuration from ${ENV_FILE}"
+  fi
+fi
+
 if [ ! -f "${ENV_FILE}" ]; then
-  read -r -p "Public Relay URL [https://relay.matemcp.com]: " RELAY_PUBLIC_URL </dev/tty || true
-  RELAY_PUBLIC_URL="${RELAY_PUBLIC_URL:-https://relay.matemcp.com}"
-  read -r -p "Public API/OAuth URL [https://api.matemcp.com]: " API_PUBLIC_URL </dev/tty || true
-  API_PUBLIC_URL="${API_PUBLIC_URL:-https://api.matemcp.com}"
-  read -r -p "Internal Control Plane URL [$API_PUBLIC_URL]: " API_INTERNAL_URL </dev/tty || true
-  API_INTERNAL_URL="${API_INTERNAL_URL:-$API_PUBLIC_URL}"
-  read -r -s -p "Control Plane internal API key: " INTERNAL_API_KEY </dev/tty || true
-  echo >/dev/tty || true
+  ask 'Public Relay URL' 'https://relay.matemcp.com'; RELAY_PUBLIC_URL="$ANSWER"
+  ask 'Public API/OAuth URL' 'https://api.matemcp.com'; API_PUBLIC_URL="$ANSWER"
+  ask 'Internal Control Plane URL' "$API_PUBLIC_URL"; API_INTERNAL_URL="$ANSWER"
+  API_ENV_FILE="${MATEMCP_API_ENV_FILE:-/opt/matemcp-api/.env}"
+  INTERNAL_API_KEY=''
+  if [ -r "$API_ENV_FILE" ]; then
+    INTERNAL_API_KEY="$(sed -n 's/^MATEMCP_INTERNAL_API_KEY=//p' "$API_ENV_FILE" | head -n 1)"
+    if [ -n "$INTERNAL_API_KEY" ]; then
+      echo "Using Control Plane internal API key from $API_ENV_FILE"
+    fi
+  fi
+  if [ -z "$INTERNAL_API_KEY" ]; then
+    ask_secret 'Control Plane internal API key'; INTERNAL_API_KEY="$ANSWER"
+  fi
   [[ -n "${INTERNAL_API_KEY:-}" ]] || { echo "The internal API key from /opt/matemcp-api/.env is required." >&2; exit 1; }
   umask 077
   cat > "${ENV_FILE}" <<EOF
