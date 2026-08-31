@@ -7,37 +7,44 @@ MateMCP gives an AI client controlled, project-scoped access to a user's compute
 1. Install and start the Agent.
 2. The Agent opens MateMCP in the browser and shows a short device code.
 3. Sign in with a personal MateMCP account and approve adding the device.
-4. The Agent stores its private credential in macOS Keychain and appears in the account dashboard.
+4. The Agent stores its private credential in the operating system's secure credential store and appears in the account dashboard.
 5. Copy that Agent's unique MCP URL, for example `https://relay.matemcp.com/mcp/agt_...`, into ChatGPT.
 6. Complete OAuth using the same personal account.
-7. Sensitive operations can be allowed or denied from the local Agent endpoint or the web dashboard on a phone.
+7. Sensitive operations can be allowed or denied from the local Agent management UI or the web dashboard on a phone.
 
 There are no Agent tokens to copy and no shared admin account in the normal user flow. Each user can own multiple independently revocable Agents. OAuth tokens are accepted only when their user, Agent, resource, and scopes all match.
 
 ## macOS Agent
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/feat/multi-user-control-plane/scripts/bootstrap-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-macos.sh | bash
 matemcp
 ```
 
-The private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; the enrolled Agent credential is stored in macOS Keychain. Local approvals remain available at `http://127.0.0.1:45871/approvals` with `POST /approvals/{id}/allow` and `/deny`.
+The private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; enrolled Agent credentials are stored in macOS Keychain. Local approvals and project management are available from the loopback-only Agent UI.
+
+## Windows Agent
+
+Download `MateMCP-win-x64.zip` (or `MateMCP-win-arm64.zip`) from the latest Agent release, extract it, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+```
+
+The private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials are stored in Windows Credential Manager. The installer preserves configuration and credentials during normal upgrades so the enrolled device identity remains stable.
 
 ## API / Control Plane
 
 For the usual single-server deployment, install the API and Relay together:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/feat/multi-user-control-plane/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/install.sh | sudo bash
 ```
 
-The combined installer asks for the public URLs once, configures the database,
-shares the private internal key automatically, and verifies both services.
-Use the component installers below only when API and Relay run on different
-servers or need to be managed independently.
+The combined installer asks for the public URLs once, configures the database, shares the private internal key automatically, and verifies both services. Use the component installers below only when API and Relay run on different servers or need to be managed independently.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/feat/multi-user-control-plane/deploy/api/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/api/install.sh | sudo bash
 ```
 
 The installer asks for public API and Relay URLs and a database provider:
@@ -50,20 +57,24 @@ It also creates a private internal API key used between Relay and Control Plane.
 ## Relay
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/feat/multi-user-control-plane/deploy/relay/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/relay/install.sh | sudo bash
 ```
 
-The Relay installer asks for its public URL, the public/internal Control Plane URLs, and the Control Plane internal API key. It no longer generates shared Agent or Client tokens.
+The Relay installer asks for its public URL, the public/internal Control Plane URLs, and the Control Plane internal API key. It does not generate shared Agent or Client tokens.
 
 Both services must sit behind HTTPS reverse proxies. Their container ports (`8080` and `8081`) should not be exposed directly to the Internet.
 
 ## Security boundaries
 
 - Users can authorize only Agents they own.
-- Every Agent has a random public ID and a separate high-entropy Keychain credential.
+- Every Agent has a random public ID and a separate high-entropy credential stored in macOS Keychain or Windows Credential Manager.
 - The unique MCP URL is an identifier, not a secret.
 - OAuth resource and `agent_id` claims must match the requested URL.
 - `mcp:read`, `mcp:write`, and `mcp:shell` are enforced per JSON-RPC tool call by Relay and constrained by the Agent's allowed scopes.
 - Filesystem paths remain confined to configured project roots.
 - Shell execution retains explicit approval and audit logging.
 - Remote approvals are owner-bound, operation-hashed, one-use decisions with expiration; local approval remains available if Control Plane is unreachable.
+
+## Releases
+
+`main` is the source of truth for stable development. Version tags such as `v0.1.0` publish self-contained Agent packages for macOS arm64/x64 and Windows x64/arm64.
