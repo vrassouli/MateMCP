@@ -152,6 +152,15 @@ app.MapPost("/internal/agents/authenticate", async (HttpContext c, AgentAuthenti
 {
     if (!Internal(c, internalKey)) return Results.Unauthorized(); var credentialHash = Hash(r.Credential); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && x.CredentialHash == credentialHash && !x.IsRevoked); if (agent is null) return Results.Unauthorized(); agent.LastSeenAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(); return Results.Ok(new { agentId = agent.PublicId, ownerId = agent.OwnerId, scopes = agent.AllowedScopes.Split(' ') });
 });
+app.MapPost("/internal/agents/offline", async (HttpContext c, AgentOffline r, ControlPlaneDbContext db) =>
+{
+    if (!Internal(c, internalKey)) return Results.Unauthorized();
+    var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked);
+    if (agent is null) return Results.NotFound();
+    agent.LastSeenAt = DateTimeOffset.MinValue;
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
 app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db) =>
 {
     if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked); if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid(); var allowed = agent.AllowedScopes.Split(' ', StringSplitOptions.RemoveEmptyEntries); return r.Scopes.All(allowed.Contains) ? Results.Ok() : Results.Forbid();
@@ -193,6 +202,7 @@ static RSA LoadOrCreateRsaKey(string path) { var rsa = RSA.Create(3072); if (Fil
 sealed record EnrollmentStart(string Name, string Platform, string? RecoverAgentId = null);
 sealed record EnrollmentToken(string DeviceCode);
 sealed record AgentAuthentication(string AgentId, string Credential);
+sealed record AgentOffline(string AgentId);
 sealed record AgentAuthorization(string AgentId, string UserId, string[] Scopes);
 sealed record NewApproval(string Capability, string Target, string Summary, int ExpiresIn = 120);
 sealed record ClientRegistration([property: System.Text.Json.Serialization.JsonPropertyName("client_name")] string? ClientName, [property: System.Text.Json.Serialization.JsonPropertyName("redirect_uris")] string[]? RedirectUris);
