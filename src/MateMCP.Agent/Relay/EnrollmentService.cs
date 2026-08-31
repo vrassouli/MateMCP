@@ -36,7 +36,7 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
     {
         var path = ConfigurationBootstrap.EnsureUserConfiguration(); var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject(); var relay = root["Mate"]!["Relay"]!.AsObject(); relay["DeviceId"] = agentId;
         File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
     private static void OpenBrowser(string url)

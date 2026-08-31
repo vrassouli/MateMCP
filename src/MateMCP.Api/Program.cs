@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using MateMCP.Api.Data;
+using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -98,7 +99,7 @@ app.MapPost("/device/approve", async (HttpContext context, ClaimsPrincipal princ
 }).RequireAuthorization();
 app.MapPost("/api/enrollment/token", async (EnrollmentToken request, ControlPlaneDbContext db) =>
 {
-    var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.DeviceCodeHash == Hash(request.DeviceCode)); if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest(new { error = "expired_token" }); if (enrollment.ApprovedByUserId is null) return Results.StatusCode(428); if (enrollment.Consumed) return Results.BadRequest(new { error = "invalid_grant" });
+    var deviceCodeHash = Hash(request.DeviceCode); var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.DeviceCodeHash == deviceCodeHash); if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest(new { error = "expired_token" }); if (enrollment.ApprovedByUserId is null) return Results.StatusCode(428); if (enrollment.Consumed) return Results.BadRequest(new { error = "invalid_grant" });
     var credential = Token(48); var agent = new AgentDevice { PublicId = "agt_" + Token(18), OwnerId = enrollment.ApprovedByUserId.Value, Name = enrollment.DeviceName, Platform = enrollment.Platform, CredentialHash = Hash(credential) }; enrollment.Consumed = true; db.Agents.Add(agent); db.AuditEvents.Add(new AuditEvent { UserId = agent.OwnerId, AgentDeviceId = agent.Id, EventType = "agent.enrolled", Detail = agent.Name }); await db.SaveChangesAsync();
     return Results.Ok(new { agentId = agent.PublicId, credential, relayUrl, mcpUrl = $"{relayUrl}/mcp/{agent.PublicId}" });
 });
@@ -122,7 +123,7 @@ app.MapPost("/connect/register", async (HttpContext context, IOpenIddictApplicat
 
 app.MapPost("/internal/agents/authenticate", async (HttpContext c, AgentAuthentication r, ControlPlaneDbContext db) =>
 {
-    if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && x.CredentialHash == Hash(r.Credential) && !x.IsRevoked); if (agent is null) return Results.Unauthorized(); agent.LastSeenAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(); return Results.Ok(new { agentId = agent.PublicId, ownerId = agent.OwnerId, scopes = agent.AllowedScopes.Split(' ') });
+    if (!Internal(c, internalKey)) return Results.Unauthorized(); var credentialHash = Hash(r.Credential); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && x.CredentialHash == credentialHash && !x.IsRevoked); if (agent is null) return Results.Unauthorized(); agent.LastSeenAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(); return Results.Ok(new { agentId = agent.PublicId, ownerId = agent.OwnerId, scopes = agent.AllowedScopes.Split(' ') });
 });
 app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db) =>
 {
@@ -150,7 +151,7 @@ static string Token(int bytes) => Base64UrlEncoder.Encode(RandomNumberGenerator.
 static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 static string CreateUserCode() { const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; var b = RandomNumberGenerator.GetBytes(8); return string.Concat(b.Select((x, i) => chars[x % chars.Length] + (i == 3 ? "-" : ""))); }
 static bool Internal(HttpContext c, string expected) => SecretEquals(c.Request.Headers["X-MateMCP-Internal-Key"].ToString(), expected);
-static async Task<AgentDevice?> AuthenticateAgent(HttpContext c, string id, ControlPlaneDbContext db) { var auth = c.Request.Headers.Authorization.ToString(); if (!auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null; var hash = Hash(auth[7..]); return await db.Agents.SingleOrDefaultAsync(x => x.PublicId == id && x.CredentialHash == hash && !x.IsRevoked); }
+static async Task<AgentDevice?> AuthenticateAgent(HttpContext c, string id, ControlPlaneDbContext db) { var auth = c.Request.Headers.Authorization.ToString(); if (!auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null; var credentialHash = Hash(auth[7..]); return await db.Agents.SingleOrDefaultAsync(x => x.PublicId == id && x.CredentialHash == credentialHash && !x.IsRevoked); }
 static bool SecretEquals(string a, string b) { var x = Encoding.UTF8.GetBytes(a); var y = Encoding.UTF8.GetBytes(b); return x.Length == y.Length && CryptographicOperations.FixedTimeEquals(x, y); }
 static bool TryAgentId(string resource, string relay, out string id) { var prefix = relay + "/mcp/"; id = resource.StartsWith(prefix, StringComparison.Ordinal) ? resource[prefix.Length..] : ""; return id.StartsWith("agt_", StringComparison.Ordinal) && !id.Contains('/'); }
 static bool IsLocal(string s) => !string.IsNullOrEmpty(s) && s[0] == '/' && (s.Length == 1 || s[1] != '/' && s[1] != '\\');
