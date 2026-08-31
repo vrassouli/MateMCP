@@ -37,13 +37,10 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
         var enrollment = await response.Content.ReadFromJsonAsync<EnrollmentResponse>(cancellationToken: ct)
             ?? throw new InvalidOperationException("Invalid enrollment response.");
 
-        logger.LogWarning(
-            recoverAgentId is null
-                ? "Sign in to MateMCP and approve this Agent: {Url} (code {Code})"
-                : "Sign in to MateMCP and approve recovery of Agent {DeviceId}: {Url} (code {Code})",
-            recoverAgentId is null ? enrollment.VerificationUriComplete : recoverAgentId,
-            recoverAgentId is null ? enrollment.UserCode : enrollment.VerificationUriComplete,
-            recoverAgentId is null ? null : enrollment.UserCode);
+        if (recoverAgentId is null)
+            logger.LogWarning("Sign in to MateMCP and approve this Agent: {Url} (code {Code})", enrollment.VerificationUriComplete, enrollment.UserCode);
+        else
+            logger.LogWarning("Sign in to MateMCP and approve recovery of Agent {DeviceId}: {Url} (code {Code})", recoverAgentId, enrollment.VerificationUriComplete, enrollment.UserCode);
         OpenBrowser(enrollment.VerificationUriComplete);
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(enrollment.ExpiresIn);
