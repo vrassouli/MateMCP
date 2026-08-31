@@ -32,7 +32,7 @@ builder.Services.AddDbContext<ControlPlaneDbContext>(o =>
     o.UseOpenIddict();
 });
 builder.Services.AddSingleton<IPasswordHasher<UserAccount>, PasswordHasher<UserAccount>>();
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o => { o.Cookie.Name = "matemcp.auth"; o.Cookie.HttpOnly = true; o.Cookie.SameSite = SameSiteMode.Lax; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; o.LoginPath = "/login"; });
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o => { o.Cookie.Name = "matemcp.auth"; o.Cookie.HttpOnly = true; o.Cookie.SameSite = SameSiteMode.Lax; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; o.LoginPath = "/login"; o.ReturnUrlParameter = "returnUrl"; });
 builder.Services.AddAuthorization();
 builder.Services.AddOpenIddict().AddCore(o => o.UseEntityFrameworkCore().UseDbContext<ControlPlaneDbContext>()).AddServer(o =>
 {
@@ -56,20 +56,28 @@ app.UseAuthentication(); app.UseAuthorization(); await EnsureDatabaseAsync(app.S
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "ok", database = provider }));
 app.MapGet("/", (ClaimsPrincipal user) => user.Identity?.IsAuthenticated == true ? Results.Redirect("/dashboard") : Results.Redirect("/login"));
 
-app.MapGet("/register", () => Page("Create MateMCP account", "<form method=post><label>Email<input name=email type=email required></label><label>Password<input name=password type=password minlength=10 required></label><button>Create account</button></form><p><a href=/login>Sign in</a></p>"));
+app.MapGet("/register", (HttpContext context) =>
+{
+    var returnUrl = SafeReturnUrl(context.Request.Query["returnUrl"].ToString());
+    return Page("Create MateMCP account", $"<form method=post><input type=hidden name=returnUrl value=\"{H(returnUrl)}\"><label>Email<input name=email type=email required></label><label>Password<input name=password type=password minlength=10 required></label><button>Create account</button></form><p><a href=\"/login?returnUrl={Uri.EscapeDataString(returnUrl)}\">Sign in</a></p>");
+});
 app.MapPost("/register", async (HttpContext context, ControlPlaneDbContext db, IPasswordHasher<UserAccount> hasher) =>
 {
     var form = await context.Request.ReadFormAsync(); var email = form["email"].ToString().Trim(); var password = form["password"].ToString();
     if (password.Length < 10 || !email.Contains('@')) return Results.BadRequest("A valid email and a password of at least 10 characters are required.");
     var normalized = email.ToUpperInvariant(); if (await db.Users.AnyAsync(x => x.NormalizedEmail == normalized)) return Results.Conflict("Account already exists.");
-    var account = new UserAccount { Email = email, NormalizedEmail = normalized, PasswordHash = "pending" }; account.PasswordHash = hasher.HashPassword(account, password); db.Users.Add(account); await db.SaveChangesAsync(); await SignInAsync(context, account); return Results.Redirect("/dashboard");
+    var account = new UserAccount { Email = email, NormalizedEmail = normalized, PasswordHash = "pending" }; account.PasswordHash = hasher.HashPassword(account, password); db.Users.Add(account); await db.SaveChangesAsync(); await SignInAsync(context, account); return Results.Redirect(SafeReturnUrl(form["returnUrl"].ToString()));
 });
-app.MapGet("/login", (string? returnUrl) => Page("Sign in", $"<form method=post><input type=hidden name=returnUrl value=\"{H(returnUrl ?? "/dashboard")}\"><label>Email<input name=email type=email required></label><label>Password<input name=password type=password required></label><button>Sign in</button></form><p><a href=/register>Create account</a></p>"));
+app.MapGet("/login", (HttpContext context) =>
+{
+    var returnUrl = SafeReturnUrl(context.Request.Query["returnUrl"].ToString());
+    return Page("Sign in", $"<form method=post><input type=hidden name=returnUrl value=\"{H(returnUrl)}\"><label>Email<input name=email type=email required></label><label>Password<input name=password type=password required></label><button>Sign in</button></form><p><a href=\"/register?returnUrl={Uri.EscapeDataString(returnUrl)}\">Create account</a></p>");
+});
 app.MapPost("/login", async (HttpContext context, ControlPlaneDbContext db, IPasswordHasher<UserAccount> hasher) =>
 {
     var form = await context.Request.ReadFormAsync(); var account = await db.Users.SingleOrDefaultAsync(x => x.NormalizedEmail == form["email"].ToString().Trim().ToUpperInvariant() && !x.IsDisabled);
     if (account is null || hasher.VerifyHashedPassword(account, account.PasswordHash, form["password"].ToString()) == PasswordVerificationResult.Failed) return Results.Unauthorized();
-    await SignInAsync(context, account); var returnUrl = form["returnUrl"].ToString(); return Results.Redirect(IsLocal(returnUrl) ? returnUrl : "/dashboard");
+    await SignInAsync(context, account); return Results.Redirect(SafeReturnUrl(form["returnUrl"].ToString()));
 });
 app.MapPost("/logout", async (HttpContext context) => { await context.SignOutAsync(); return Results.Redirect("/login"); });
 
@@ -198,6 +206,7 @@ const string RecoveryMarker = "\nMATEMCP_RECOVER:";
 static string EncodeEnrollmentPlatform(string platform, string? recoverAgentId) => recoverAgentId is null ? platform : platform + RecoveryMarker + recoverAgentId;
 static (string Platform, string? RecoverAgentId) DecodeEnrollmentPlatform(string value) { var index = value.LastIndexOf(RecoveryMarker, StringComparison.Ordinal); if (index < 0) return (value, null); var agentId = value[(index + RecoveryMarker.Length)..]; return IsAgentId(agentId) ? (value[..index], agentId) : (value, null); }
 static bool IsLocal(string s) => !string.IsNullOrEmpty(s) && s[0] == '/' && (s.Length == 1 || s[1] != '/' && s[1] != '\\');
+static string SafeReturnUrl(string? value) => !string.IsNullOrWhiteSpace(value) && IsLocal(value) ? value : "/dashboard";
 static string H(string s) => System.Net.WebUtility.HtmlEncode(s);
 static IResult Page(string title, string body) => Results.Content($"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>{H(title)}</title><style>body{{font-family:system-ui;max-width:900px;margin:50px auto;padding:0 20px;color:#17202a}}label{{display:block;margin:14px 0}}input{{display:block;width:100%;max-width:420px;padding:10px}}button{{padding:10px 16px;margin:4px}}.deny{{background:#a22;color:white}}table{{border-collapse:collapse;width:100%}}td,th{{padding:9px;border-bottom:1px solid #ddd;text-align:left}}code,pre{{overflow-wrap:anywhere}}article{{border:1px solid #ddd;padding:14px;margin:12px 0}}</style></head><body><h1>{H(title)}</h1>{body}</body></html>", "text/html");
 static RSA LoadOrCreateRsaKey(string path) { var rsa = RSA.Create(3072); if (File.Exists(path)) { rsa.ImportFromPem(File.ReadAllText(path)); return rsa; } File.WriteAllText(path, rsa.ExportPkcs8PrivateKeyPem()); return rsa; }
