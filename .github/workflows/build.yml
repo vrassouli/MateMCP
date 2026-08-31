@@ -3,6 +3,7 @@ name: build
 on:
   push:
     branches: [ main, 'feat/**' ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
@@ -65,7 +66,7 @@ jobs:
           path: MateMCP-${{ matrix.rid }}.zip
 
   publish-agent-release:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/feat/relay-mvp' || github.ref == 'refs/heads/feat/multi-user-control-plane' || github.ref == 'refs/heads/feat/windows-agent-v0.1' || github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
@@ -94,20 +95,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="MateMCP ${GITHUB_REF_NAME}"
+            NOTES="MateMCP ${GITHUB_REF_NAME} release for macOS and Windows."
+          else
             TAG="agent-latest"
             TITLE="MateMCP Agent Latest"
-            NOTES="Latest stable build from main. Assets are replaced on each successful push."
-            EXTRA=()
-          else
-            TAG="agent-dev"
-            TITLE="MateMCP Agent Development"
-            NOTES="Latest development build for macOS and Windows. Assets are replaced on each successful feature-branch push."
-            EXTRA=(--prerelease)
+            NOTES="Latest stable Agent build from main for macOS and Windows. Assets are replaced on each successful push."
           fi
 
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" "${EXTRA[@]}" --title "$TITLE" --notes "$NOTES"
+            gh release create "$TAG" --title "$TITLE" --notes "$NOTES"
 
           gh release upload "$TAG" \
             release/MateMCP-osx-arm64.tar.gz \
