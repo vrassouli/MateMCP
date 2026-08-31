@@ -1,0 +1,34 @@
+namespace MateMCP.Agent.Configuration;
+
+public sealed class MateOptions
+{
+    public const string SectionName = "Mate";
+    public string BindAddress { get; set; } = "127.0.0.1";
+    public int Port { get; set; } = 45871;
+    public bool AllowInsecureHttp { get; set; }
+    public string? CertificatePath { get; set; }
+    public string? CertificatePassword { get; set; }
+    public string? AccessToken { get; set; }
+    public bool RequireShellApproval { get; set; } = true;
+    public int ApprovalTimeoutSeconds { get; set; } = 120;
+    public RelayOptions Relay { get; set; } = new();
+    public List<ProjectOptions> Projects { get; set; } = [];
+}
+
+public sealed class RelayOptions
+{
+    public bool Enabled { get; set; }
+    public string Url { get; set; } = "https://relay.matemcp.com";
+    public string ControlPlaneUrl { get; set; } = "https://api.matemcp.com";
+    public string? DeviceId { get; set; }
+    public int MaxMessageBytes { get; set; } = 8 * 1024 * 1024;
+}
+
+public sealed class ProjectOptions
+{
+    public required string Name { get; set; }
+    public required string Root { get; set; }
+    public bool Read { get; set; } = true;
+    public bool Write { get; set; } = true;
+    public bool Shell { get; set; } = true;
+}

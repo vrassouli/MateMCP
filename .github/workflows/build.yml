@@ -3,11 +3,15 @@ name: build
 on:
   push:
     branches: [ main, 'feat/**' ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
+  build-macos:
     runs-on: macos-14
     strategy:
       fail-fast: false
@@ -20,9 +24,93 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet restore MateMCP.slnx
       - run: dotnet build MateMCP.slnx -c Release --no-restore
-      - run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o artifacts/${{ matrix.rid }}
-      - run: tar -czf MateMCP-${{ matrix.rid }}.tar.gz -C artifacts/${{ matrix.rid }} .
+      - name: Publish self-contained agent
+        run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
+      - name: Build installable archive
+        run: |
+          cp scripts/install-macos.sh package/install-macos.sh
+          cp scripts/uninstall-macos.sh package/uninstall-macos.sh
+          cp scripts/prepare-external-test-macos.sh package/prepare-external-test-macos.sh
+          chmod +x package/install-macos.sh package/uninstall-macos.sh package/prepare-external-test-macos.sh package/payload/MateMCP.Agent
+          tar -czf MateMCP-${{ matrix.rid }}.tar.gz -C package .
       - uses: actions/upload-artifact@v4
         with:
           name: MateMCP-${{ matrix.rid }}
           path: MateMCP-${{ matrix.rid }}.tar.gz
+
+  build-windows:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore MateMCP.slnx
+      - run: dotnet build MateMCP.slnx -c Release --no-restore
+      - name: Publish self-contained agent
+        shell: pwsh
+        run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
+      - name: Build installable archive
+        shell: pwsh
+        run: |
+          Copy-Item scripts/install-windows.ps1 package/install-windows.ps1
+          Copy-Item scripts/uninstall-windows.ps1 package/uninstall-windows.ps1
+          Compress-Archive -Path package/* -DestinationPath MateMCP-${{ matrix.rid }}.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MateMCP-${{ matrix.rid }}
+          path: MateMCP-${{ matrix.rid }}.zip
+
+  publish-agent-release:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS arm64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-osx-arm64
+          path: release
+      - name: Download macOS x64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-osx-x64
+          path: release
+      - name: Download Windows x64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-win-x64
+          path: release
+      - name: Download Windows arm64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: MateMCP-win-arm64
+          path: release
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="MateMCP ${GITHUB_REF_NAME}"
+            NOTES="MateMCP ${GITHUB_REF_NAME} release for macOS and Windows."
+          else
+            TAG="agent-latest"
+            TITLE="MateMCP Agent Latest"
+            NOTES="Latest stable Agent build from main for macOS and Windows. Assets are replaced on each successful push."
+          fi
+
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TITLE" --notes "$NOTES"
+
+          gh release upload "$TAG" \
+            release/MateMCP-osx-arm64.tar.gz \
+            release/MateMCP-osx-x64.tar.gz \
+            release/MateMCP-win-x64.zip \
+            release/MateMCP-win-arm64.zip \
+            --clobber

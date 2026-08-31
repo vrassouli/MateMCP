@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="vrassouli/MateMCP"
+REF="${MATEMCP_REF:-feat/multi-user-control-plane}"
+INSTALL_DIR="${MATEMCP_RELAY_DIR:-/opt/matemcp-relay}"
+COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/${REF}/deploy/relay/docker-compose.yml"
+
+if [ "${EUID}" -ne 0 ]; then
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "This installer needs root privileges (sudo not found)." >&2
+    exit 1
+  fi
+  exec sudo --preserve-env=MATEMCP_REF,MATEMCP_RELAY_DIR,MATEMCP_RELAY_IMAGE,MATEMCP_RELAY_BIND,MATEMCP_RELAY_PORT bash "$0" "$@"
+fi
+
+log() { printf '\n==> %s\n' "$*"; }
+
+install_docker() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    return
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Docker is not installed and this installer currently supports automatic Docker setup on Debian/Ubuntu only." >&2
+    exit 1
+  fi
+
+  log "Installing Docker Engine and Compose plugin"
+  apt-get update
+  apt-get install -y ca-certificates curl gnupg
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+  . /etc/os-release
+  arch="$(dpkg --print-architecture)"
+  echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  systemctl enable --now docker
+}
+
+generate_token() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  else
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+  fi
+}
+
+ask() {
+  local prompt="$1" default="$2"
+  printf '%s [%s]: ' "$prompt" "$default" >/dev/tty
+  IFS= read -r ANSWER </dev/tty || true
+  ANSWER="${ANSWER:-$default}"
+}
+
+ask_secret() {
+  local prompt="$1"
+  printf '%s: ' "$prompt" >/dev/tty
+  IFS= read -r -s ANSWER </dev/tty || true
+  printf '\n' >/dev/tty
+}
+
+install_docker
+
+log "Preparing ${INSTALL_DIR}"
+install -d -m 0750 "${INSTALL_DIR}"
+curl -fsSL "${COMPOSE_URL}" -o "${INSTALL_DIR}/docker-compose.yml"
+
+ENV_FILE="${INSTALL_DIR}/.env"
+if [ -f "${ENV_FILE}" ]; then
+  if ! grep -q '^MATEMCP_INTERNAL_API_KEY=.' "${ENV_FILE}" || \
+     ! grep -q '^MATEMCP_API_INTERNAL_URL=.' "${ENV_FILE}"; then
+    ENV_BACKUP="${ENV_FILE}.pre-multi-user-$(date -u +%Y%m%dT%H%M%SZ)"
+    cp "${ENV_FILE}" "${ENV_BACKUP}"
+    chmod 600 "${ENV_BACKUP}"
+    rm "${ENV_FILE}"
+    echo "Legacy MateMCP Relay configuration detected."
+    echo "Backup created at ${ENV_BACKUP}"
+  else
+    echo "Using existing Relay configuration from ${ENV_FILE}"
+  fi
+fi
+
+if [ ! -f "${ENV_FILE}" ]; then
+  if [ -n "${MATEMCP_RELAY_PUBLIC_URL_INPUT:-}" ]; then RELAY_PUBLIC_URL="$MATEMCP_RELAY_PUBLIC_URL_INPUT"; else ask 'Public Relay URL' 'https://relay.matemcp.com'; RELAY_PUBLIC_URL="$ANSWER"; fi
+  if [ -n "${MATEMCP_API_PUBLIC_URL_INPUT:-}" ]; then API_PUBLIC_URL="$MATEMCP_API_PUBLIC_URL_INPUT"; else ask 'Public API/OAuth URL' 'https://api.matemcp.com'; API_PUBLIC_URL="$ANSWER"; fi
+  if [ -n "${MATEMCP_API_INTERNAL_URL_INPUT:-}" ]; then API_INTERNAL_URL="$MATEMCP_API_INTERNAL_URL_INPUT"; else ask 'Internal Control Plane URL' "$API_PUBLIC_URL"; API_INTERNAL_URL="$ANSWER"; fi
+  API_ENV_FILE="${MATEMCP_API_ENV_FILE:-/opt/matemcp-api/.env}"
+  INTERNAL_API_KEY=''
+  if [ -r "$API_ENV_FILE" ]; then
+    INTERNAL_API_KEY="$(sed -n 's/^MATEMCP_INTERNAL_API_KEY=//p' "$API_ENV_FILE" | head -n 1)"
+    if [ -n "$INTERNAL_API_KEY" ]; then
+      echo "Using Control Plane internal API key from $API_ENV_FILE"
+    fi
+  fi
+  if [ -z "$INTERNAL_API_KEY" ]; then
+    ask_secret 'Control Plane internal API key'; INTERNAL_API_KEY="$ANSWER"
+  fi
+  [[ -n "${INTERNAL_API_KEY:-}" ]] || { echo "The internal API key from /opt/matemcp-api/.env is required." >&2; exit 1; }
+  umask 077
+  cat > "${ENV_FILE}" <<EOF
+MATEMCP_RELAY_IMAGE=${MATEMCP_RELAY_IMAGE:-vrassouli/matemcp-relay:dev}
+MATEMCP_RELAY_BIND=${MATEMCP_RELAY_BIND:-0.0.0.0}
+MATEMCP_RELAY_PORT=${MATEMCP_RELAY_PORT:-8080}
+MATEMCP_RELAY_PUBLIC_URL=${RELAY_PUBLIC_URL}
+MATEMCP_API_PUBLIC_URL=${API_PUBLIC_URL}
+MATEMCP_API_INTERNAL_URL=${API_INTERNAL_URL}
+MATEMCP_INTERNAL_API_KEY=${INTERNAL_API_KEY}
+MATEMCP_RELAY_MAX_BODY_BYTES=4194304
+MATEMCP_RELAY_REQUEST_TIMEOUT_SECONDS=120
+EOF
+  chmod 600 "${ENV_FILE}"
+  CREATED_ENV=1
+else
+  CREATED_ENV=0
+fi
+
+log "Pulling and starting MateMCP Relay"
+cd "${INSTALL_DIR}"
+docker compose pull
+docker compose up -d --force-recreate --remove-orphans
+
+log "Waiting for health endpoint"
+for _ in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:$(grep '^MATEMCP_RELAY_PORT=' "${ENV_FILE}" | cut -d= -f2)/health" >/dev/null 2>&1; then
+    echo "MateMCP Relay is healthy."
+    break
+  fi
+  sleep 1
+done
+
+if ! curl -fsS "http://127.0.0.1:$(grep '^MATEMCP_RELAY_PORT=' "${ENV_FILE}" | cut -d= -f2)/health" >/dev/null 2>&1; then
+  echo "Relay did not become healthy. Recent logs:" >&2
+  docker compose logs --tail=100 relay >&2 || true
+  exit 1
+fi
+
+PORT="$(grep '^MATEMCP_RELAY_PORT=' "${ENV_FILE}" | cut -d= -f2)"
+echo
+echo "Installed in: ${INSTALL_DIR}"
+echo "Local health: http://127.0.0.1:${PORT}/health"
+echo "Compose file: ${INSTALL_DIR}/docker-compose.yml"
+echo "Environment: ${ENV_FILE}"
+
+echo
+echo "Update later with:"
+echo "  cd ${INSTALL_DIR} && docker compose pull && docker compose up -d --force-recreate --remove-orphans"

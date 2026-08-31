@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.git/
+.github/
+.vscode/
+.idea/
+.DS_Store
+*.user
+*.suo
+*.tar.gz
+package/
