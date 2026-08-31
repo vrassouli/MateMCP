@@ -128,7 +128,7 @@ public sealed class AgentCredentialStore
         {
             var native = Marshal.PtrToStructure<NativeCredential>(pointer);
             if (native.CredentialBlob == IntPtr.Zero || native.CredentialBlobSize == 0) return string.Empty;
-            var bytes = new byte[native.CredentialBlobSize];
+            var bytes = new byte[checked((int)native.CredentialBlobSize)];
             Marshal.Copy(native.CredentialBlob, bytes, 0, bytes.Length);
             try { return Encoding.UTF8.GetString(bytes); }
             finally { CryptographicOperations.ZeroMemory(bytes); }
