@@ -27,7 +27,7 @@ public sealed class AgentRegistry
 
     public bool TryGet(string deviceId, out AgentConnection connection) => _agents.TryGetValue(deviceId, out connection!);
 
-    public void Remove(string deviceId, AgentConnection connection) => _agents.TryRemove(new KeyValuePair<string, AgentConnection>(deviceId, connection));
+    public bool Remove(string deviceId, AgentConnection connection) => _agents.TryRemove(new KeyValuePair<string, AgentConnection>(deviceId, connection));
 }
 
 public sealed class AgentConnection(string deviceId, WebSocket socket)
