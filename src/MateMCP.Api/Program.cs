@@ -76,7 +76,8 @@ app.MapPost("/logout", async (HttpContext context) => { await context.SignOutAsy
 app.MapGet("/dashboard", async (ClaimsPrincipal principal, ControlPlaneDbContext db) =>
 {
     var userId = UserId(principal); var agents = await db.Agents.Where(x => x.OwnerId == userId).OrderBy(x => x.Name).ToListAsync();
-    var approvals = await db.Approvals.Include(x => x.AgentDevice).Where(x => x.AgentDevice!.OwnerId == userId && x.Status == "pending" && x.ExpiresAt > DateTimeOffset.UtcNow).OrderBy(x => x.CreatedAt).ToListAsync();
+    var now = DateTimeOffset.UtcNow;
+    var approvals = (await db.Approvals.Include(x => x.AgentDevice).Where(x => x.AgentDevice!.OwnerId == userId && x.Status == "pending").ToListAsync()).Where(x => x.ExpiresAt > now).OrderBy(x => x.CreatedAt).ToList();
     var rows = string.Join("", agents.Select(x => $"<tr><td>{H(x.Name)}</td><td>{H(x.Platform)}</td><td>{(x.IsRevoked ? "revoked" : x.LastSeenAt > DateTimeOffset.UtcNow.AddMinutes(-2) ? "online" : "offline")}</td><td><code>{relayUrl}/mcp/{x.PublicId}</code></td><td>{(x.IsRevoked ? "" : $"<form method=post action=/dashboard/agents/{x.PublicId}/revoke><button class=deny>Revoke</button></form>")}</td></tr>"));
     var pending = string.Join("", approvals.Select(x => $"<article><b>{H(x.Capability)}</b> on {H(x.AgentDevice!.Name)}<pre>{H(x.Summary)}</pre><form method=post action=/dashboard/approvals/{x.Id}/allow><button>Allow once</button></form><form method=post action=/dashboard/approvals/{x.Id}/deny><button class=deny>Deny</button></form></article>"));
     return Page("Your MateMCP agents", $"<table><tr><th>Name</th><th>Platform</th><th>Status</th><th>MCP URL</th><th></th></tr>{rows}</table><h2>Pending approvals</h2>{(pending.Length == 0 ? "<p>Nothing waiting.</p>" : pending)}<form method=post action=/logout><button>Sign out</button></form>");
@@ -94,8 +95,8 @@ app.MapPost("/api/enrollment/start", async (EnrollmentStart request, ControlPlan
 app.MapGet("/device", (string? code) => Page("Add a device", $"<form method=post action=/device/approve><label>Code<input name=code value=\"{H(code ?? "")}\" required></label><button>Add device</button></form>")).RequireAuthorization();
 app.MapPost("/device/approve", async (HttpContext context, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
 {
-    var form = await context.Request.ReadFormAsync(); var code = form["code"].ToString().Trim().ToUpperInvariant(); var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.UserCode == code && !x.Consumed && x.ApprovedByUserId == null && x.ExpiresAt > DateTimeOffset.UtcNow);
-    if (enrollment is null) return Results.BadRequest("Invalid or expired code."); enrollment.ApprovedByUserId = UserId(principal); await db.SaveChangesAsync(); return Page("Device approved", $"<p><b>{H(enrollment.DeviceName)}</b> can now finish setup. You may close this page.</p>");
+    var form = await context.Request.ReadFormAsync(); var code = form["code"].ToString().Trim().ToUpperInvariant(); var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.UserCode == code && !x.Consumed && x.ApprovedByUserId == null);
+    if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest("Invalid or expired code."); enrollment.ApprovedByUserId = UserId(principal); await db.SaveChangesAsync(); return Page("Device approved", $"<p><b>{H(enrollment.DeviceName)}</b> can now finish setup. You may close this page.</p>");
 }).RequireAuthorization();
 app.MapPost("/api/enrollment/token", async (EnrollmentToken request, ControlPlaneDbContext db) =>
 {
@@ -139,7 +140,7 @@ app.MapGet("/api/agents/{agentId}/approvals/{id:guid}", async (string agentId, G
 });
 app.MapPost("/dashboard/approvals/{id:guid}/{decision}", async (Guid id, string decision, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
 {
-    if (decision is not ("allow" or "deny")) return Results.NotFound(); var userId = UserId(principal); var a = await db.Approvals.Include(x => x.AgentDevice).SingleOrDefaultAsync(x => x.Id == id && x.AgentDevice!.OwnerId == userId && x.Status == "pending" && x.ExpiresAt > DateTimeOffset.UtcNow); if (a is null) return Results.NotFound(); a.Status = decision == "allow" ? "allowed" : "denied"; a.DecidedAt = DateTimeOffset.UtcNow; db.AuditEvents.Add(new AuditEvent { UserId = userId, AgentDeviceId = a.AgentDeviceId, EventType = "approval." + a.Status, Detail = a.OperationHash }); await db.SaveChangesAsync(); return Results.Redirect("/dashboard");
+    if (decision is not ("allow" or "deny")) return Results.NotFound(); var userId = UserId(principal); var a = await db.Approvals.Include(x => x.AgentDevice).SingleOrDefaultAsync(x => x.Id == id && x.AgentDevice!.OwnerId == userId && x.Status == "pending"); if (a is null || a.ExpiresAt <= DateTimeOffset.UtcNow) return Results.NotFound(); a.Status = decision == "allow" ? "allowed" : "denied"; a.DecidedAt = DateTimeOffset.UtcNow; db.AuditEvents.Add(new AuditEvent { UserId = userId, AgentDeviceId = a.AgentDeviceId, EventType = "approval." + a.Status, Detail = a.OperationHash }); await db.SaveChangesAsync(); return Results.Redirect("/dashboard");
 }).RequireAuthorization();
 
 app.Run();
