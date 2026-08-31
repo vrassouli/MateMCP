@@ -13,7 +13,15 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         var current = options.CurrentValue;
-        if (!current.Relay.Enabled || !string.IsNullOrWhiteSpace(current.Relay.DeviceId)) return;
+        if (!current.Relay.Enabled) return;
+        if (!string.IsNullOrWhiteSpace(current.Relay.DeviceId))
+        {
+            var existingCredential = await credentials.GetAsync(current.Relay.DeviceId, ct);
+            if (!string.IsNullOrWhiteSpace(existingCredential)) return;
+
+            logger.LogWarning("Agent {DeviceId} has no credential in macOS Keychain; starting enrollment again.", current.Relay.DeviceId);
+            SaveAgentId(null);
+        }
         var client = clients.CreateClient(); client.BaseAddress = new Uri(current.Relay.ControlPlaneUrl.TrimEnd('/') + "/");
         var response = await client.PostAsJsonAsync("api/enrollment/start", new { name = Environment.MachineName, platform = $"macOS {Environment.OSVersion.Version}" }, ct);
         response.EnsureSuccessStatusCode(); var enrollment = await response.Content.ReadFromJsonAsync<EnrollmentResponse>(cancellationToken: ct) ?? throw new InvalidOperationException("Invalid enrollment response.");
@@ -32,7 +40,7 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
         throw new TimeoutException("MateMCP Agent enrollment expired.");
     }
 
-    private static void SaveAgentId(string agentId)
+    private static void SaveAgentId(string? agentId)
     {
         var path = ConfigurationBootstrap.EnsureUserConfiguration(); var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject(); var relay = root["Mate"]!["Relay"]!.AsObject(); relay["DeviceId"] = agentId;
         File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
