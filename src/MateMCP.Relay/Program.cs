@@ -28,7 +28,11 @@ builder.Services.AddOpenIddict().AddValidation(validation =>
 });
 
 var app = builder.Build();
-app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(20),
+    KeepAliveTimeout = TimeSpan.FromSeconds(20)
+});
 
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Relay", status = "ok" }));
 
