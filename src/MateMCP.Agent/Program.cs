@@ -55,17 +55,18 @@ var app = builder.Build();
 app.UseRateLimiter();
 app.UseMiddleware<BearerTokenMiddleware>();
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP", status = "ok" }));
-app.MapGet("/status", (HttpContext context) =>
+app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
+    var current = currentOptions.CurrentValue;
     return Results.Ok(new
     {
         service = "MateMCP",
-        endpoint = $"{(options.AllowInsecureHttp ? "http" : "https")}://{options.BindAddress}:{options.Port}/mcp",
+        endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp",
         configuration = userConfigPath,
-        projects = options.Projects.Select(p => p.Name).ToArray(),
-        shellApproval = options.RequireShellApproval,
-        relay = new { options.Relay.Enabled, options.Relay.Url, options.Relay.DeviceId }
+        projects = current.Projects.Select(p => p.Name).ToArray(),
+        shellApproval = current.RequireShellApproval,
+        relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId }
     });
 });
 app.MapGet("/approvals", (HttpContext context, ApprovalService approvals) =>
