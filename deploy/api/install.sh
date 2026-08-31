@@ -8,18 +8,17 @@ command -v docker >/dev/null && docker compose version >/dev/null 2>&1 || { echo
 
 generate_secret() { openssl rand -hex 32 2>/dev/null || od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
 ask() {
-  local prompt="$1" default="$2" value
+  local prompt="$1" default="$2"
   printf '%s [%s]: ' "$prompt" "$default" >/dev/tty
-  read -r value </dev/tty || true
-  printf '%s' "${value:-$default}"
+  IFS= read -r ANSWER </dev/tty || true
+  ANSWER="${ANSWER:-$default}"
 }
 
 ask_secret() {
-  local prompt="$1" value
+  local prompt="$1"
   printf '%s: ' "$prompt" >/dev/tty
-  read -r -s value </dev/tty || true
+  IFS= read -r -s ANSWER </dev/tty || true
   printf '\n' >/dev/tty
-  printf '%s' "$value"
 }
 
 mkdir -p "$INSTALL_DIR"
@@ -46,23 +45,23 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  API_URL="$(ask 'Public API URL' 'https://api.matemcp.com')"
-  RELAY_URL="$(ask 'Public Relay URL' 'https://relay.matemcp.com')"
-  DB_PROVIDER="$(ask 'Database provider (sqlite/sqlserver)' 'sqlite')"
+  ask 'Public API URL' 'https://api.matemcp.com'; API_URL="$ANSWER"
+  ask 'Public Relay URL' 'https://relay.matemcp.com'; RELAY_URL="$ANSWER"
+  ask 'Database provider (sqlite/sqlserver)' 'sqlite'; DB_PROVIDER="$ANSWER"
   DB_PROVIDER="${DB_PROVIDER,,}"
   case "$DB_PROVIDER" in
     sqlite)
       CONNECTION_STRING='Data Source=/data/matemcp-api.db'
       ;;
     sqlserver)
-      SQL_HOST="$(ask 'SQL Server host or IP' 'host.docker.internal')"
-      SQL_PORT="$(ask 'SQL Server port' '1433')"
-      SQL_DATABASE="$(ask 'Database name' 'MateMCP')"
-      SQL_USER="$(ask 'SQL Server username' 'sa')"
-      SQL_PASSWORD="$(ask_secret 'SQL Server password')"
+      ask 'SQL Server host or IP' 'host.docker.internal'; SQL_HOST="$ANSWER"
+      ask 'SQL Server port' '1433'; SQL_PORT="$ANSWER"
+      ask 'Database name' 'MateMCP'; SQL_DATABASE="$ANSWER"
+      ask 'SQL Server username' 'sa'; SQL_USER="$ANSWER"
+      ask_secret 'SQL Server password'; SQL_PASSWORD="$ANSWER"
       [[ -n "${SQL_PASSWORD:-}" ]] || { echo 'SQL Server password is required.' >&2; exit 1; }
-      ENCRYPT="$(ask 'Encrypt SQL connection (true/false)' 'true')"
-      TRUST="$(ask 'Trust server certificate (true/false)' 'false')"
+      ask 'Encrypt SQL connection (true/false)' 'true'; ENCRYPT="$ANSWER"
+      ask 'Trust server certificate (true/false)' 'false'; TRUST="$ANSWER"
       CONNECTION_STRING="Server=${SQL_HOST},${SQL_PORT};Database=${SQL_DATABASE};User Id=${SQL_USER};Password=${SQL_PASSWORD};Encrypt=${ENCRYPT};TrustServerCertificate=${TRUST};MultipleActiveResultSets=true"
       ;;
     *) echo 'Database provider must be sqlite or sqlserver.' >&2; exit 1 ;;
@@ -71,7 +70,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   printf 'Bootstrap account email (optional): ' >/dev/tty
   read -r ADMIN_EMAIL </dev/tty || true
   ADMIN_PASSWORD=''
-  if [[ -n "${ADMIN_EMAIL:-}" ]]; then ADMIN_PASSWORD="$(ask_secret 'Bootstrap account password (minimum 10 characters)')"; [[ ${#ADMIN_PASSWORD} -ge 10 ]] || { echo 'Password is too short.' >&2; exit 1; }; fi
+  if [[ -n "${ADMIN_EMAIL:-}" ]]; then ask_secret 'Bootstrap account password (minimum 10 characters)'; ADMIN_PASSWORD="$ANSWER"; [[ ${#ADMIN_PASSWORD} -ge 10 ]] || { echo 'Password is too short.' >&2; exit 1; }; fi
   umask 077
   {
     printf 'MATEMCP_API_IMAGE=%s\n' "${MATEMCP_API_IMAGE:-vrassouli/matemcp-api:dev}"
