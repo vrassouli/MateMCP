@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="${MATEMCP_REPO:-vrassouli/MateMCP}"
-REF="${MATEMCP_REF:-feat/multi-user-control-plane}"
+REF="${MATEMCP_REF:-main}"
 
 [[ $EUID -eq 0 ]] || { echo "Run as root (curl ... | sudo bash)." >&2; exit 1; }
 
