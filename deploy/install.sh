@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${MATEMCP_REPO:-vrassouli/MateMCP}"
-REF="${MATEMCP_REF:-main}"
+REPO="vrassouli/MateMCP"
+REF="main"
 
 [[ $EUID -eq 0 ]] || { echo "Run as root (curl ... | sudo bash)." >&2; exit 1; }
 
@@ -24,7 +24,9 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 download() {
   local component="$1"
-  curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/${component}/install.sh" -o "$TMP_DIR/install-${component}.sh"
+  local url="https://raw.githubusercontent.com/${REPO}/${REF}/deploy/${component}/install.sh"
+  echo "Downloading: $url"
+  curl -fsSL "$url" -o "$TMP_DIR/install-${component}.sh"
   chmod +x "$TMP_DIR/install-${component}.sh"
 }
 
