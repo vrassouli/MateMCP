@@ -23,7 +23,6 @@ var scopeValue = string.Join(' ', options.OAuthScopes);
 builder.Services.AddOpenIddict().AddValidation(validation =>
 {
     validation.SetIssuer(new Uri(authorizationServerUrl + "/"));
-    validation.AddAudiences(publicBaseUrl);
     validation.UseSystemNetHttp();
     validation.UseAspNetCore();
 });
