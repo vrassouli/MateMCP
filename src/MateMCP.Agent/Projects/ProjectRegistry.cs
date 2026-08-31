@@ -5,16 +5,17 @@ namespace MateMCP.Agent.Projects;
 
 public sealed record ProjectDefinition(string Name, string Root, bool Read, bool Write, bool Shell);
 
-public sealed class ProjectRegistry(IOptions<MateOptions> options)
+public sealed class ProjectRegistry(IOptionsMonitor<MateOptions> options)
 {
-    private readonly Dictionary<string, ProjectDefinition> _projects = Build(options.Value.Projects);
-
-    public IEnumerable<ProjectDefinition> All => _projects.Values;
+    public IEnumerable<ProjectDefinition> All => Build(options.CurrentValue.Projects).Values;
 
     public ProjectDefinition Get(string name)
-        => _projects.TryGetValue(name, out var project)
+    {
+        var projects = Build(options.CurrentValue.Projects);
+        return projects.TryGetValue(name, out var project)
             ? project
             : throw new InvalidOperationException($"Unknown project '{name}'.");
+    }
 
     public string ResolvePath(string projectName, string relativePath, bool requireWrite = false)
     {
