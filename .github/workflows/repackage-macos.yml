@@ -1,0 +1,43 @@
+name: repackage-macos
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/install-macos.sh'
+      - 'scripts/uninstall-macos.sh'
+      - 'scripts/prepare-external-test-macos.sh'
+      - '.github/workflows/repackage-macos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repackage:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download current release package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download agent-latest --repo "$GITHUB_REPOSITORY" --pattern "MateMCP-${{ matrix.rid }}.tar.gz" --dir current
+
+      - name: Replace installer scripts
+        run: |
+          mkdir package
+          tar -xzf "current/MateMCP-${{ matrix.rid }}.tar.gz" -C package
+          cp scripts/install-macos.sh package/install-macos.sh
+          cp scripts/uninstall-macos.sh package/uninstall-macos.sh
+          cp scripts/prepare-external-test-macos.sh package/prepare-external-test-macos.sh
+          chmod +x package/install-macos.sh package/uninstall-macos.sh package/prepare-external-test-macos.sh
+          tar -czf "current/MateMCP-${{ matrix.rid }}.tar.gz" -C package .
+
+      - name: Update agent-latest package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload agent-latest "current/MateMCP-${{ matrix.rid }}.tar.gz" --repo "$GITHUB_REPOSITORY" --clobber
