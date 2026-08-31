@@ -25,6 +25,17 @@ The private configuration is stored at `~/Library/Application Support/MateMCP/ap
 
 ## API / Control Plane
 
+For the usual single-server deployment, install the API and Relay together:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/feat/multi-user-control-plane/deploy/install.sh | sudo bash
+```
+
+The combined installer asks for the public URLs once, configures the database,
+shares the private internal key automatically, and verifies both services.
+Use the component installers below only when API and Relay run on different
+servers or need to be managed independently.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/feat/multi-user-control-plane/deploy/api/install.sh | sudo bash
 ```
