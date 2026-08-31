@@ -38,7 +38,7 @@ jobs:
           path: MateMCP-${{ matrix.rid }}.tar.gz
 
   publish-agent-release:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/feat/relay-mvp' || github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/feat/relay-mvp' || github.ref == 'refs/heads/feat/multi-user-control-plane' || github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -65,7 +65,7 @@ jobs:
           else
             TAG="agent-dev"
             TITLE="MateMCP Agent Development"
-            NOTES="Latest development build from feat/relay-mvp. Assets are replaced on each successful push."
+            NOTES="Latest development build. Assets are replaced on each successful feature-branch push."
             EXTRA=(--prerelease)
           fi
 

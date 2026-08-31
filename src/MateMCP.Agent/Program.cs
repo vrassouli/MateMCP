@@ -37,6 +37,9 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 builder.Services.AddSingleton<ProjectRegistry>();
 builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<ApprovalService>();
+builder.Services.AddSingleton<AgentCredentialStore>();
+builder.Services.AddHttpClient();
+builder.Services.AddHostedService<EnrollmentService>();
 builder.Services.AddHostedService<RelayConnector>();
 builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("mcp", limiter =>
 {

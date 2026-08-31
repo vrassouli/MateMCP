@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/relay-mvp
+      - feat/multi-user-control-plane
     tags:
       - 'relay-v*'
     paths:
@@ -47,6 +48,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=dev,enable=${{ github.ref == 'refs/heads/feat/relay-mvp' }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/feat/multi-user-control-plane' }}
             type=sha,prefix=sha-
             type=ref,event=tag
 

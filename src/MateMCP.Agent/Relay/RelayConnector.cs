@@ -2,10 +2,11 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using MateMCP.Agent.Security;
 
 namespace MateMCP.Agent.Relay;
 
-public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> options, ILogger<RelayConnector> logger) : BackgroundService
+public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> options, AgentCredentialStore credentials, ILogger<RelayConnector> logger) : BackgroundService
 {
     private readonly HttpClient _http = new();
 
@@ -14,7 +15,7 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
         while (!stoppingToken.IsCancellationRequested)
         {
             var current = options.CurrentValue;
-            if (!current.Relay.Enabled || string.IsNullOrWhiteSpace(current.Relay.Url) || string.IsNullOrWhiteSpace(current.Relay.DeviceId) || string.IsNullOrWhiteSpace(current.Relay.AgentToken))
+            if (!current.Relay.Enabled || string.IsNullOrWhiteSpace(current.Relay.Url) || string.IsNullOrWhiteSpace(current.Relay.DeviceId))
             { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); continue; }
             try { await RunConnectionAsync(current, stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
@@ -26,7 +27,7 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
     {
         var relayUrl = current.Relay.Url!;
         var deviceId = current.Relay.DeviceId!;
-        var agentToken = current.Relay.AgentToken!;
+        var agentToken = await credentials.GetAsync(deviceId, ct) ?? throw new InvalidOperationException("Agent credential is missing from macOS Keychain. Re-enroll this Agent.");
 
         using var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Authorization", $"Bearer {agentToken}");

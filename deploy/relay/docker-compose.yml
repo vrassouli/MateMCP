@@ -5,8 +5,10 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_URLS: http://+:8080
-      Relay__AgentToken: ${MATEMCP_RELAY_AGENT_TOKEN}
-      Relay__ClientToken: ${MATEMCP_RELAY_CLIENT_TOKEN}
+      Relay__PublicBaseUrl: ${MATEMCP_RELAY_PUBLIC_URL:-https://relay.matemcp.com}
+      Relay__AuthorizationServerUrl: ${MATEMCP_API_PUBLIC_URL:-https://api.matemcp.com}
+      Relay__ControlPlaneUrl: ${MATEMCP_API_INTERNAL_URL:-https://api.matemcp.com}
+      Relay__InternalApiKey: ${MATEMCP_INTERNAL_API_KEY}
       Relay__MaxBodyBytes: ${MATEMCP_RELAY_MAX_BODY_BYTES:-4194304}
       Relay__RequestTimeoutSeconds: ${MATEMCP_RELAY_REQUEST_TIMEOUT_SECONDS:-120}
     ports:

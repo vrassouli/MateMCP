@@ -28,6 +28,13 @@ public static class ConfigurationBootstrap
                 CertificatePassword = (string?)null,
                 RequireShellApproval = true,
                 ApprovalTimeoutSeconds = 120,
+                Relay = new
+                {
+                    Enabled = true,
+                    Url = "https://relay.matemcp.com",
+                    ControlPlaneUrl = "https://api.matemcp.com",
+                    DeviceId = (string?)null
+                },
                 Projects = Array.Empty<object>()
             }
         };

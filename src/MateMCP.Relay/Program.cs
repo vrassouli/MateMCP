@@ -1,21 +1,23 @@
 using System.Net.WebSockets;
-using System.Security.Cryptography;
+using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text.Json;
 using MateMCP.Relay;
 using Microsoft.AspNetCore.Authentication;
+using OpenIddict.Abstractions;
 using OpenIddict.Validation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection(RelayOptions.SectionName));
 builder.Services.AddSingleton<AgentRegistry>();
+builder.Services.AddHttpClient("control-plane", client => client.BaseAddress = new Uri((builder.Configuration["Relay:ControlPlaneUrl"] ?? "https://api.matemcp.com").TrimEnd('/') + "/"));
 
 var options = builder.Configuration.GetSection(RelayOptions.SectionName).Get<RelayOptions>() ?? new RelayOptions();
-if (options.AgentToken == "change-me" || options.ClientToken == "change-me")
-    throw new InvalidOperationException("Configure Relay:AgentToken and Relay:ClientToken.");
+if (options.InternalApiKey == "change-me")
+    throw new InvalidOperationException("Configure Relay:InternalApiKey.");
 
 var publicBaseUrl = options.PublicBaseUrl.TrimEnd('/');
 var authorizationServerUrl = options.AuthorizationServerUrl.TrimEnd('/');
-var resourceMetadataUrl = $"{publicBaseUrl}/.well-known/oauth-protected-resource";
 var scopeValue = string.Join(' ', options.OAuthScopes);
 
 builder.Services.AddOpenIddict().AddValidation(validation =>
@@ -40,10 +42,19 @@ app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
     resource_documentation = "https://github.com/vrassouli/MateMCP"
 }));
 
-app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, AgentRegistry registry) =>
+app.MapGet("/.well-known/oauth-protected-resource/mcp/{deviceId}", (string deviceId) => Results.Ok(new
+{
+    resource = $"{publicBaseUrl}/mcp/{deviceId}",
+    authorization_servers = new[] { authorizationServerUrl },
+    scopes_supported = options.OAuthScopes,
+    bearer_methods_supported = new[] { "header" }
+}));
+
+app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
 {
     if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
-    if (!BearerEquals(context, options.AgentToken)) { context.Response.StatusCode = 401; return; }
+    var credential = Bearer(context);
+    if (credential is null || !await AuthenticateAgentAsync(clients, options, deviceId, credential, context.RequestAborted)) { context.Response.StatusCode = 401; return; }
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
     if (!registry.TryRegister(deviceId, socket, out var connection))
     {
@@ -73,11 +84,14 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
     finally { registry.Remove(deviceId, connection); }
 });
 
-app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], async (HttpContext context, string deviceId, AgentRegistry registry) =>
+app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
 {
-    if (!BearerEquals(context, options.ClientToken) && !await HasValidOAuthTokenAsync(context))
+    var principal = await AuthenticateOAuthAsync(context);
+    var requiredResource = $"{publicBaseUrl}/mcp/{deviceId}";
+    if (principal is null || principal.FindFirstValue("agent_id") != deviceId || !principal.GetResources().Contains(requiredResource, StringComparer.Ordinal) ||
+        !await AuthorizeAsync(clients, options, deviceId, principal, context.RequestAborted))
     {
-        context.Response.Headers.WWWAuthenticate = $"Bearer resource_metadata=\"{resourceMetadataUrl}\", scope=\"{scopeValue}\"";
+        context.Response.Headers.WWWAuthenticate = $"Bearer resource_metadata=\"{publicBaseUrl}/.well-known/oauth-protected-resource/mcp/{deviceId}\", scope=\"{scopeValue}\"";
         return Results.Unauthorized();
     }
     if (!registry.TryGet(deviceId, out var agent)) return Results.NotFound(new { error = "device_offline" });
@@ -86,6 +100,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], asy
     using var ms = new MemoryStream();
     await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
     if (ms.Length > options.MaxBodyBytes) return Results.StatusCode(413);
+    if (!ScopeAllowsPayload(principal, ms.ToArray())) return Results.Forbid();
 
     var headers = context.Request.Headers
         .Where(h => !string.Equals(h.Key, "Authorization", StringComparison.OrdinalIgnoreCase))
@@ -110,17 +125,57 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], asy
 
 app.Run();
 
-static async Task<bool> HasValidOAuthTokenAsync(HttpContext context)
+static async Task<ClaimsPrincipal?> AuthenticateOAuthAsync(HttpContext context)
 {
     var result = await context.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-    return result.Succeeded && result.Principal?.Identity?.IsAuthenticated == true;
+    return result.Succeeded && result.Principal?.Identity?.IsAuthenticated == true ? result.Principal : null;
 }
 
-static bool BearerEquals(HttpContext context, string expected)
+static string? Bearer(HttpContext context)
 {
     var auth = context.Request.Headers.Authorization.ToString();
-    if (!auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return false;
-    var supplied = System.Text.Encoding.UTF8.GetBytes(auth[7..]);
-    var required = System.Text.Encoding.UTF8.GetBytes(expected);
-    return supplied.Length == required.Length && CryptographicOperations.FixedTimeEquals(supplied, required);
+    return auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..] : null;
+}
+
+static async Task<bool> AuthenticateAgentAsync(IHttpClientFactory factory, RelayOptions options, string agentId, string credential, CancellationToken ct)
+{
+    var client = factory.CreateClient("control-plane");
+    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authenticate") { Content = JsonContent.Create(new { agentId, credential }) };
+    request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
+    using var response = await client.SendAsync(request, ct);
+    return response.IsSuccessStatusCode;
+}
+
+static async Task<bool> AuthorizeAsync(IHttpClientFactory factory, RelayOptions options, string agentId, ClaimsPrincipal principal, CancellationToken ct)
+{
+    var userId = principal.FindFirstValue(OpenIddict.Abstractions.OpenIddictConstants.Claims.Subject);
+    if (string.IsNullOrWhiteSpace(userId)) return false;
+    var client = factory.CreateClient("control-plane");
+    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authorize") { Content = JsonContent.Create(new { agentId, userId, scopes = principal.GetScopes() }) };
+    request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
+    using var response = await client.SendAsync(request, ct);
+    return response.IsSuccessStatusCode;
+}
+
+static bool ScopeAllowsPayload(ClaimsPrincipal principal, byte[] body)
+{
+    if (body.Length == 0) return principal.HasScope("mcp:read");
+    try
+    {
+        using var document = JsonDocument.Parse(body);
+        var calls = document.RootElement.ValueKind == JsonValueKind.Array ? document.RootElement.EnumerateArray().ToArray() : [document.RootElement];
+        foreach (var call in calls)
+        {
+            if (!call.TryGetProperty("method", out var method) || method.GetString() != "tools/call")
+            {
+                if (!principal.HasScope("mcp:read")) return false;
+                continue;
+            }
+            var name = call.TryGetProperty("params", out var parameters) && parameters.TryGetProperty("name", out var tool) ? tool.GetString() : null;
+            var required = name switch { "filesystem_write" => "mcp:write", "shell_exec" => "mcp:shell", _ => "mcp:read" };
+            if (!principal.HasScope(required)) return false;
+        }
+        return true;
+    }
+    catch (JsonException) { return false; }
 }

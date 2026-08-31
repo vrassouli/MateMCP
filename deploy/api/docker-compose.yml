@@ -6,14 +6,19 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8081
       MateMCP__PublicUrl: ${MATEMCP_API_PUBLIC_URL:-https://api.matemcp.com}
-      MateMCP__RelayResource: ${MATEMCP_RELAY_RESOURCE:-https://relay.matemcp.com}
-      MateMCP__AdminEmail: ${MATEMCP_API_ADMIN_EMAIL}
-      MateMCP__AdminPassword: ${MATEMCP_API_ADMIN_PASSWORD}
-      MateMCP__DataPath: /data/matemcp-api.db
+      MateMCP__RelayUrl: ${MATEMCP_RELAY_URL:-https://relay.matemcp.com}
+      MateMCP__InternalApiKey: ${MATEMCP_INTERNAL_API_KEY}
+      MateMCP__DatabaseProvider: ${MATEMCP_DB_PROVIDER:-sqlite}
+      MateMCP__ConnectionStringBase64: ${MATEMCP_DB_CONNECTION_STRING_BASE64:-}
+      MateMCP__BootstrapAdminEmail: ${MATEMCP_BOOTSTRAP_ADMIN_EMAIL:-}
+      MateMCP__BootstrapAdminPassword: ${MATEMCP_BOOTSTRAP_ADMIN_PASSWORD:-}
+      MateMCP__KeyPath: /data
     volumes:
       - matemcp-api-data:/data
     ports:
       - "${MATEMCP_API_BIND:-0.0.0.0}:${MATEMCP_API_PORT:-8081}:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   matemcp-api-data:

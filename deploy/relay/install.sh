@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="vrassouli/MateMCP"
-REF="${MATEMCP_REF:-feat/relay-mvp}"
+REF="${MATEMCP_REF:-feat/multi-user-control-plane}"
 INSTALL_DIR="${MATEMCP_RELAY_DIR:-/opt/matemcp-relay}"
 COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/${REF}/deploy/relay/docker-compose.yml"
 
@@ -56,13 +56,24 @@ curl -fsSL "${COMPOSE_URL}" -o "${INSTALL_DIR}/docker-compose.yml"
 
 ENV_FILE="${INSTALL_DIR}/.env"
 if [ ! -f "${ENV_FILE}" ]; then
+  read -r -p "Public Relay URL [https://relay.matemcp.com]: " RELAY_PUBLIC_URL </dev/tty || true
+  RELAY_PUBLIC_URL="${RELAY_PUBLIC_URL:-https://relay.matemcp.com}"
+  read -r -p "Public API/OAuth URL [https://api.matemcp.com]: " API_PUBLIC_URL </dev/tty || true
+  API_PUBLIC_URL="${API_PUBLIC_URL:-https://api.matemcp.com}"
+  read -r -p "Internal Control Plane URL [$API_PUBLIC_URL]: " API_INTERNAL_URL </dev/tty || true
+  API_INTERNAL_URL="${API_INTERNAL_URL:-$API_PUBLIC_URL}"
+  read -r -s -p "Control Plane internal API key: " INTERNAL_API_KEY </dev/tty || true
+  echo >/dev/tty || true
+  [[ -n "${INTERNAL_API_KEY:-}" ]] || { echo "The internal API key from /opt/matemcp-api/.env is required." >&2; exit 1; }
   umask 077
   cat > "${ENV_FILE}" <<EOF
 MATEMCP_RELAY_IMAGE=${MATEMCP_RELAY_IMAGE:-vrassouli/matemcp-relay:dev}
 MATEMCP_RELAY_BIND=${MATEMCP_RELAY_BIND:-0.0.0.0}
 MATEMCP_RELAY_PORT=${MATEMCP_RELAY_PORT:-8080}
-MATEMCP_RELAY_AGENT_TOKEN=$(generate_token)
-MATEMCP_RELAY_CLIENT_TOKEN=$(generate_token)
+MATEMCP_RELAY_PUBLIC_URL=${RELAY_PUBLIC_URL}
+MATEMCP_API_PUBLIC_URL=${API_PUBLIC_URL}
+MATEMCP_API_INTERNAL_URL=${API_INTERNAL_URL}
+MATEMCP_INTERNAL_API_KEY=${INTERNAL_API_KEY}
 MATEMCP_RELAY_MAX_BODY_BYTES=4194304
 MATEMCP_RELAY_REQUEST_TIMEOUT_SECONDS=120
 EOF
@@ -98,13 +109,6 @@ echo "Installed in: ${INSTALL_DIR}"
 echo "Local health: http://127.0.0.1:${PORT}/health"
 echo "Compose file: ${INSTALL_DIR}/docker-compose.yml"
 echo "Environment: ${ENV_FILE}"
-
-if [ "${CREATED_ENV}" -eq 1 ]; then
-  echo
-echo "Generated credentials (save these securely):"
-  grep '^MATEMCP_RELAY_AGENT_TOKEN=' "${ENV_FILE}"
-  grep '^MATEMCP_RELAY_CLIENT_TOKEN=' "${ENV_FILE}"
-fi
 
 echo
 echo "Update later with:"

@@ -19,8 +19,8 @@ public sealed class RelayOptions
 {
     public bool Enabled { get; set; }
     public string Url { get; set; } = "https://relay.matemcp.com";
+    public string ControlPlaneUrl { get; set; } = "https://api.matemcp.com";
     public string? DeviceId { get; set; }
-    public string? AgentToken { get; set; }
     public int MaxMessageBytes { get; set; } = 8 * 1024 * 1024;
 }
 
