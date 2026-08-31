@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="vrassouli/MateMCP"
-REF="${MATEMCP_REF:-main}"
+REF="main"
 INSTALL_DIR="${MATEMCP_RELAY_DIR:-/opt/matemcp-relay}"
 COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/${REF}/deploy/relay/docker-compose.yml"
 
@@ -11,7 +11,7 @@ if [ "${EUID}" -ne 0 ]; then
     echo "This installer needs root privileges (sudo not found)." >&2
     exit 1
   fi
-  exec sudo --preserve-env=MATEMCP_REF,MATEMCP_RELAY_DIR,MATEMCP_RELAY_IMAGE,MATEMCP_RELAY_BIND,MATEMCP_RELAY_PORT bash "$0" "$@"
+  exec sudo --preserve-env=MATEMCP_RELAY_DIR,MATEMCP_RELAY_IMAGE,MATEMCP_RELAY_BIND,MATEMCP_RELAY_PORT bash "$0" "$@"
 fi
 
 log() { printf '\n==> %s\n' "$*"; }
@@ -66,6 +66,7 @@ install_docker
 
 log "Preparing ${INSTALL_DIR}"
 install -d -m 0750 "${INSTALL_DIR}"
+echo "Downloading: ${COMPOSE_URL}"
 curl -fsSL "${COMPOSE_URL}" -o "${INSTALL_DIR}/docker-compose.yml"
 
 ENV_FILE="${INSTALL_DIR}/.env"
