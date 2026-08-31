@@ -39,6 +39,15 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "MateMCP installer exited with code $LASTEXITCODE"
     }
+
+    # The installer runs in a child PowerShell process, so propagate its PATH
+    # change into the current bootstrap process as well. This makes `matemcp`
+    # immediately available when bootstrap itself was invoked in the caller's shell.
+    $bin = Join-Path $env:LOCALAPPDATA 'MateMCP\bin'
+    $processParts = @($env:Path -split ';' | Where-Object { $_ })
+    if ($processParts -notcontains $bin) {
+        $env:Path = (($processParts + $bin) -join ';').Trim(';')
+    }
 }
 finally {
     Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
