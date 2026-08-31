@@ -61,6 +61,8 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
         return;
     }
 
+    using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+    var heartbeatTask = RunAgentHeartbeatAsync(clients, options, deviceId, credential, heartbeatCts.Token);
     var buffer = new byte[64 * 1024];
     try
     {
@@ -80,7 +82,12 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
             if (response is not null) connection.Complete(response);
         }
     }
-    finally { registry.Remove(deviceId, connection); }
+    finally
+    {
+        heartbeatCts.Cancel();
+        await heartbeatTask;
+        registry.Remove(deviceId, connection);
+    }
 });
 
 app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
@@ -143,6 +150,34 @@ static async Task<bool> AuthenticateAgentAsync(IHttpClientFactory factory, Relay
     request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
     using var response = await client.SendAsync(request, ct);
     return response.IsSuccessStatusCode;
+}
+
+static async Task RunAgentHeartbeatAsync(IHttpClientFactory factory, RelayOptions options, string agentId, string credential, CancellationToken ct)
+{
+    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+    try
+    {
+        while (await timer.WaitForNextTickAsync(ct))
+        {
+            using var heartbeatTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            heartbeatTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+            try
+            {
+                await AuthenticateAgentAsync(factory, options, agentId, credential, heartbeatTimeout.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // A transient control-plane timeout must not tear down an otherwise healthy relay connection.
+            }
+            catch (HttpRequestException)
+            {
+                // A transient control-plane/network failure will be retried on the next heartbeat.
+            }
+        }
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+    }
 }
 
 static async Task<bool> AuthorizeAsync(IHttpClientFactory factory, RelayOptions options, string agentId, ClaimsPrincipal principal, CancellationToken ct)
