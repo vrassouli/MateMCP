@@ -22,7 +22,7 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
             if (!string.IsNullOrWhiteSpace(existingCredential)) return;
 
             recoverAgentId = current.Relay.DeviceId;
-            logger.LogWarning("Agent {DeviceId} has no credential in macOS Keychain; starting identity recovery while preserving the existing MCP URL.", recoverAgentId);
+            logger.LogWarning("Agent {DeviceId} has no credential in the OS secure credential store; starting identity recovery while preserving the existing MCP URL.", recoverAgentId);
         }
 
         var client = clients.CreateClient();
@@ -30,7 +30,7 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
         var response = await client.PostAsJsonAsync("api/enrollment/start", new
         {
             name = Environment.MachineName,
-            platform = $"macOS {Environment.OSVersion.Version}",
+            platform = GetPlatformDescription(),
             recoverAgentId
         }, ct);
         response.EnsureSuccessStatusCode();
@@ -41,7 +41,8 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
             logger.LogWarning("Sign in to MateMCP and approve this Agent: {Url} (code {Code})", enrollment.VerificationUriComplete, enrollment.UserCode);
         else
             logger.LogWarning("Sign in to MateMCP and approve recovery of Agent {DeviceId}: {Url} (code {Code})", recoverAgentId, enrollment.VerificationUriComplete, enrollment.UserCode);
-        OpenBrowser(enrollment.VerificationUriComplete);
+
+        OpenBrowser(enrollment.VerificationUriComplete, logger);
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(enrollment.ExpiresIn);
         while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
@@ -76,12 +77,47 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
-    private static void OpenBrowser(string url)
+    private static string GetPlatformDescription()
     {
-        if (!OperatingSystem.IsMacOS()) return;
-        var start = new ProcessStartInfo("/usr/bin/open") { UseShellExecute = false };
-        start.ArgumentList.Add(url);
-        Process.Start(start)?.Dispose();
+        if (OperatingSystem.IsWindows())
+            return $"Windows {Environment.OSVersion.Version}";
+        if (OperatingSystem.IsMacOS())
+            return $"macOS {Environment.OSVersion.Version}";
+        if (OperatingSystem.IsLinux())
+            return $"Linux {Environment.OSVersion.Version}";
+        return Environment.OSVersion.ToString();
+    }
+
+    private static void OpenBrowser(string url, ILogger logger)
+    {
+        try
+        {
+            ProcessStartInfo start;
+            if (OperatingSystem.IsWindows())
+            {
+                start = new ProcessStartInfo(url) { UseShellExecute = true };
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                start = new ProcessStartInfo("/usr/bin/open") { UseShellExecute = false };
+                start.ArgumentList.Add(url);
+            }
+            else if (OperatingSystem.IsLinux())
+            {
+                start = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+                start.ArgumentList.Add(url);
+            }
+            else
+            {
+                return;
+            }
+
+            Process.Start(start)?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not open the MateMCP sign-in page automatically. Open this URL manually: {Url}", url);
+        }
     }
 
     private sealed record EnrollmentResponse(string DeviceCode, string UserCode, string VerificationUriComplete, int Interval, int ExpiresIn);
