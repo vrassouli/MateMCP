@@ -1,6 +1,6 @@
 services:
   api:
-    image: ${MATEMCP_API_IMAGE:-vrassouli/matemcp-api:dev}
+    image: ${MATEMCP_API_IMAGE:-vrassouli/matemcp-api:latest}
     container_name: matemcp-api
     restart: unless-stopped
     environment:
