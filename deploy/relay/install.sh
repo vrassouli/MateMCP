@@ -120,7 +120,7 @@ fi
 log "Pulling and starting MateMCP Relay"
 cd "${INSTALL_DIR}"
 docker compose pull
-docker compose up -d
+docker compose up -d --force-recreate --remove-orphans
 
 log "Waiting for health endpoint"
 for _ in $(seq 1 30); do
@@ -146,4 +146,4 @@ echo "Environment: ${ENV_FILE}"
 
 echo
 echo "Update later with:"
-echo "  cd ${INSTALL_DIR} && docker compose pull && docker compose up -d"
+echo "  cd ${INSTALL_DIR} && docker compose pull && docker compose up -d --force-recreate --remove-orphans"
