@@ -12,6 +12,26 @@ ask() { local prompt="$1" default="$2" value; read -r -p "$prompt [$default]: " 
 mkdir -p "$INSTALL_DIR"
 curl -fsSL "$REPO_RAW/deploy/api/docker-compose.yml" -o "$INSTALL_DIR/docker-compose.yml"
 ENV_FILE="$INSTALL_DIR/.env"
+
+# Installations created before the multi-user control plane do not contain the
+# database or internal API settings. Keeping that file would silently start the
+# API with an empty shared key and would also skip the database questions.
+if [[ -f "$ENV_FILE" ]]; then
+  if ! grep -q '^MATEMCP_INTERNAL_API_KEY=.' "$ENV_FILE" || \
+     ! grep -q '^MATEMCP_DB_PROVIDER=.' "$ENV_FILE" || \
+     ! grep -q '^MATEMCP_DB_CONNECTION_STRING_BASE64=.' "$ENV_FILE"; then
+    ENV_BACKUP="$ENV_FILE.pre-multi-user-$(date -u +%Y%m%dT%H%M%SZ)"
+    cp "$ENV_FILE" "$ENV_BACKUP"
+    chmod 600 "$ENV_BACKUP"
+    rm "$ENV_FILE"
+    echo "Legacy MateMCP API configuration detected."
+    echo "Backup created at $ENV_BACKUP"
+    echo "The API must be reconfigured for the multi-user control plane."
+  else
+    echo "Using existing API configuration from $ENV_FILE"
+  fi
+fi
+
 if [[ ! -f "$ENV_FILE" ]]; then
   API_URL="$(ask 'Public API URL' 'https://api.matemcp.com')"
   RELAY_URL="$(ask 'Public Relay URL' 'https://relay.matemcp.com')"
