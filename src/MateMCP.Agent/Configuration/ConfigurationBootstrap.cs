@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace MateMCP.Agent.Configuration;
@@ -15,7 +14,6 @@ public static class ConfigurationBootstrap
         var path = Path.Combine(directory, "appsettings.json");
         if (File.Exists(path)) return path;
 
-        var token = "matemcp_" + Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         var initial = new
         {
             Mate = new
@@ -23,7 +21,6 @@ public static class ConfigurationBootstrap
                 BindAddress = "127.0.0.1",
                 Port = 45871,
                 AllowInsecureHttp = true,
-                AccessToken = token,
                 CertificatePath = (string?)null,
                 CertificatePassword = (string?)null,
                 RequireShellApproval = true,
@@ -45,7 +42,7 @@ public static class ConfigurationBootstrap
         return path;
     }
 
-    private static void TryRestrictPermissions(string path)
+    public static void TryRestrictPermissions(string path)
     {
         if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
         try
@@ -54,7 +51,7 @@ public static class ConfigurationBootstrap
         }
         catch
         {
-            // Best effort. Startup validation still prevents using the placeholder token.
+            // Best effort. Sensitive values are not expected in this file.
         }
     }
 }
