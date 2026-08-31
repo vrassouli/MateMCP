@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Desktop;
 using Microsoft.Extensions.Options;
@@ -9,45 +10,42 @@ namespace MateMCP.Agent.Security;
 
 public enum ApprovalDecision { AllowOnce, AllowSession, AllowAlways, Deny, Timeout }
 
-public sealed record PendingApproval(
-    string Id,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset ExpiresAt,
-    string Capability,
-    string Target,
-    string Summary);
+public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Capability, string Target, string Summary);
 
 public sealed class ApprovalService(
     IOptionsMonitor<MateOptions> options,
     IHttpClientFactory clients,
     AgentCredentialStore credentials,
     ApprovalPolicyStore policies,
+    AuditLog audit,
     LocalNotificationService notifications,
     ILogger<ApprovalService> logger)
 {
     private sealed class PendingState(PendingApproval approval)
     {
         public PendingApproval Approval { get; } = approval;
-        public TaskCompletionSource<ApprovalDecision> Completion { get; } =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<ApprovalDecision> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private readonly ConcurrentDictionary<string, PendingState> _pending = new(StringComparer.Ordinal);
     private MateOptions Current => options.CurrentValue;
 
-    public IReadOnlyCollection<PendingApproval> GetPending() =>
-        _pending.Values.Select(x => x.Approval).OrderBy(x => x.CreatedAt).ToArray();
-
-    public Task<IReadOnlyList<ApprovalPolicy>> GetPoliciesAsync(CancellationToken cancellationToken = default) =>
-        policies.GetAlwaysAsync(cancellationToken);
-
-    public Task<bool> RemovePolicyAsync(string capability, string target, CancellationToken cancellationToken = default) =>
-        policies.RemoveAlwaysAsync(capability, target, cancellationToken);
+    public IReadOnlyCollection<PendingApproval> GetPending() => _pending.Values.Select(x => x.Approval).OrderBy(x => x.CreatedAt).ToArray();
+    public Task<IReadOnlyList<ApprovalPolicy>> GetPoliciesAsync(CancellationToken cancellationToken = default) => policies.GetAlwaysAsync(cancellationToken);
+    public Task<bool> RemovePolicyAsync(string capability, string target, CancellationToken cancellationToken = default) => policies.RemoveAlwaysAsync(capability, target, cancellationToken);
 
     public async Task<ApprovalDecision> RequestAsync(string capability, string target, string summary, CancellationToken cancellationToken)
     {
-        if (policies.IsSessionAllowed(capability, target)) return ApprovalDecision.AllowSession;
-        if (await policies.IsAlwaysAllowedAsync(capability, target, cancellationToken)) return ApprovalDecision.AllowAlways;
+        if (policies.IsSessionAllowed(capability, target))
+        {
+            await audit.WriteAsync("approval", $"{capability}:{target}", "allowed:session-policy", cancellationToken);
+            return ApprovalDecision.AllowSession;
+        }
+        if (await policies.IsAlwaysAllowedAsync(capability, target, cancellationToken))
+        {
+            await audit.WriteAsync("approval", $"{capability}:{target}", "allowed:persistent-policy", cancellationToken);
+            return ApprovalDecision.AllowAlways;
+        }
 
         var timeoutSeconds = Math.Clamp(Current.ApprovalTimeoutSeconds, 15, 600);
         var createdAt = DateTimeOffset.UtcNow;
@@ -66,10 +64,12 @@ public sealed class ApprovalService(
             var decision = await state.Completion.Task.WaitAsync(timeout.Token);
             if (decision == ApprovalDecision.AllowSession) policies.AllowForSession(capability, target);
             if (decision == ApprovalDecision.AllowAlways) await policies.AllowAlwaysAsync(capability, target, cancellationToken);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:{decision.ToString().ToLowerInvariant()}", cancellationToken);
             return decision;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            await audit.WriteAsync("approval", $"{capability}:{target}", "decision:timeout", CancellationToken.None);
             return ApprovalDecision.Timeout;
         }
         finally { _pending.TryRemove(approval.Id, out _); }
