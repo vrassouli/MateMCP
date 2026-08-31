@@ -7,7 +7,20 @@ REPO_RAW="${MATEMCP_REPO_RAW:-https://raw.githubusercontent.com/vrassouli/MateMC
 command -v docker >/dev/null && docker compose version >/dev/null 2>&1 || { echo "Docker Engine with Compose v2 is required." >&2; exit 1; }
 
 generate_secret() { openssl rand -hex 32 2>/dev/null || od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
-ask() { local prompt="$1" default="$2" value; read -r -p "$prompt [$default]: " value </dev/tty || true; printf '%s' "${value:-$default}"; }
+ask() {
+  local prompt="$1" default="$2" value
+  printf '%s [%s]: ' "$prompt" "$default" >/dev/tty
+  read -r value </dev/tty || true
+  printf '%s' "${value:-$default}"
+}
+
+ask_secret() {
+  local prompt="$1" value
+  printf '%s: ' "$prompt" >/dev/tty
+  read -r -s value </dev/tty || true
+  printf '\n' >/dev/tty
+  printf '%s' "$value"
+}
 
 mkdir -p "$INSTALL_DIR"
 curl -fsSL "$REPO_RAW/deploy/api/docker-compose.yml" -o "$INSTALL_DIR/docker-compose.yml"
@@ -46,7 +59,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
       SQL_PORT="$(ask 'SQL Server port' '1433')"
       SQL_DATABASE="$(ask 'Database name' 'MateMCP')"
       SQL_USER="$(ask 'SQL Server username' 'sa')"
-      read -r -s -p 'SQL Server password: ' SQL_PASSWORD </dev/tty || true; echo >/dev/tty || true
+      SQL_PASSWORD="$(ask_secret 'SQL Server password')"
       [[ -n "${SQL_PASSWORD:-}" ]] || { echo 'SQL Server password is required.' >&2; exit 1; }
       ENCRYPT="$(ask 'Encrypt SQL connection (true/false)' 'true')"
       TRUST="$(ask 'Trust server certificate (true/false)' 'false')"
@@ -55,9 +68,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
     *) echo 'Database provider must be sqlite or sqlserver.' >&2; exit 1 ;;
   esac
   CONNECTION_B64="$(printf '%s' "$CONNECTION_STRING" | base64 -w 0)"
-  read -r -p 'Bootstrap account email (optional): ' ADMIN_EMAIL </dev/tty || true
+  printf 'Bootstrap account email (optional): ' >/dev/tty
+  read -r ADMIN_EMAIL </dev/tty || true
   ADMIN_PASSWORD=''
-  if [[ -n "${ADMIN_EMAIL:-}" ]]; then read -r -s -p 'Bootstrap account password (minimum 10 characters): ' ADMIN_PASSWORD </dev/tty || true; echo >/dev/tty || true; [[ ${#ADMIN_PASSWORD} -ge 10 ]] || { echo 'Password is too short.' >&2; exit 1; }; fi
+  if [[ -n "${ADMIN_EMAIL:-}" ]]; then ADMIN_PASSWORD="$(ask_secret 'Bootstrap account password (minimum 10 characters)')"; [[ ${#ADMIN_PASSWORD} -ge 10 ]] || { echo 'Password is too short.' >&2; exit 1; }; fi
   umask 077
   {
     printf 'MATEMCP_API_IMAGE=%s\n' "${MATEMCP_API_IMAGE:-vrassouli/matemcp-api:dev}"
