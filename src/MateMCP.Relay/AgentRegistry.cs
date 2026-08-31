@@ -11,9 +11,18 @@ public sealed class AgentRegistry
     public bool TryRegister(string deviceId, WebSocket socket, out AgentConnection connection)
     {
         connection = new AgentConnection(deviceId, socket);
-        if (_agents.TryAdd(deviceId, connection)) return true;
-        connection = null!;
-        return false;
+
+        while (true)
+        {
+            if (_agents.TryAdd(deviceId, connection)) return true;
+            if (!_agents.TryGetValue(deviceId, out var existing)) continue;
+
+            if (!_agents.TryUpdate(deviceId, connection, existing)) continue;
+
+            try { existing.Socket.Abort(); }
+            catch { }
+            return true;
+        }
     }
 
     public bool TryGet(string deviceId, out AgentConnection connection) => _agents.TryGetValue(deviceId, out connection!);
