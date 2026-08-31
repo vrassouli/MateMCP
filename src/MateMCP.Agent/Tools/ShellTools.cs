@@ -42,16 +42,7 @@ public sealed class ShellTools(
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, 1, 600);
 
-        var psi = new ProcessStartInfo("/bin/zsh")
-        {
-            WorkingDirectory = definition.Root,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add("-lc");
-        psi.ArgumentList.Add(command);
+        var psi = CreateShellProcess(command, definition.Root);
         foreach (var key in new[] { "GITHUB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN" })
             psi.Environment.Remove(key);
 
@@ -75,6 +66,50 @@ public sealed class ShellTools(
         var stderr = Limit(await stderrTask);
         await audit.WriteAsync("shell.exec", $"{project}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
         return new { exitCode = process.ExitCode, stdout, stderr };
+    }
+
+    private static ProcessStartInfo CreateShellProcess(string command, string workingDirectory)
+    {
+        ProcessStartInfo psi;
+
+        if (OperatingSystem.IsWindows())
+        {
+            var powerShell = ResolvePowerShell();
+            psi = new ProcessStartInfo(powerShell)
+            {
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            psi.ArgumentList.Add("-NoLogo");
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-NonInteractive");
+            psi.ArgumentList.Add("-Command");
+            psi.ArgumentList.Add(command);
+            return psi;
+        }
+
+        var shell = File.Exists("/bin/zsh") ? "/bin/zsh" : "/bin/sh";
+        psi = new ProcessStartInfo(shell)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("-lc");
+        psi.ArgumentList.Add(command);
+        return psi;
+    }
+
+    private static string ResolvePowerShell()
+    {
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var pwsh = Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe");
+        return File.Exists(pwsh) ? pwsh : "powershell.exe";
     }
 
     private static string Limit(string value) => value.Length <= 200_000 ? value : value[..200_000] + "\n[output truncated]";
