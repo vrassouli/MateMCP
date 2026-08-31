@@ -90,7 +90,8 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
     {
         heartbeatCts.Cancel();
         await heartbeatTask;
-        registry.Remove(deviceId, connection);
+        if (registry.Remove(deviceId, connection))
+            await MarkAgentOfflineAsync(clients, options, deviceId);
     }
 });
 
@@ -154,6 +155,20 @@ static async Task<bool> AuthenticateAgentAsync(IHttpClientFactory factory, Relay
     request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
     using var response = await client.SendAsync(request, ct);
     return response.IsSuccessStatusCode;
+}
+
+static async Task MarkAgentOfflineAsync(IHttpClientFactory factory, RelayOptions options, string agentId)
+{
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    try
+    {
+        var client = factory.CreateClient("control-plane");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/offline") { Content = JsonContent.Create(new { agentId }) };
+        request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
+        using var response = await client.SendAsync(request, timeout.Token);
+    }
+    catch (OperationCanceledException) { }
+    catch (HttpRequestException) { }
 }
 
 static async Task RunAgentHeartbeatAsync(IHttpClientFactory factory, RelayOptions options, string agentId, string credential, CancellationToken ct)
