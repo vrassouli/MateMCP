@@ -1,0 +1,44 @@
+name: repackage-windows
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/install-windows.ps1'
+      - 'scripts/uninstall-windows.ps1'
+      - '.github/workflows/repackage-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repackage:
+    runs-on: windows-2025
+    strategy:
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download current release package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download agent-latest --repo $env:GITHUB_REPOSITORY --pattern "MateMCP-${{ matrix.rid }}.zip" --dir current
+
+      - name: Replace installer scripts
+        shell: pwsh
+        run: |
+          $archive = "current/MateMCP-${{ matrix.rid }}.zip"
+          Expand-Archive -Path $archive -DestinationPath package -Force
+          Copy-Item scripts/install-windows.ps1 package/install-windows.ps1 -Force
+          Copy-Item scripts/uninstall-windows.ps1 package/uninstall-windows.ps1 -Force
+          Remove-Item $archive -Force
+          Compress-Archive -Path package/* -DestinationPath $archive -Force
+
+      - name: Update agent-latest package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload agent-latest "current/MateMCP-${{ matrix.rid }}.zip" --repo $env:GITHUB_REPOSITORY --clobber
