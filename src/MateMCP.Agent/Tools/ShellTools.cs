@@ -16,33 +16,47 @@ public sealed class ShellTools(
     ApprovalService approvals,
     IOptions<MateOptions> options)
 {
-    [McpServerTool(Name = "shell_exec"), Description("Executes a shell command in a configured project directory and returns exit code, stdout, and stderr. Shell execution may require explicit local approval.")]
-    public async Task<object> Exec(string project, string command, int timeoutSeconds = 60, CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "shell_exec"), Description("Executes a shell command. When a project is specified, the command runs in that configured project directory and obeys its shell policy; otherwise it runs in the Agent user's home directory. Shell execution may require explicit local approval.")]
+    public async Task<object> Exec(string command, string? project = null, int timeoutSeconds = 60, CancellationToken cancellationToken = default)
     {
-        var definition = projects.Get(project);
-        if (!definition.Shell)
+        var hasProject = !string.IsNullOrWhiteSpace(project);
+        var scope = "agent";
+        string workingDirectory;
+
+        if (hasProject)
         {
-            await audit.WriteAsync("shell.exec", project, "denied:project-policy", cancellationToken);
-            throw new UnauthorizedAccessException($"Shell access is disabled for project '{project}'.");
+            var definition = projects.Get(project!);
+            if (!definition.Shell)
+            {
+                await audit.WriteAsync("shell.exec", project!, "denied:project-policy", cancellationToken);
+                throw new UnauthorizedAccessException($"Shell access is disabled for project '{project}'.");
+            }
+
+            workingDirectory = definition.Root;
+            scope = $"project:{project}";
+        }
+        else
+        {
+            workingDirectory = ResolveDefaultWorkingDirectory();
         }
 
         if (options.Value.RequireShellApproval)
         {
             var approved = await approvals.RequestAsync(
                 "shell.exec",
-                $"project:{project}",
+                scope,
                 Trim(command),
                 cancellationToken);
             if (!approved)
             {
-                await audit.WriteAsync("shell.exec", $"{project}:{Trim(command)}", "denied:approval", cancellationToken);
+                await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "denied:approval", cancellationToken);
                 throw new UnauthorizedAccessException("Shell execution was denied or approval timed out.");
             }
         }
 
         timeoutSeconds = Math.Clamp(timeoutSeconds, 1, 600);
 
-        var psi = CreateShellProcess(command, definition.Root);
+        var psi = CreateShellProcess(command, workingDirectory);
         foreach (var key in new[] { "GITHUB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN" })
             psi.Environment.Remove(key);
 
@@ -58,14 +72,23 @@ public sealed class ShellTools(
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            await audit.WriteAsync("shell.exec", $"{project}:{Trim(command)}", "timeout", CancellationToken.None);
+            await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "timeout", CancellationToken.None);
             throw;
         }
 
         var stdout = Limit(await stdoutTask);
         var stderr = Limit(await stderrTask);
-        await audit.WriteAsync("shell.exec", $"{project}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
-        return new { exitCode = process.ExitCode, stdout, stderr };
+        await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
+        return new { exitCode = process.ExitCode, stdout, stderr, workingDirectory, project = hasProject ? project : null };
+    }
+
+    private static string ResolveDefaultWorkingDirectory()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(home) && Directory.Exists(home))
+            return home;
+
+        return Environment.CurrentDirectory;
     }
 
     private static ProcessStartInfo CreateShellProcess(string command, string workingDirectory)
