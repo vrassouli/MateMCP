@@ -25,11 +25,13 @@ The private configuration is stored at `~/Library/Application Support/MateMCP/ap
 
 ## Windows Agent
 
-Download `MateMCP-win-x64.zip` (or `MateMCP-win-arm64.zip`) from the latest Agent release, extract it, then run:
+Run this from PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+irm https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-windows.ps1 | iex
 ```
+
+The bootstrap script detects Windows architecture automatically (`win-x64` or `win-arm64`), downloads the current stable Agent package from the `agent-latest` GitHub Release, extracts it to a temporary directory, and runs the packaged installer. No manual ZIP download or extraction is required.
 
 The private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials are stored in Windows Credential Manager. The installer preserves configuration and credentials during normal upgrades so the enrolled device identity remains stable.
 
