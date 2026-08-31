@@ -17,7 +17,12 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
             var current = options.CurrentValue;
             if (!current.Relay.Enabled || string.IsNullOrWhiteSpace(current.Relay.Url) || string.IsNullOrWhiteSpace(current.Relay.DeviceId))
             { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); continue; }
-            try { await RunConnectionAsync(current, stoppingToken); }
+            try
+            {
+                await RunConnectionAsync(current, stoppingToken);
+                if (!stoppingToken.IsCancellationRequested)
+                    await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+            }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
             catch (Exception ex) { logger.LogWarning(ex, "Relay connection lost; reconnecting."); await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken); }
         }
@@ -38,7 +43,20 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
         while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
             using var ms = new MemoryStream(); WebSocketReceiveResult result;
-            do { result = await socket.ReceiveAsync(buffer, ct); if (result.MessageType == WebSocketMessageType.Close) return; ms.Write(buffer, 0, result.Count); } while (!result.EndOfMessage);
+            do
+            {
+                result = await socket.ReceiveAsync(buffer, ct);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    logger.LogWarning(
+                        "MateMCP Relay closed the connection for {DeviceId}. Status={CloseStatus}; Reason={CloseReason}",
+                        deviceId,
+                        result.CloseStatus?.ToString() ?? "none",
+                        string.IsNullOrWhiteSpace(result.CloseStatusDescription) ? "none" : result.CloseStatusDescription);
+                    return;
+                }
+                ms.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
             var request = JsonSerializer.Deserialize<RelayRequest>(ms.ToArray());
             if (request is null) continue;
             var response = await ForwardAsync(request, current, ct);
