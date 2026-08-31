@@ -83,6 +83,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   chmod 600 "$ENV_FILE"
 fi
 
-cd "$INSTALL_DIR"; docker compose pull; docker compose up -d
+cd "$INSTALL_DIR"
+docker compose pull
+docker compose up -d --force-recreate --remove-orphans
 for _ in {1..45}; do curl -fsS http://127.0.0.1:8081/health >/dev/null 2>&1 && { echo "MateMCP API is running."; echo "Relay must use the same MATEMCP_INTERNAL_API_KEY from $ENV_FILE"; exit 0; }; sleep 1; done
 echo "MateMCP API did not become healthy. Run: cd $INSTALL_DIR && docker compose logs" >&2; exit 1
