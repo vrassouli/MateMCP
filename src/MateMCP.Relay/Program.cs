@@ -87,7 +87,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], asy
 {
     var principal = await AuthenticateOAuthAsync(context);
     var requiredResource = $"{publicBaseUrl}/mcp/{deviceId}";
-    if (principal is null || principal.FindFirstValue("agent_id") != deviceId || !principal.GetResources().Contains(requiredResource, StringComparer.Ordinal) ||
+    if (principal is null || principal.FindFirstValue("agent_id") != deviceId || !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
         !await AuthorizeAsync(clients, options, deviceId, principal, context.RequestAborted))
     {
         context.Response.Headers.WWWAuthenticate = $"Bearer resource_metadata=\"{publicBaseUrl}/.well-known/oauth-protected-resource/mcp/{deviceId}\", scope=\"{scopeValue}\"";
