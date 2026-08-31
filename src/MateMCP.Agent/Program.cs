@@ -61,6 +61,10 @@ var app = builder.Build();
 app.UseRateLimiter();
 app.UseMiddleware<BearerTokenMiddleware>();
 
+app.MapGet("/", (HttpContext context) =>
+    IsLoopback(context)
+        ? Results.Redirect("/ui", permanent: false)
+        : Results.NotFound());
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP", status = "ok" }));
 app.MapGet("/ui", (HttpContext context) =>
     IsLoopback(context)
@@ -79,7 +83,7 @@ app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOption
         projects = projects.All.Select(p => p.Name).ToArray(),
         shellApproval = current.RequireShellApproval,
         relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId },
-        credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : "platform fallback"
+        credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store"
     });
 });
 
