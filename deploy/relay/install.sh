@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="vrassouli/MateMCP"
-REF="${MATEMCP_REF:-feat/multi-user-control-plane}"
+REF="${MATEMCP_REF:-main}"
 INSTALL_DIR="${MATEMCP_RELAY_DIR:-/opt/matemcp-relay}"
 COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/${REF}/deploy/relay/docker-compose.yml"
 
