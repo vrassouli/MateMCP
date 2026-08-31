@@ -84,9 +84,9 @@ if [ -f "${ENV_FILE}" ]; then
 fi
 
 if [ ! -f "${ENV_FILE}" ]; then
-  ask 'Public Relay URL' 'https://relay.matemcp.com'; RELAY_PUBLIC_URL="$ANSWER"
-  ask 'Public API/OAuth URL' 'https://api.matemcp.com'; API_PUBLIC_URL="$ANSWER"
-  ask 'Internal Control Plane URL' "$API_PUBLIC_URL"; API_INTERNAL_URL="$ANSWER"
+  if [ -n "${MATEMCP_RELAY_PUBLIC_URL_INPUT:-}" ]; then RELAY_PUBLIC_URL="$MATEMCP_RELAY_PUBLIC_URL_INPUT"; else ask 'Public Relay URL' 'https://relay.matemcp.com'; RELAY_PUBLIC_URL="$ANSWER"; fi
+  if [ -n "${MATEMCP_API_PUBLIC_URL_INPUT:-}" ]; then API_PUBLIC_URL="$MATEMCP_API_PUBLIC_URL_INPUT"; else ask 'Public API/OAuth URL' 'https://api.matemcp.com'; API_PUBLIC_URL="$ANSWER"; fi
+  if [ -n "${MATEMCP_API_INTERNAL_URL_INPUT:-}" ]; then API_INTERNAL_URL="$MATEMCP_API_INTERNAL_URL_INPUT"; else ask 'Internal Control Plane URL' "$API_PUBLIC_URL"; API_INTERNAL_URL="$ANSWER"; fi
   API_ENV_FILE="${MATEMCP_API_ENV_FILE:-/opt/matemcp-api/.env}"
   INTERNAL_API_KEY=''
   if [ -r "$API_ENV_FILE" ]; then
