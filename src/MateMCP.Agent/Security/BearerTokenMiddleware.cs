@@ -1,13 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
-using MateMCP.Agent.Configuration;
-using Microsoft.Extensions.Options;
 
 namespace MateMCP.Agent.Security;
 
 public sealed class BearerTokenMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, IOptions<MateOptions> options)
+    public async Task InvokeAsync(HttpContext context, LocalAccessCredential credential)
     {
         if (!context.Request.Path.StartsWithSegments("/mcp"))
         {
@@ -15,7 +13,7 @@ public sealed class BearerTokenMiddleware(RequestDelegate next)
             return;
         }
 
-        var expected = options.Value.AccessToken;
+        var expected = credential.Token;
         var authorization = context.Request.Headers.Authorization.ToString();
         var supplied = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? authorization[7..].Trim() : string.Empty;
         if (string.IsNullOrWhiteSpace(expected) || !FixedEquals(expected, supplied))
