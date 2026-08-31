@@ -2,7 +2,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${MATEMCP_API_INSTALL_DIR:-/opt/matemcp-api}"
-REPO_RAW="${MATEMCP_REPO_RAW:-https://raw.githubusercontent.com/vrassouli/MateMCP/feat/multi-user-control-plane}"
+REPO_RAW="${MATEMCP_REPO_RAW:-https://raw.githubusercontent.com/vrassouli/MateMCP/main}"
 [[ $EUID -eq 0 ]] || { echo "Run as root (curl ... | sudo bash)." >&2; exit 1; }
 command -v docker >/dev/null && docker compose version >/dev/null 2>&1 || { echo "Docker Engine with Compose v2 is required." >&2; exit 1; }
 
@@ -25,9 +25,6 @@ mkdir -p "$INSTALL_DIR"
 curl -fsSL "$REPO_RAW/deploy/api/docker-compose.yml" -o "$INSTALL_DIR/docker-compose.yml"
 ENV_FILE="$INSTALL_DIR/.env"
 
-# Installations created before the multi-user control plane do not contain the
-# database or internal API settings. Keeping that file would silently start the
-# API with an empty shared key and would also skip the database questions.
 if [[ -f "$ENV_FILE" ]]; then
   if ! grep -q '^MATEMCP_INTERNAL_API_KEY=.' "$ENV_FILE" || \
      ! grep -q '^MATEMCP_DB_PROVIDER=.' "$ENV_FILE" || \
