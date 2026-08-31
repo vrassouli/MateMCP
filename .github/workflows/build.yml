@@ -4,7 +4,15 @@ on:
   push:
     branches: [ main, 'feat/**' ]
     tags: [ 'v*' ]
+    paths:
+      - 'src/MateMCP.Agent/**'
+      - 'MateMCP.slnx'
+      - '.github/workflows/build.yml'
   pull_request:
+    paths:
+      - 'src/MateMCP.Agent/**'
+      - 'MateMCP.slnx'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 permissions:
@@ -102,7 +110,7 @@ jobs:
           else
             TAG="agent-latest"
             TITLE="MateMCP Agent Latest"
-            NOTES="Latest stable Agent build from main for macOS and Windows. Assets are replaced on each successful push."
+            NOTES="Latest stable Agent build from main for macOS and Windows. Assets are replaced on each successful source change."
           fi
 
           gh release view "$TAG" >/dev/null 2>&1 || \
