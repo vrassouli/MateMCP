@@ -157,8 +157,11 @@ app.MapPost("/internal/agents/offline", async (HttpContext c, AgentOffline r, Co
     if (!Internal(c, internalKey)) return Results.Unauthorized();
     var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked);
     if (agent is null) return Results.NotFound();
-    agent.LastSeenAt = DateTimeOffset.MinValue;
-    await db.SaveChangesAsync();
+    if (agent.LastSeenAt <= r.LastSeenAt)
+    {
+        agent.LastSeenAt = DateTimeOffset.MinValue;
+        await db.SaveChangesAsync();
+    }
     return Results.Ok();
 });
 app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db) =>
@@ -202,7 +205,7 @@ static RSA LoadOrCreateRsaKey(string path) { var rsa = RSA.Create(3072); if (Fil
 sealed record EnrollmentStart(string Name, string Platform, string? RecoverAgentId = null);
 sealed record EnrollmentToken(string DeviceCode);
 sealed record AgentAuthentication(string AgentId, string Credential);
-sealed record AgentOffline(string AgentId);
+sealed record AgentOffline(string AgentId, DateTimeOffset LastSeenAt);
 sealed record AgentAuthorization(string AgentId, string UserId, string[] Scopes);
 sealed record NewApproval(string Capability, string Target, string Summary, int ExpiresIn = 120);
 sealed record ClientRegistration([property: System.Text.Json.Serialization.JsonPropertyName("client_name")] string? ClientName, [property: System.Text.Json.Serialization.JsonPropertyName("redirect_uris")] string[]? RedirectUris);
