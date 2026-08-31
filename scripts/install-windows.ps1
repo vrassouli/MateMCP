@@ -38,6 +38,11 @@ if ($parts -notcontains $Bin) {
     [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
 }
 
+$currentProcessParts = @($env:Path -split ';' | Where-Object { $_ })
+if ($currentProcessParts -notcontains $Bin) {
+    $env:Path = (($currentProcessParts + $Bin) -join ';').Trim(';')
+}
+
 Write-Host 'MateMCP installed/upgraded.'
 Write-Host "Binary: $Exe"
 Write-Host "Command: $Shim"
@@ -45,7 +50,7 @@ Write-Host "Config: $env:APPDATA\MateMCP\appsettings.json"
 Write-Host "Credentials: Windows Credential Manager"
 Write-Host "Uninstall: powershell -ExecutionPolicy Bypass -File `"$Target\uninstall-windows.ps1`""
 Write-Host ''
-Write-Host 'Open a new terminal before using the matemcp command.'
+Write-Host 'The matemcp command is now available in this installer process and in newly opened terminals.'
 
 if (-not $NoStart) {
     Start-Process -FilePath $Exe -WorkingDirectory $Target
