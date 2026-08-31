@@ -2,7 +2,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${MATEMCP_API_INSTALL_DIR:-/opt/matemcp-api}"
-REPO_RAW="${MATEMCP_REPO_RAW:-https://raw.githubusercontent.com/vrassouli/MateMCP/main}"
+REPO_RAW="https://raw.githubusercontent.com/vrassouli/MateMCP/main"
 [[ $EUID -eq 0 ]] || { echo "Run as root (curl ... | sudo bash)." >&2; exit 1; }
 command -v docker >/dev/null && docker compose version >/dev/null 2>&1 || { echo "Docker Engine with Compose v2 is required." >&2; exit 1; }
 
@@ -22,7 +22,9 @@ ask_secret() {
 }
 
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$REPO_RAW/deploy/api/docker-compose.yml" -o "$INSTALL_DIR/docker-compose.yml"
+COMPOSE_URL="$REPO_RAW/deploy/api/docker-compose.yml"
+echo "Downloading: $COMPOSE_URL"
+curl -fsSL "$COMPOSE_URL" -o "$INSTALL_DIR/docker-compose.yml"
 ENV_FILE="$INSTALL_DIR/.env"
 
 if [[ -f "$ENV_FILE" ]]; then
