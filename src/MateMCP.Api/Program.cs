@@ -89,19 +89,45 @@ app.MapPost("/dashboard/agents/{agentId}/revoke", async (string agentId, ClaimsP
 
 app.MapPost("/api/enrollment/start", async (EnrollmentStart request, ControlPlaneDbContext db) =>
 {
-    var raw = Token(32); var code = CreateUserCode(); db.Enrollments.Add(new EnrollmentSession { DeviceCodeHash = Hash(raw), UserCode = code, DeviceName = request.Name.Trim(), Platform = request.Platform.Trim(), ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10) }); await db.SaveChangesAsync();
+    var recoverAgentId = string.IsNullOrWhiteSpace(request.RecoverAgentId) ? null : request.RecoverAgentId.Trim();
+    if (recoverAgentId is not null && !IsAgentId(recoverAgentId)) return Results.BadRequest(new { error = "invalid_agent_id" });
+    var raw = Token(32); var code = CreateUserCode();
+    db.Enrollments.Add(new EnrollmentSession { DeviceCodeHash = Hash(raw), UserCode = code, DeviceName = request.Name.Trim(), Platform = EncodeEnrollmentPlatform(request.Platform.Trim(), recoverAgentId), ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10) });
+    await db.SaveChangesAsync();
     return Results.Ok(new { deviceCode = raw, userCode = code, verificationUri = publicUrl + "/device", verificationUriComplete = publicUrl + "/device?code=" + code, interval = 3, expiresIn = 600 });
 });
 app.MapGet("/device", (string? code) => Page("Add a device", $"<form method=post action=/device/approve><label>Code<input name=code value=\"{H(code ?? "")}\" required></label><button>Add device</button></form>")).RequireAuthorization();
 app.MapPost("/device/approve", async (HttpContext context, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
 {
     var form = await context.Request.ReadFormAsync(); var code = form["code"].ToString().Trim().ToUpperInvariant(); var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.UserCode == code && !x.Consumed && x.ApprovedByUserId == null);
-    if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest("Invalid or expired code."); enrollment.ApprovedByUserId = UserId(principal); await db.SaveChangesAsync(); return Page("Device approved", $"<p><b>{H(enrollment.DeviceName)}</b> can now finish setup. You may close this page.</p>");
+    if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest("Invalid or expired code.");
+    var (_, recoverAgentId) = DecodeEnrollmentPlatform(enrollment.Platform);
+    var userId = UserId(principal);
+    if (recoverAgentId is not null)
+    {
+        var recoverable = await db.Agents.AnyAsync(x => x.PublicId == recoverAgentId && x.OwnerId == userId && !x.IsRevoked);
+        if (!recoverable) return Results.Forbid();
+    }
+    enrollment.ApprovedByUserId = userId; await db.SaveChangesAsync();
+    return Page(recoverAgentId is null ? "Device approved" : "Device recovery approved", $"<p><b>{H(enrollment.DeviceName)}</b> can now finish setup. You may close this page.</p>");
 }).RequireAuthorization();
 app.MapPost("/api/enrollment/token", async (EnrollmentToken request, ControlPlaneDbContext db) =>
 {
     var deviceCodeHash = Hash(request.DeviceCode); var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.DeviceCodeHash == deviceCodeHash); if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest(new { error = "expired_token" }); if (enrollment.ApprovedByUserId is null) return Results.StatusCode(428); if (enrollment.Consumed) return Results.BadRequest(new { error = "invalid_grant" });
-    var credential = Token(48); var agent = new AgentDevice { PublicId = "agt_" + Token(18), OwnerId = enrollment.ApprovedByUserId.Value, Name = enrollment.DeviceName, Platform = enrollment.Platform, CredentialHash = Hash(credential) }; enrollment.Consumed = true; db.Agents.Add(agent); db.AuditEvents.Add(new AuditEvent { UserId = agent.OwnerId, AgentDeviceId = agent.Id, EventType = "agent.enrolled", Detail = agent.Name }); await db.SaveChangesAsync();
+    var (platform, recoverAgentId) = DecodeEnrollmentPlatform(enrollment.Platform);
+    var credential = Token(48);
+    AgentDevice agent;
+    if (recoverAgentId is not null)
+    {
+        agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == recoverAgentId && x.OwnerId == enrollment.ApprovedByUserId.Value && !x.IsRevoked) ?? throw new InvalidOperationException("Approved recovery target is no longer available.");
+        agent.CredentialHash = Hash(credential); agent.Name = enrollment.DeviceName; agent.Platform = platform; enrollment.Consumed = true;
+        db.AuditEvents.Add(new AuditEvent { UserId = agent.OwnerId, AgentDeviceId = agent.Id, EventType = "agent.credential_rotated", Detail = agent.Name });
+    }
+    else
+    {
+        agent = new AgentDevice { PublicId = "agt_" + Token(18), OwnerId = enrollment.ApprovedByUserId.Value, Name = enrollment.DeviceName, Platform = platform, CredentialHash = Hash(credential) }; enrollment.Consumed = true; db.Agents.Add(agent); db.AuditEvents.Add(new AuditEvent { UserId = agent.OwnerId, AgentDeviceId = agent.Id, EventType = "agent.enrolled", Detail = agent.Name });
+    }
+    await db.SaveChangesAsync();
     return Results.Ok(new { agentId = agent.PublicId, credential, relayUrl, mcpUrl = $"{relayUrl}/mcp/{agent.PublicId}" });
 });
 
@@ -154,13 +180,17 @@ static string CreateUserCode() { const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ2
 static bool Internal(HttpContext c, string expected) => SecretEquals(c.Request.Headers["X-MateMCP-Internal-Key"].ToString(), expected);
 static async Task<AgentDevice?> AuthenticateAgent(HttpContext c, string id, ControlPlaneDbContext db) { var auth = c.Request.Headers.Authorization.ToString(); if (!auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null; var credentialHash = Hash(auth[7..]); return await db.Agents.SingleOrDefaultAsync(x => x.PublicId == id && x.CredentialHash == credentialHash && !x.IsRevoked); }
 static bool SecretEquals(string a, string b) { var x = Encoding.UTF8.GetBytes(a); var y = Encoding.UTF8.GetBytes(b); return x.Length == y.Length && CryptographicOperations.FixedTimeEquals(x, y); }
-static bool TryAgentId(string resource, string relay, out string id) { var prefix = relay + "/mcp/"; id = resource.StartsWith(prefix, StringComparison.Ordinal) ? resource[prefix.Length..] : ""; return id.StartsWith("agt_", StringComparison.Ordinal) && !id.Contains('/'); }
+static bool TryAgentId(string resource, string relay, out string id) { var prefix = relay + "/mcp/"; id = resource.StartsWith(prefix, StringComparison.Ordinal) ? resource[prefix.Length..] : ""; return IsAgentId(id); }
+static bool IsAgentId(string id) => id.StartsWith("agt_", StringComparison.Ordinal) && id.Length > 4 && !id.Contains('/');
+const string RecoveryMarker = "\nMATEMCP_RECOVER:";
+static string EncodeEnrollmentPlatform(string platform, string? recoverAgentId) => recoverAgentId is null ? platform : platform + RecoveryMarker + recoverAgentId;
+static (string Platform, string? RecoverAgentId) DecodeEnrollmentPlatform(string value) { var index = value.LastIndexOf(RecoveryMarker, StringComparison.Ordinal); if (index < 0) return (value, null); var agentId = value[(index + RecoveryMarker.Length)..]; return IsAgentId(agentId) ? (value[..index], agentId) : (value, null); }
 static bool IsLocal(string s) => !string.IsNullOrEmpty(s) && s[0] == '/' && (s.Length == 1 || s[1] != '/' && s[1] != '\\');
 static string H(string s) => System.Net.WebUtility.HtmlEncode(s);
 static IResult Page(string title, string body) => Results.Content($"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>{H(title)}</title><style>body{{font-family:system-ui;max-width:900px;margin:50px auto;padding:0 20px;color:#17202a}}label{{display:block;margin:14px 0}}input{{display:block;width:100%;max-width:420px;padding:10px}}button{{padding:10px 16px;margin:4px}}.deny{{background:#a22;color:white}}table{{border-collapse:collapse;width:100%}}td,th{{padding:9px;border-bottom:1px solid #ddd;text-align:left}}code,pre{{overflow-wrap:anywhere}}article{{border:1px solid #ddd;padding:14px;margin:12px 0}}</style></head><body><h1>{H(title)}</h1>{body}</body></html>", "text/html");
 static RSA LoadOrCreateRsaKey(string path) { var rsa = RSA.Create(3072); if (File.Exists(path)) { rsa.ImportFromPem(File.ReadAllText(path)); return rsa; } File.WriteAllText(path, rsa.ExportPkcs8PrivateKeyPem()); return rsa; }
 
-sealed record EnrollmentStart(string Name, string Platform);
+sealed record EnrollmentStart(string Name, string Platform, string? RecoverAgentId = null);
 sealed record EnrollmentToken(string DeviceCode);
 sealed record AgentAuthentication(string AgentId, string Credential);
 sealed record AgentAuthorization(string AgentId, string UserId, string[] Scopes);
