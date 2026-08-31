@@ -45,8 +45,8 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  ask 'Public API URL' 'https://api.matemcp.com'; API_URL="$ANSWER"
-  ask 'Public Relay URL' 'https://relay.matemcp.com'; RELAY_URL="$ANSWER"
+  if [[ -n "${MATEMCP_API_PUBLIC_URL_INPUT:-}" ]]; then API_URL="$MATEMCP_API_PUBLIC_URL_INPUT"; else ask 'Public API URL' 'https://api.matemcp.com'; API_URL="$ANSWER"; fi
+  if [[ -n "${MATEMCP_RELAY_PUBLIC_URL_INPUT:-}" ]]; then RELAY_URL="$MATEMCP_RELAY_PUBLIC_URL_INPUT"; else ask 'Public Relay URL' 'https://relay.matemcp.com'; RELAY_URL="$ANSWER"; fi
   ask 'Database provider (sqlite/sqlserver)' 'sqlite'; DB_PROVIDER="$ANSWER"
   DB_PROVIDER="${DB_PROVIDER,,}"
   case "$DB_PROVIDER" in
