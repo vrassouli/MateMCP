@@ -2,7 +2,7 @@ name: companion-build
 
 on:
   push:
-    branches: [ main, 'feature/**', 'feat/**', 'fix/**' ]
+    branches: [ main ]
     paths:
       - 'src/MateMCP.Agent.Companion/**'
       - 'src/MateMCP.Agent/Program.cs'
@@ -19,6 +19,10 @@ on:
       - 'MateMCP.Agent.Companion.slnx'
       - '.github/workflows/companion-build.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
