@@ -1,14 +1,18 @@
+using MateMCP.Agent.Companion.Services;
+
 namespace MateMCP.Agent.Companion;
 
 public partial class App : Application
 {
-    public App()
+    private readonly ApprovalNotificationWatcher _approvalWatcher;
+
+    public App(ApprovalNotificationWatcher approvalWatcher)
     {
         InitializeComponent();
+        _approvalWatcher = approvalWatcher;
+        _approvalWatcher.Start();
     }
 
     protected override Window CreateWindow(IActivationState? activationState)
-    {
-        return new Window(new MainPage());
-    }
+        => new(new MainPage());
 }
