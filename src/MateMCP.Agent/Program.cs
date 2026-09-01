@@ -81,6 +81,54 @@ app.MapGet("/credential-audit", async (HttpContext context, AuditLog audit, int?
     if (!IsLoopback(context)) return Results.NotFound();
     return Results.Ok(await audit.ReadCredentialUsageAsync(limit ?? 200, ct));
 });
+app.MapGet("/audit", async (HttpContext context, AuditLog audit, int? limit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return Results.Ok(await audit.ReadAsync(limit ?? 200, ct));
+});
+
+app.MapGet("/shell/sessions", async (HttpContext context, InteractiveShellSessionManager sessions, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    var history = await audit.ReadAsync(1000, ct);
+    var ids = history
+        .Where(x => string.Equals(x.Capability, "shell.session.start", StringComparison.Ordinal) && x.Result.StartsWith("started:", StringComparison.Ordinal))
+        .Select(x => x.Result["started:".Length..])
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+    var active = new List<ShellSessionSnapshot>();
+    foreach (var id in ids)
+    {
+        try { active.Add(sessions.Read(id, 0)); }
+        catch (KeyNotFoundException) { }
+    }
+    return Results.Ok(active.OrderByDescending(x => x.LastTouched).ToArray());
+});
+app.MapGet("/shell/sessions/{id}", (string id, int? offset, HttpContext context, InteractiveShellSessionManager sessions) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try { return Results.Ok(sessions.Read(id, Math.Max(0, offset ?? 0))); }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+});
+app.MapPost("/shell/sessions/{id}/input", async (string id, ShellInput update, HttpContext context, InteractiveShellSessionManager sessions, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try
+    {
+        await sessions.WriteAsync(id, update.Text ?? string.Empty, update.Submit, ct);
+        await audit.WriteAsync("shell.session.ui-input", id, $"chars:{update.Text?.Length ?? 0};submit:{update.Submit}", ct);
+        return Results.Ok(new { status = "written" });
+    }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+    catch (ArgumentException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
+});
+app.MapDelete("/shell/sessions/{id}", async (string id, HttpContext context, InteractiveShellSessionManager sessions, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    var closed = sessions.Close(id);
+    await audit.WriteAsync("shell.session.ui-close", id, closed ? "closed" : "not-found", ct);
+    return closed ? Results.Ok(new { status = "closed" }) : Results.NotFound();
+});
 
 app.MapGet("/projects", (HttpContext context, ProjectRegistry projects) => IsLoopback(context) ? Results.Ok(projects.All.OrderBy(p => p.Name).ToArray()) : Results.NotFound());
 app.MapPost("/projects", (ProjectUpdate update, HttpContext context, ProjectConfigurationService projects) =>
@@ -104,20 +152,26 @@ app.MapGet("/secrets", async (HttpContext context, UserSecretStore secrets, Canc
     try { return Results.Ok(await secrets.ListAsync(ct)); }
     catch (PlatformNotSupportedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status501NotImplemented); }
 });
-app.MapPost("/secrets", async (SecretUpdate update, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
+app.MapPost("/secrets", async (SecretUpdate update, HttpContext context, UserSecretStore secrets, AuditLog audit, CancellationToken ct) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
     try
     {
         await secrets.SaveAsync(update.Name, update.Value, update.Description, update.Kind, update.AllowedTools, ct);
+        await audit.WriteAsync("secret.manage", update.Name, "saved", ct);
         return Results.Ok(new { update.Name, type = update.Kind.ToString(), allowedTools = update.AllowedTools });
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
 });
-app.MapDelete("/secrets/{name}", async (string name, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
+app.MapDelete("/secrets/{name}", async (string name, HttpContext context, UserSecretStore secrets, AuditLog audit, CancellationToken ct) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
-    try { return await secrets.DeleteAsync(name, ct) ? Results.Ok(new { status = "removed" }) : Results.NotFound(); }
+    try
+    {
+        var removed = await secrets.DeleteAsync(name, ct);
+        if (removed) await audit.WriteAsync("secret.manage", name, "removed", ct);
+        return removed ? Results.Ok(new { status = "removed" }) : Results.NotFound();
+    }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
 });
 
@@ -128,3 +182,4 @@ static bool IsLoopback(HttpContext context) { var remote = context.Connection.Re
 
 public sealed record SecretUpdate(string Name, string Value, string? Description, CredentialKind Kind = CredentialKind.Password,
     IReadOnlyCollection<string>? AllowedTools = null);
+public sealed record ShellInput(string? Text, bool Submit = true);
