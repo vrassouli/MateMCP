@@ -18,10 +18,9 @@ There are no Agent tokens to copy and no shared admin account in the normal user
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-macos.sh | bash
-matemcp
 ```
 
-The private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; enrolled Agent credentials are stored in macOS Keychain. Local approvals and project management are available from the loopback-only Agent UI.
+The bootstrap downloads the current stable package from the `agent-latest` GitHub Release, installs a per-user LaunchAgent, and starts it immediately. It also starts automatically on future sign-ins. The private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; enrolled Agent credentials and user-managed secrets are stored in macOS Keychain. Local approvals, secret management, credential audit, and project management are available at `http://127.0.0.1:45871/ui`.
 
 ## Windows Agent
 
@@ -33,7 +32,9 @@ irm https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-w
 
 The bootstrap script detects Windows architecture automatically (`win-x64` or `win-arm64`), downloads the current stable Agent package from the `agent-latest` GitHub Release, extracts it to a temporary directory, and runs the packaged installer. No manual ZIP download or extraction is required.
 
-The private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials are stored in Windows Credential Manager. The installer preserves configuration and credentials during normal upgrades so the enrolled device identity remains stable.
+The installer starts the Agent immediately and creates a per-user startup shortcut for future sign-ins. The private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials are stored in Windows Credential Manager. The installer preserves configuration and credentials during normal upgrades so the enrolled device identity remains stable.
+
+The supported Agent capability matrix and the checklist for keeping platforms aligned are documented in [`docs/agent-feature-parity.md`](docs/agent-feature-parity.md).
 
 ## API / Control Plane
 

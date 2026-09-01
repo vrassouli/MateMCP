@@ -33,6 +33,7 @@ Validation should match the affected surface. Examples:
 - API/Control Plane code: build/test API, confirm API image publication, and exercise affected endpoints or dashboard behavior.
 - Cross-component protocol changes: verify both sides together rather than validating each side only in isolation.
 - Installer/update changes: test the actual one-line install/update path on the affected platform when practical.
+- Agent feature changes: apply the checklist in `agent-feature-parity.md` and verify both macOS and Windows jobs unless a documented platform limitation applies.
 
 A green local build is not a substitute for relevant CI when CI exists.
 
