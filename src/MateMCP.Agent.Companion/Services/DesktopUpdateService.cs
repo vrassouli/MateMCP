@@ -10,8 +10,8 @@ public sealed class DesktopUpdateService : IDisposable
     private const string ReleaseApi = "https://api.github.com/repos/vrassouli/MateMCP/releases/tags/agent-latest";
     private const string WindowsBootstrap = "https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-windows.ps1";
     private const string MacBootstrap = "https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-macos.sh";
-    private const string InstalledAssetPreference = "matemcp.desktop.installed-asset-id";
     private const string AutoUpdatePreference = "matemcp.desktop.auto-update";
+    private const string MarkerFileName = ".desktop-release-asset";
 
     private readonly HttpClient _http = new()
     {
@@ -41,12 +41,15 @@ public sealed class DesktopUpdateService : IDisposable
         if (asset is null)
             return new DesktopUpdateStatus(true, false, null, null, $"Release asset {assetName} is not available.");
 
-        var installedAssetId = Preferences.Default.Get(InstalledAssetPreference, 0L);
+        var markerPath = GetMarkerPath();
+        var installedAssetId = ReadInstalledAssetId(markerPath);
         if (installedAssetId == 0)
         {
-            // First launch after introducing update tracking: treat the currently
-            // installed public release as the baseline instead of reinstalling it.
-            Preferences.Default.Set(InstalledAssetPreference, asset.Id);
+            // First launch after introducing update tracking: the Companion being
+            // executed came from the current public Desktop package, so establish
+            // that release asset as the baseline without reinstalling it.
+            Directory.CreateDirectory(Path.GetDirectoryName(markerPath)!);
+            File.WriteAllText(markerPath, asset.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
             installedAssetId = asset.Id;
         }
 
@@ -61,15 +64,12 @@ public sealed class DesktopUpdateService : IDisposable
     public void BeginUpdate(long assetId)
     {
         if (assetId <= 0) throw new ArgumentOutOfRangeException(nameof(assetId));
-
-        // Record the target before handing off. The official bootstrap relaunches
-        // the updated Companion. If installation fails, the user can still use
-        // Check for updates after the next release or clear app preferences.
-        Preferences.Default.Set(InstalledAssetPreference, assetId);
+        var markerPath = GetMarkerPath();
 
         if (OperatingSystem.IsWindows())
         {
-            var script = $"$ErrorActionPreference='Stop'; Start-Sleep -Seconds 2; irm '{WindowsBootstrap}' | iex";
+            var escapedMarker = markerPath.Replace("'", "''", StringComparison.Ordinal);
+            var script = $"$ErrorActionPreference='Stop'; Start-Sleep -Seconds 2; irm '{WindowsBootstrap}' | iex; [IO.File]::WriteAllText('{escapedMarker}','{assetId}')";
             Process.Start(new ProcessStartInfo("powershell.exe")
             {
                 UseShellExecute = true,
@@ -81,7 +81,8 @@ public sealed class DesktopUpdateService : IDisposable
 
         if (OperatingSystem.IsMacCatalyst() || OperatingSystem.IsMacOS())
         {
-            var command = $"sleep 2; curl -fsSL '{MacBootstrap}' | /bin/bash >/tmp/matemcp-update.log 2>&1";
+            var escapedMarker = markerPath.Replace("'", "'\"'\"'", StringComparison.Ordinal);
+            var command = $"sleep 2; if curl -fsSL '{MacBootstrap}' | /bin/bash >/tmp/matemcp-update.log 2>&1; then printf '%s' '{assetId}' > '{escapedMarker}'; fi";
             Process.Start(new ProcessStartInfo("/bin/sh")
             {
                 UseShellExecute = false,
@@ -92,6 +93,27 @@ public sealed class DesktopUpdateService : IDisposable
         }
 
         throw new PlatformNotSupportedException("MateMCP Desktop self-update is supported on Windows and macOS.");
+    }
+
+    private static long ReadInstalledAssetId(string markerPath)
+    {
+        try
+        {
+            return File.Exists(markerPath) && long.TryParse(File.ReadAllText(markerPath).Trim(), out var value) ? value : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static string GetMarkerPath()
+    {
+        if (OperatingSystem.IsWindows())
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MateMCP", MarkerFileName);
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, "Library", "Application Support", "MateMCP", MarkerFileName);
     }
 
     private static string? GetAssetName()
