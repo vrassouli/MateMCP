@@ -5,6 +5,7 @@ using MateMCP.Agent.Desktop;
 using MateMCP.Agent.Projects;
 using MateMCP.Agent.Relay;
 using MateMCP.Agent.Security;
+using MateMCP.Agent.Tools;
 using Microsoft.AspNetCore.RateLimiting;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
@@ -31,6 +32,8 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 
 builder.Services.AddSingleton(credentialStore);
 builder.Services.AddSingleton(new LocalAccessCredential(localAccessToken));
+builder.Services.AddSingleton<UserSecretStore>();
+builder.Services.AddSingleton<InteractiveShellSessionManager>();
 builder.Services.AddSingleton<ProjectRegistry>();
 builder.Services.AddSingleton<ProjectConfigurationService>();
 builder.Services.AddSingleton<AuditLog>();
@@ -87,7 +90,28 @@ app.MapDelete("/projects/{name}", (string name, HttpContext context, ProjectConf
     if (!IsLoopback(context)) return Results.NotFound(); return projects.Remove(name) ? Results.Ok(new { status = "removed" }) : Results.NotFound();
 });
 
+app.MapGet("/secrets", async (HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try { return Results.Ok(await secrets.ListAsync(ct)); }
+    catch (PlatformNotSupportedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status501NotImplemented); }
+});
+app.MapPost("/secrets", async (SecretUpdate update, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try { await secrets.SaveAsync(update.Name, update.Value, update.Description, ct); return Results.Ok(new { update.Name }); }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
+});
+app.MapDelete("/secrets/{name}", async (string name, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try { return await secrets.DeleteAsync(name, ct) ? Results.Ok(new { status = "removed" }) : Results.NotFound(); }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
+});
+
 app.MapMcp("/mcp").RequireRateLimiting("mcp");
 app.Run();
 
 static bool IsLoopback(HttpContext context) { var remote = context.Connection.RemoteIpAddress; return remote is not null && IPAddress.IsLoopback(remote); }
+
+public sealed record SecretUpdate(string Name, string Value, string? Description);
