@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [ main, 'feat/**', 'fix/**' ]
+    branches: [ main ]
     tags: [ 'v*' ]
     paths:
       - 'src/MateMCP.Agent/**'
@@ -32,6 +32,10 @@ on:
       - 'MateMCP.slnx'
       - '.github/workflows/build.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write

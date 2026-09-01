@@ -56,8 +56,6 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
             connection = null;
             session.StartReader();
-            // Once the process is registered, do not let cancellation of this small warm-up delay
-            // strand an already-live session while releasing its slot in the catch block.
             await Task.Delay(150, CancellationToken.None);
             return session.Snapshot(0);
         }
@@ -67,6 +65,16 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             _sessionSlots.Release();
             throw;
         }
+    }
+
+    public IReadOnlyList<ShellSessionSnapshot> List()
+    {
+        ThrowIfDisposed();
+        CleanupExpired();
+        return _sessions.Values
+            .Select(session => session.Snapshot(0, touch: false))
+            .OrderByDescending(snapshot => snapshot.LastTouched)
+            .ToArray();
     }
 
     public ShellSessionSnapshot Read(string sessionId, int offset)
@@ -185,9 +193,6 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             session.Dispose();
             _sessionSlots.Release();
         }
-        // Do not dispose _sessionSlots: a timer callback that began immediately before disposal may
-        // still complete a final Release. The semaphore owns no unmanaged resource, and leaving it
-        // undisposed avoids a shutdown race without leaking processes or sessions.
         return ValueTask.CompletedTask;
     }
 
@@ -237,11 +242,11 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         public void Touch() => LastTouched = DateTimeOffset.UtcNow;
         public void StartReader() => _ = Task.Run(ReadLoopAsync);
 
-        public ShellSessionSnapshot Snapshot(int absoluteOffset)
+        public ShellSessionSnapshot Snapshot(int absoluteOffset, bool touch = true)
         {
             lock (_sync)
             {
-                Touch();
+                if (touch) Touch();
                 var truncated = absoluteOffset < _trimmedChars;
                 var start = Math.Clamp(absoluteOffset - _trimmedChars, 0, _output.Length);
                 var chunk = _output.ToString(start, _output.Length - start);
