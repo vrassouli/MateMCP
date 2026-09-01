@@ -69,9 +69,18 @@ jobs:
         run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-maccatalyst -r maccatalyst-arm64 --no-restore
       - name: Publish Agent
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r osx-arm64 --self-contained true -o package/agent-payload
-      - name: Publish Mac Catalyst Companion
-        run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-maccatalyst -r maccatalyst-arm64 --self-contained true --no-restore -o package/companion-payload
-      - name: Build unified macOS archive
+      - name: Publish Mac Catalyst Companion app bundle
+        run: |
+          dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj \
+            -c Release -f net10.0-maccatalyst -r maccatalyst-arm64 \
+            --self-contained true -p:CreatePackage=false --no-restore
+          mkdir -p package/companion-payload
+          APP_BUNDLE="$(find src/MateMCP.Agent.Companion/bin/Release/net10.0-maccatalyst/maccatalyst-arm64 -type d -name '*.app' -print -quit)"
+          test -n "$APP_BUNDLE"
+          codesign --force --deep --sign - "$APP_BUNDLE"
+          codesign --verify --deep --strict "$APP_BUNDLE"
+          cp -R "$APP_BUNDLE" package/companion-payload/
+      - name: Stage unified macOS package
         run: |
           test -x package/agent-payload/MateMCP.Agent
           find package/companion-payload -maxdepth 1 -type d -name '*.app' | grep -q .
@@ -82,7 +91,16 @@ jobs:
           cp scripts/install-desktop-macos.sh package/install-desktop-macos.sh
           cp scripts/uninstall-desktop-macos.sh package/uninstall-desktop-macos.sh
           chmod +x package/*.sh package/agent-payload/MateMCP.Agent
-          tar -czf MateMCP-Desktop-macos-arm64.tar.gz -C package .
+      - name: Smoke test unified macOS installer
+        run: |
+          package/install-desktop-macos.sh --no-start
+          test -x "$HOME/.local/share/matemcp/MateMCP.Agent"
+          test -d "$HOME/Applications/MateMCP Agent Companion.app"
+          "$HOME/Library/Application Support/MateMCP/uninstall-desktop-macos.sh"
+          test ! -e "$HOME/.local/share/matemcp/MateMCP.Agent"
+          test ! -e "$HOME/Applications/MateMCP Agent Companion.app"
+      - name: Build unified macOS archive
+        run: tar -czf MateMCP-Desktop-macos-arm64.tar.gz -C package .
       - uses: actions/upload-artifact@v4
         with:
           name: MateMCP-Desktop-macos-arm64
@@ -104,8 +122,8 @@ jobs:
       - name: Publish Agent
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r win-x64 --self-contained true -o package/agent-payload
       - name: Publish Windows Companion
-        run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --self-contained true -p:WindowsPackageType=None --no-restore -o package/companion-payload
-      - name: Build unified Windows archive
+        run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --self-contained true -p:WindowsPackageType=None -p:PublishReadyToRun=false --no-restore -o package/companion-payload
+      - name: Stage unified Windows package
         shell: pwsh
         run: |
           if (-not (Test-Path package/agent-payload/MateMCP.Agent.exe)) { throw 'Agent publish output missing.' }
@@ -116,7 +134,18 @@ jobs:
           Copy-Item scripts/uninstall-companion-windows.ps1 package/uninstall-companion-windows.ps1
           Copy-Item scripts/install-desktop-windows.ps1 package/install-desktop-windows.ps1
           Copy-Item scripts/uninstall-desktop-windows.ps1 package/uninstall-desktop-windows.ps1
-          Compress-Archive -Path package/* -DestinationPath MateMCP-Desktop-win-x64.zip -Force
+      - name: Smoke test unified Windows installer
+        shell: pwsh
+        run: |
+          & package/install-desktop-windows.ps1 -NoStart
+          $root = Join-Path $env:LOCALAPPDATA 'MateMCP'
+          if (-not (Test-Path (Join-Path $root 'MateMCP.Agent.exe'))) { throw 'Installed Agent missing.' }
+          if (-not (Test-Path (Join-Path $root 'Companion\MateMCP.Agent.Companion.exe'))) { throw 'Installed Companion missing.' }
+          & (Join-Path $root 'uninstall-desktop-windows.ps1')
+          if (Test-Path $root) { throw 'Unified uninstall left the installation root behind.' }
+      - name: Build unified Windows archive
+        shell: pwsh
+        run: Compress-Archive -Path package/* -DestinationPath MateMCP-Desktop-win-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
           name: MateMCP-Desktop-win-x64
