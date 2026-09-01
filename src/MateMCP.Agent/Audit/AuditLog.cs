@@ -29,8 +29,7 @@ public sealed class AuditLog
         CancellationToken cancellationToken = default)
         => await AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, "secret.use", target, result, credential, tool), cancellationToken);
 
-    public async Task<IReadOnlyList<AuditEntry>> ReadCredentialUsageAsync(int limit = 200,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<AuditEntry>> ReadAsync(int limit = 200, CancellationToken cancellationToken = default)
     {
         limit = Math.Clamp(limit, 1, 1000);
         await _gate.WaitAsync(cancellationToken);
@@ -43,7 +42,7 @@ public sealed class AuditLog
                 AuditEntry? entry;
                 try { entry = JsonSerializer.Deserialize<AuditEntry>(line); }
                 catch (JsonException) { continue; }
-                if (entry is null || !string.Equals(entry.Capability, "secret.use", StringComparison.Ordinal)) continue;
+                if (entry is null) continue;
                 if (entries.Count == limit) entries.Dequeue();
                 entries.Enqueue(entry);
             }
@@ -51,6 +50,13 @@ public sealed class AuditLog
         }
         finally { _gate.Release(); }
     }
+
+    public async Task<IReadOnlyList<AuditEntry>> ReadCredentialUsageAsync(int limit = 200,
+        CancellationToken cancellationToken = default)
+        => (await ReadAsync(Math.Clamp(limit * 5, limit, 1000), cancellationToken))
+            .Where(x => string.Equals(x.Capability, "secret.use", StringComparison.Ordinal))
+            .Take(limit)
+            .ToArray();
 
     private async Task AppendAsync(AuditEntry entry, CancellationToken cancellationToken)
     {
