@@ -59,6 +59,7 @@
                 <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ShellSessions.Count)</div></div>
                 <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div></div>
             </div>
+            <DesktopUpdatePanel />
             @if (Status is not null)
             {
                 <div class="panel">
