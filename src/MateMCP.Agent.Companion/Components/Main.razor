@@ -1,10 +1,316 @@
-@page "/"
+@implements IAsyncDisposable
+@inject AgentApiClient Api
 
-<FluentCard>
-    <h1>MateMCP Agent Companion</h1>
-    <FluentStack Orientation="Orientation.Vertical">
-        <FluentLabel>Agent Status: Initializing</FluentLabel>
-        <FluentLabel>Connection: Local API pending</FluentLabel>
-        <FluentLabel>Pending Approvals: 0</FluentLabel>
-    </FluentStack>
-</FluentCard>
+<div class="shell">
+    <aside class="sidebar">
+        <div class="brand">MateMCP Agent</div>
+        <nav class="nav">
+            <button class="@(Section == "dashboard" ? "active" : null)" @onclick='() => Section = "dashboard"'>Dashboard</button>
+            <button class="@(Section == "approvals" ? "active" : null)" @onclick='() => Section = "approvals"'>Approvals (@Approvals.Count)</button>
+            <button class="@(Section == "shell" ? "active" : null)" @onclick='() => Section = "shell"'>Shell</button>
+            <button class="@(Section == "secrets" ? "active" : null)" @onclick='() => Section = "secrets"'>Secrets</button>
+            <button class="@(Section == "audit" ? "active" : null)" @onclick='() => Section = "audit"'>Activity</button>
+        </nav>
+    </aside>
+
+    <main class="content">
+        <div class="toolbar">
+            <div>
+                <h1>@Title</h1>
+                <div class="muted">Local Agent management · Bluent UI</div>
+            </div>
+            <Button Text="Refresh" OnClick="RefreshAllAsync" />
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="error">@Error</div>
+        }
+
+        @if (Section == "dashboard")
+        {
+            <div class="grid">
+                <div class="panel"><div class="muted">Agent</div><div class="metric">@(Status is null ? "Offline" : "Online")</div><div>@Status?.Endpoint</div></div>
+                <div class="panel"><div class="muted">Pending approvals</div><div class="metric">@Approvals.Count</div></div>
+                <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ShellSessions.Count)</div></div>
+                <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? "Unavailable")</div></div>
+            </div>
+            @if (Status is not null)
+            {
+                <div class="panel">
+                    <strong>Connection</strong>
+                    <div class="row"><span class="muted">Relay</span><div>@(Status.Relay.Enabled ? Status.Relay.Url : "Disabled")</div></div>
+                    <div class="row"><span class="muted">Projects</span><div>@string.Join(", ", Status.Projects)</div></div>
+                    <div class="row"><span class="muted">Configuration</span><div>@Status.Configuration</div></div>
+                </div>
+            }
+        }
+        else if (Section == "approvals")
+        {
+            <div class="panel">
+                @if (Approvals.Count == 0)
+                {
+                    <div class="muted">No pending approval requests.</div>
+                }
+                else
+                {
+                    <div class="list">
+                        @foreach (var approval in Approvals)
+                        {
+                            <div class="row" @key="approval.Id">
+                                <strong>@approval.Capability</strong>
+                                <div>@approval.Target</div>
+                                <div class="muted">@approval.Summary</div>
+                                <div class="actions">
+                                    <Button Text="Approve" OnClick="() => DecideAsync(approval.Id, \"allow\")" />
+                                    <Button Text="Approve for session" OnClick="() => DecideAsync(approval.Id, \"allow-session\")" />
+                                    <Button Text="Always allow" OnClick="() => DecideAsync(approval.Id, \"allow-always\")" />
+                                    <Button Text="Deny" OnClick="() => DecideAsync(approval.Id, \"deny\")" />
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (Section == "shell")
+        {
+            <div class="session-layout">
+                <div class="panel">
+                    <strong>Sessions</strong>
+                    @if (ShellSessions.Count == 0)
+                    {
+                        <div class="muted" style="margin-top:10px">No active interactive sessions.</div>
+                    }
+                    @foreach (var session in ShellSessions)
+                    {
+                        <div class="session-item @(SelectedSessionId == session.SessionId ? "active" : null)" @onclick="() => SelectShellAsync(session.SessionId)" @key="session.SessionId">
+                            <strong>@session.SessionId[..Math.Min(8, session.SessionId.Length)]</strong>
+                            <div class="muted">PID @session.ProcessId · @(session.Exited ? $"Exited {session.ExitCode}" : "Running")</div>
+                            <div class="muted">@session.WorkingDirectory</div>
+                        </div>
+                    }
+                </div>
+                <div class="panel">
+                    @if (SelectedSessionId is null)
+                    {
+                        <div class="muted">Select a session to inspect its live output.</div>
+                    }
+                    else
+                    {
+                        <div class="terminal">@ShellOutput</div>
+                        <div class="field" style="margin-top:12px">
+                            <label>Input</label>
+                            <input @bind="ShellInput" @onkeydown="HandleShellKeyDown" placeholder="Send input to the running process" />
+                        </div>
+                        <div class="actions">
+                            <Button Text="Send" OnClick="SendShellInputAsync" />
+                            <Button Text="Terminate" OnClick="CloseSelectedShellAsync" />
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (Section == "secrets")
+        {
+            <div class="grid">
+                <div class="panel">
+                    <strong>Add / replace secret</strong>
+                    <div class="field"><label>Name</label><input @bind="SecretName" autocomplete="off" /></div>
+                    <div class="field"><label>Description</label><input @bind="SecretDescription" /></div>
+                    <div class="field"><label>Secret value</label><input type="password" @bind="SecretValue" autocomplete="new-password" /></div>
+                    <div class="field"><label>Allowed tools (comma separated)</label><input @bind="SecretAllowedTools" placeholder="shell_session_send_secret" /></div>
+                    <Button Text="Save secret" OnClick="SaveSecretAsync" />
+                    <div class="muted" style="margin-top:10px">Secret values are sent only to the loopback Agent API and are never read back or shown in this UI.</div>
+                </div>
+                <div class="panel">
+                    <strong>Stored secrets</strong>
+                    @if (Secrets.Count == 0)
+                    {
+                        <div class="muted" style="margin-top:10px">No stored secrets.</div>
+                    }
+                    @foreach (var secret in Secrets)
+                    {
+                        <div class="row" @key="secret.Name">
+                            <strong>@secret.Name</strong>
+                            <div>@secret.Description</div>
+                            <div class="muted">Allowed: @string.Join(", ", secret.AllowedTools ?? ["shell_session_send_secret"])</div>
+                            <div class="actions"><Button Text="Delete" OnClick="() => DeleteSecretAsync(secret.Name)" /></div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (Section == "audit")
+        {
+            <div class="panel">
+                @if (Audit.Count == 0)
+                {
+                    <div class="muted">No activity recorded yet.</div>
+                }
+                @foreach (var item in Audit)
+                {
+                    <div class="row">
+                        <strong>@item.Capability</strong>
+                        <span class="muted"> · @item.Timestamp.LocalDateTime</span>
+                        <div>@item.Target</div>
+                        <div class="muted">@item.Result@if (!string.IsNullOrWhiteSpace(item.Credential)) { <text> · credential: @item.Credential</text> }@if (!string.IsNullOrWhiteSpace(item.Tool)) { <text> · tool: @item.Tool</text> }</div>
+                    </div>
+                }
+            </div>
+        }
+    </main>
+</div>
+<Containers />
+
+@code {
+    private readonly CancellationTokenSource _disposeCts = new();
+    private Task? _pollTask;
+    private string Section { get; set; } = "dashboard";
+    private string? Error { get; set; }
+    private AgentStatus? Status { get; set; }
+    private IReadOnlyList<PendingApproval> Approvals { get; set; } = [];
+    private IReadOnlyList<UserSecretInfo> Secrets { get; set; } = [];
+    private IReadOnlyList<ShellSessionSnapshot> ShellSessions { get; set; } = [];
+    private IReadOnlyList<AuditEntry> Audit { get; set; } = [];
+    private string? SelectedSessionId { get; set; }
+    private int ShellOffset { get; set; }
+    private string ShellOutput { get; set; } = string.Empty;
+    private string ShellInput { get; set; } = string.Empty;
+    private string SecretName { get; set; } = string.Empty;
+    private string SecretDescription { get; set; } = string.Empty;
+    private string SecretValue { get; set; } = string.Empty;
+    private string SecretAllowedTools { get; set; } = "shell_session_send_secret";
+
+    private string Title => Section switch
+    {
+        "approvals" => "Approval Center",
+        "shell" => "Interactive Shell",
+        "secrets" => "Secret Manager",
+        "audit" => "Activity & Audit",
+        _ => "Dashboard"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAllAsync();
+        _pollTask = PollAsync(_disposeCts.Token);
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        try
+        {
+            Status = await Api.GetStatusAsync(_disposeCts.Token);
+            Approvals = await Api.GetApprovalsAsync(_disposeCts.Token);
+            Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
+            ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
+            Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
+            Error = null;
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex) { Error = $"Agent unavailable: {ex.Message}"; }
+    }
+
+    private async Task RefreshDynamicAsync()
+    {
+        try
+        {
+            Status = await Api.GetStatusAsync(_disposeCts.Token);
+            Approvals = await Api.GetApprovalsAsync(_disposeCts.Token);
+            ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
+            if (SelectedSessionId is not null)
+            {
+                var snapshot = await Api.ReadShellSessionAsync(SelectedSessionId, ShellOffset, _disposeCts.Token);
+                if (snapshot is not null)
+                {
+                    if (snapshot.OutputTruncated) ShellOutput += "\n[older output truncated]\n";
+                    ShellOutput += snapshot.Output;
+                    ShellOffset = snapshot.NextOffset;
+                }
+            }
+            Error = null;
+        }
+        catch (KeyNotFoundException) { SelectedSessionId = null; ShellOutput = string.Empty; ShellOffset = 0; }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex) { Error = $"Agent unavailable: {ex.Message}"; }
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+                await InvokeAsync(async () => { await RefreshDynamicAsync(); StateHasChanged(); });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    private async Task DecideAsync(string id, string decision)
+    {
+        await Api.DecideApprovalAsync(id, decision, _disposeCts.Token);
+        Approvals = await Api.GetApprovalsAsync(_disposeCts.Token);
+        Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
+    }
+
+    private async Task SelectShellAsync(string id)
+    {
+        SelectedSessionId = id;
+        ShellOffset = 0;
+        ShellOutput = string.Empty;
+        var snapshot = await Api.ReadShellSessionAsync(id, 0, _disposeCts.Token);
+        if (snapshot is null) return;
+        ShellOutput = snapshot.Output;
+        ShellOffset = snapshot.NextOffset;
+    }
+
+    private async Task SendShellInputAsync()
+    {
+        if (SelectedSessionId is null || string.IsNullOrEmpty(ShellInput)) return;
+        var input = ShellInput;
+        ShellInput = string.Empty;
+        await Api.SendShellInputAsync(SelectedSessionId, input, true, _disposeCts.Token);
+    }
+
+    private async Task HandleShellKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SendShellInputAsync();
+    }
+
+    private async Task CloseSelectedShellAsync()
+    {
+        if (SelectedSessionId is null) return;
+        await Api.CloseShellSessionAsync(SelectedSessionId, _disposeCts.Token);
+        SelectedSessionId = null;
+        ShellOutput = string.Empty;
+        ShellOffset = 0;
+        ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
+    }
+
+    private async Task SaveSecretAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SecretName) || string.IsNullOrEmpty(SecretValue)) return;
+        var allowed = SecretAllowedTools.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        await Api.SaveSecretAsync(SecretName.Trim(), SecretValue, string.IsNullOrWhiteSpace(SecretDescription) ? null : SecretDescription.Trim(), allowed, _disposeCts.Token);
+        SecretValue = string.Empty;
+        Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
+        Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
+    }
+
+    private async Task DeleteSecretAsync(string name)
+    {
+        await Api.DeleteSecretAsync(name, _disposeCts.Token);
+        Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposeCts.Cancel();
+        if (_pollTask is not null)
+        {
+            try { await _pollTask; } catch (OperationCanceledException) { }
+        }
+        _disposeCts.Dispose();
+    }
+}
