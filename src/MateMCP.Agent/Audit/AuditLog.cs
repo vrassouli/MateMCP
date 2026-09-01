@@ -7,7 +7,12 @@ public sealed record AuditEntry(DateTimeOffset Timestamp, string Capability, str
 public sealed class AuditLog
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly string _path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP", "audit.jsonl");
+    private readonly string _path;
+
+    public AuditLog(string? path = null)
+    {
+        _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP", "audit.jsonl");
+    }
 
     public async Task WriteAsync(string capability, string target, string result, CancellationToken cancellationToken = default)
     {
