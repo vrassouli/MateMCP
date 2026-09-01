@@ -13,7 +13,8 @@ if (-not (Test-Path $AgentInstaller)) { throw "Agent installer not found: $Agent
 if (-not (Test-Path $CompanionInstaller)) { throw "Companion installer not found: $CompanionInstaller" }
 
 # Agent installation intentionally runs first because it refreshes %LOCALAPPDATA%\MateMCP.
-& $AgentInstaller -Source $AgentPayload -NoStart
+# -AgentOnly prevents install-windows.ps1 from delegating back to this Desktop wrapper.
+& $AgentInstaller -Source $AgentPayload -NoStart -AgentOnly
 & $CompanionInstaller -Source $CompanionPayload -NoStart
 
 $InstalledRoot = Join-Path $env:LOCALAPPDATA 'MateMCP'
