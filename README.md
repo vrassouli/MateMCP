@@ -16,7 +16,7 @@ There are no Agent tokens to copy and no shared admin account in the normal user
 
 ## Install / upgrade on macOS
 
-For Apple Silicon Macs, this single command downloads the latest stable MateMCP Desktop package, extracts it, upgrades any existing Agent installation, installs the native Companion, starts both components, and cleans up the temporary files:
+For Apple Silicon Macs, this single command downloads the latest stable MateMCP Desktop package, extracts it, upgrades any existing Agent installation, installs the native Companion, starts the Agent, opens Companion for the interactive install, and cleans up the temporary files:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-macos.sh | bash
@@ -31,7 +31,9 @@ Prefer a manual download instead? Use the stable Desktop asset:
 
 After extracting the archive, run `./install-macos.sh`. In a Desktop package that entry point installs **both Agent + Companion**. The lower-level Agent installer automatically delegates to the Desktop installer when the Companion payload is present.
 
-The Agent starts as a per-user LaunchAgent. The native Companion is installed in `~/Applications/MateMCP Agent Companion.app` and also starts automatically when you sign in. Private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; enrolled Agent credentials and user-managed secrets are stored in macOS Keychain.
+The Agent runs in the background as a per-user LaunchAgent. The native Companion is installed in `~/Applications/MateMCP Agent Companion.app` but does **not** automatically open after future sign-ins. Open it when you want to manage the Agent, approvals, secrets, interactive sessions, or updates. Private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; enrolled Agent credentials and user-managed secrets are stored in macOS Keychain.
+
+From Companion you can monitor whether the Agent is running and Start, Stop, or Restart it without using Terminal. On Apple Silicon, Companion also checks the moving `agent-latest` Desktop release in the background, provides **Check for updates** / **Update now**, and has an opt-in **Auto Update** mode. Desktop updates always upgrade Agent + Companion together through the same official bootstrap installer.
 
 Intel Macs continue to receive the Agent-only package through the same bootstrap command until the native Companion is published for Intel Mac.
 
@@ -43,7 +45,7 @@ Run this from PowerShell:
 irm https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-windows.ps1 | iex
 ```
 
-On Windows x64, the bootstrap automatically downloads the latest stable **MateMCP Desktop (Agent + Companion)** package, extracts it to a temporary directory, upgrades the existing installation in place, starts Agent + Companion, and removes the downloaded temporary files. No manual ZIP download, extraction, or previous-version uninstall is required.
+On Windows x64, the bootstrap automatically downloads the latest stable **MateMCP Desktop (Agent + Companion)** package, extracts it to a temporary directory, upgrades the existing installation in place, starts the background Agent and opens Companion for the interactive install, and removes the downloaded temporary files. No manual ZIP download, extraction, or previous-version uninstall is required.
 
 Prefer a manual download instead? Use the stable Desktop asset:
 
@@ -58,7 +60,9 @@ After extracting the ZIP, run:
 
 In a Desktop package that entry point installs **both Agent + Companion**. You do not need to choose between component-specific scripts.
 
-The Agent and Companion create per-user startup entries for future sign-ins. Private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials and user-managed secrets are stored in Windows Credential Manager. Normal upgrades preserve configuration, credentials, and enrolled device identity.
+The Agent starts at sign-in as a hidden per-user background process while the existing user-scoped Windows Credential Manager security model is retained. A migration to a real Windows Service is tracked separately. Companion does **not** auto-open at sign-in; use its **MateMCP Agent Companion** Start Menu shortcut when you want the UI. Private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials and user-managed secrets are stored in Windows Credential Manager. Normal upgrades preserve configuration, credentials, and enrolled device identity.
+
+From Companion you can monitor whether the Agent is running and Start, Stop, or Restart it without PowerShell. On Windows x64, Companion also checks the moving `agent-latest` Desktop release in the background, provides **Check for updates** / **Update now**, and has an opt-in **Auto Update** mode. Desktop updates always upgrade Agent + Companion together through the same official bootstrap installer.
 
 Windows ARM64 continues to receive the Agent-only package through the same bootstrap command until the native Companion package is published for that architecture.
 

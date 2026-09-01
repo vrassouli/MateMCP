@@ -105,6 +105,8 @@ jobs:
           package/install-desktop-macos.sh --no-start
           test -x "$HOME/.local/share/matemcp/MateMCP.Agent"
           test -d "$HOME/Applications/MateMCP Agent Companion.app"
+          test -f "$HOME/Library/LaunchAgents/com.matemcp.agent.plist"
+          test ! -e "$HOME/Library/LaunchAgents/com.matemcp.agent.companion.plist"
           "$HOME/Library/Application Support/MateMCP/uninstall-desktop-macos.sh"
           test ! -e "$HOME/.local/share/matemcp/MateMCP.Agent"
           test ! -e "$HOME/Applications/MateMCP Agent Companion.app"
@@ -151,10 +153,17 @@ jobs:
         run: |
           & package/install-desktop-windows.ps1 -NoStart
           $root = Join-Path $env:LOCALAPPDATA 'MateMCP'
+          $startup = [Environment]::GetFolderPath('Startup')
+          $programs = [Environment]::GetFolderPath('Programs')
           if (-not (Test-Path (Join-Path $root 'MateMCP.Agent.exe'))) { throw 'Installed Agent missing.' }
           if (-not (Test-Path (Join-Path $root 'Companion\MateMCP.Agent.Companion.exe'))) { throw 'Installed Companion missing.' }
+          if (-not (Test-Path (Join-Path $root 'start-agent-hidden.vbs'))) { throw 'Hidden Agent launcher missing.' }
+          if (-not (Test-Path (Join-Path $startup 'MateMCP Agent.lnk'))) { throw 'Background Agent startup shortcut missing.' }
+          if (Test-Path (Join-Path $startup 'MateMCP Agent Companion.lnk')) { throw 'Companion must not auto-start at sign-in.' }
+          if (-not (Test-Path (Join-Path $programs 'MateMCP Agent Companion.lnk'))) { throw 'Companion Start Menu shortcut missing.' }
           & (Join-Path $root 'uninstall-desktop-windows.ps1')
           if (Test-Path $root) { throw 'Unified uninstall left the installation root behind.' }
+          if (Test-Path (Join-Path $programs 'MateMCP Agent Companion.lnk')) { throw 'Companion Start Menu shortcut remained after uninstall.' }
       - name: Build unified Windows archive
         shell: pwsh
         run: Compress-Archive -Path package/* -DestinationPath MateMCP-Desktop-win-x64.zip -Force
@@ -229,6 +238,8 @@ jobs:
           bash scripts/bootstrap-macos.sh
           test -x "$HOME/.local/share/matemcp/MateMCP.Agent"
           test -d "$HOME/Applications/MateMCP Agent Companion.app"
+          test -f "$HOME/Library/LaunchAgents/com.matemcp.agent.plist"
+          test ! -e "$HOME/Library/LaunchAgents/com.matemcp.agent.companion.plist"
           "$HOME/Library/Application Support/MateMCP/uninstall-desktop-macos.sh"
       - name: Bootstrap install and uninstall on Windows
         if: matrix.platform == 'windows'
@@ -236,6 +247,12 @@ jobs:
         run: |
           & scripts/bootstrap-windows.ps1
           $root = Join-Path $env:LOCALAPPDATA 'MateMCP'
+          $startup = [Environment]::GetFolderPath('Startup')
+          $programs = [Environment]::GetFolderPath('Programs')
           if (-not (Test-Path (Join-Path $root 'MateMCP.Agent.exe'))) { throw 'Bootstrap did not install the Agent.' }
           if (-not (Test-Path (Join-Path $root 'Companion\MateMCP.Agent.Companion.exe'))) { throw 'Bootstrap did not install the Companion.' }
+          if (-not (Test-Path (Join-Path $root 'start-agent-hidden.vbs'))) { throw 'Bootstrap did not install the hidden Agent launcher.' }
+          if (-not (Test-Path (Join-Path $startup 'MateMCP Agent.lnk'))) { throw 'Bootstrap did not configure Agent background startup.' }
+          if (Test-Path (Join-Path $startup 'MateMCP Agent Companion.lnk')) { throw 'Bootstrap left Companion in Startup.' }
+          if (-not (Test-Path (Join-Path $programs 'MateMCP Agent Companion.lnk'))) { throw 'Bootstrap did not add Companion to Start Menu.' }
           & (Join-Path $root 'uninstall-desktop-windows.ps1')

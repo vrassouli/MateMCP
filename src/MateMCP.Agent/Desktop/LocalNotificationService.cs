@@ -3,9 +3,9 @@ using MateMCP.Agent.Security;
 namespace MateMCP.Agent.Desktop;
 
 /// <summary>
-/// Passive fallback notification owned by the background Agent.
-/// The Companion application provides actionable Approve/Deny buttons. This service intentionally
-/// never launches a browser and stays silent while the Companion process is running.
+/// Passive approval notification owned by the background Agent.
+/// The Companion can add richer actionable notifications when the platform/runtime supports them,
+/// but the Agent fallback must remain available so an approval is never silent.
 /// </summary>
 public sealed class LocalNotificationService(ILogger<LocalNotificationService> logger)
 {
@@ -13,7 +13,10 @@ public sealed class LocalNotificationService(ILogger<LocalNotificationService> l
     {
         try
         {
-            if (IsCompanionRunning())
+            // On macOS the Companion notification path is reliable while the Companion is open,
+            // so avoid duplicates there. On Windows the current self-contained Companion can lack
+            // Windows App SDK Singleton notification support, so always keep the Agent fallback.
+            if (OperatingSystem.IsMacOS() && IsCompanionRunning())
                 return;
 
             var title = "MateMCP approval required";

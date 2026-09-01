@@ -22,14 +22,16 @@ Copy-Item (Join-Path $PSScriptRoot 'uninstall-desktop-windows.ps1') (Join-Path $
 
 Write-Host ''
 Write-Host 'MateMCP Desktop installed/upgraded.'
-Write-Host 'Components: Agent + Agent Companion'
+Write-Host 'Components: background Agent + on-demand Agent Companion'
 Write-Host "Uninstall: powershell -ExecutionPolicy Bypass -File `"$InstalledRoot\uninstall-desktop-windows.ps1`""
 
 if (-not $NoStart) {
-    $AgentExe = Join-Path $InstalledRoot 'MateMCP.Agent.exe'
+    $HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
+    $WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
     $CompanionExe = Join-Path $InstalledRoot 'Companion\MateMCP.Agent.Companion.exe'
-    Start-Process -FilePath $AgentExe -WorkingDirectory $InstalledRoot
+    Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`""
     Start-Sleep -Milliseconds 750
     Start-Process -FilePath $CompanionExe -WorkingDirectory (Split-Path $CompanionExe)
-    Write-Host 'MateMCP Agent and Companion started.'
+    Write-Host 'MateMCP Agent started in the background; Companion opened for this install session.'
+    Write-Host 'Companion will not open automatically on future sign-ins.'
 }

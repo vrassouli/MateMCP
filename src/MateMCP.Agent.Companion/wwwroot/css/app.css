@@ -1,11 +1,11 @@
-html, body { margin: 0; min-height: 100%; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--neutral-layer-1, #f6f7f8); color: var(--neutral-foreground-rest, #202020); }
+html, body { margin: 0; min-height: 100%; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 15px; background: var(--neutral-layer-1, #f6f7f8); color: var(--neutral-foreground-rest, #202020); }
 * { box-sizing: border-box; }
 #app { min-height: 100vh; }
 .shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
 .sidebar { padding: 20px 14px; border-right: 1px solid rgba(0,0,0,.08); background: var(--neutral-layer-2, #fff); }
 .brand { font-size: 20px; font-weight: 700; margin: 4px 8px 24px; }
 .nav { display: grid; gap: 6px; }
-.nav button { width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 8px; cursor: pointer; }
+.nav button { width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 15px; line-height: 1.35; color: inherit; }
 .nav button.active, .nav button:hover { background: rgba(0,0,0,.06); }
 .content { padding: 24px; overflow: auto; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }
@@ -18,7 +18,12 @@ html, body { margin: 0; min-height: 100%; font-family: system-ui, -apple-system,
 .row { border-bottom: 1px solid rgba(0,0,0,.08); padding: 10px 0; }
 .row:last-child { border-bottom: 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+a.link { color: inherit; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.copy-note { margin-left: 8px; }
 input, textarea, select { width: 100%; padding: 9px 10px; border: 1px solid rgba(0,0,0,.18); border-radius: 7px; background: transparent; color: inherit; }
+.update-toggle-row { display: grid; gap: 6px; }
+.update-toggle { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.update-toggle input { width: auto; margin: 0; padding: 0; }
 .field { display: grid; gap: 6px; margin-bottom: 12px; }
 .terminal { background: #111; color: #ddd; padding: 14px; min-height: 320px; max-height: 60vh; overflow: auto; border-radius: 8px; white-space: pre-wrap; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .session-layout { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; gap: 14px; }
