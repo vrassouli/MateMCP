@@ -146,6 +146,43 @@ public sealed class InteractiveShellTests
     }
 
     [Fact]
+    public async Task Credential_tool_policy_is_enforced_before_approval_or_resolution()
+    {
+        await using var manager = CreateManager();
+        var started = await manager.StartAsync(WaitingCommand(), WorkingDirectory(), CancellationToken.None);
+        var approvals = new FakeApprovalService(ApprovalDecision.AllowOnce);
+        var store = new FakeCredentialStore("blocked", "never-resolve", []);
+        var tools = CreateTools(manager, store, approvals, NewAuditPath());
+
+        var exception = await Assert.ThrowsAsync<McpException>(
+            () => tools.SendSecret(started.SessionId, "blocked", true, CancellationToken.None));
+
+        Assert.Contains("not authorized", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, approvals.Calls);
+        Assert.Equal(0, store.ResolveCalls);
+    }
+
+    [Fact]
+    public async Task Excessive_credential_attempts_are_rate_limited_and_audited()
+    {
+        var auditPath = NewAuditPath();
+        await using var manager = CreateManager();
+        var started = await manager.StartAsync(WaitingCommand(), WorkingDirectory(), CancellationToken.None);
+        var approvals = new FakeApprovalService(ApprovalDecision.Deny);
+        var tools = CreateTools(manager, new FakeCredentialStore("limited", "unused"), approvals, auditPath, maxAttempts: 2);
+
+        await Assert.ThrowsAsync<McpException>(() => tools.SendSecret(started.SessionId, "limited", true));
+        await Assert.ThrowsAsync<McpException>(() => tools.SendSecret(started.SessionId, "limited", true));
+        var exception = await Assert.ThrowsAsync<McpException>(() => tools.SendSecret(started.SessionId, "limited", true));
+        var entries = await new AuditLog(auditPath).ReadCredentialUsageAsync();
+
+        Assert.Contains("rate limit", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, approvals.Calls);
+        Assert.Contains(entries, x => x.Credential == "limited" &&
+            x.Tool == UserSecretInfo.ShellSessionSendSecretTool && x.Result == "denied:rate-limit");
+    }
+
+    [Fact]
     public async Task Output_buffer_is_bounded_and_reports_truncation()
     {
         await using var manager = CreateManager(maxOutputChars: 4096);
@@ -172,11 +209,18 @@ public sealed class InteractiveShellTests
         return new InteractiveShellSessionManager(Options.Create(options));
     }
 
-    private static InteractiveShellTools CreateTools(InteractiveShellSessionManager manager, ICredentialStore credentials, IApprovalService approvals, string auditPath)
+    private static InteractiveShellTools CreateTools(InteractiveShellSessionManager manager, ICredentialStore credentials,
+        IApprovalService approvals, string auditPath, int maxAttempts = 5)
     {
-        var options = new MateOptions { RequireShellApproval = false };
+        var options = new MateOptions
+        {
+            RequireShellApproval = false,
+            InteractiveShell = new InteractiveShellOptions { SecretInjectionMaxAttempts = maxAttempts }
+        };
         var registry = new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options));
-        return new InteractiveShellTools(registry, new AuditLog(auditPath), approvals, Options.Create(options), manager, credentials);
+        var optionWrapper = Options.Create(options);
+        return new InteractiveShellTools(registry, new AuditLog(auditPath), approvals, optionWrapper, manager, credentials,
+            new CredentialInjectionRateLimiter(optionWrapper));
     }
 
     private static async Task<ShellSessionSnapshot> WaitForAsync(InteractiveShellSessionManager manager, string sessionId, int offset, Func<ShellSessionSnapshot, bool> predicate)
@@ -234,15 +278,23 @@ public sealed class InteractiveShellTests
         private readonly UserSecretInfo[] _items;
         private readonly string? _value;
 
-        public FakeCredentialStore(string? name = null, string? value = null)
+        public FakeCredentialStore(string? name = null, string? value = null, IReadOnlyList<string>? allowedTools = null)
         {
             _value = value;
-            _items = name is null ? [] : [new UserSecretInfo(name, "test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, CredentialKind.Password)];
+            _items = name is null ? [] : [new UserSecretInfo(name, "test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                CredentialKind.Password, allowedTools)];
         }
 
+        public int ResolveCalls { get; private set; }
+
         public Task<IReadOnlyList<UserSecretInfo>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<UserSecretInfo>>(_items);
-        public Task SaveAsync(string name, string value, string? description, CredentialKind kind, CancellationToken ct) => throw new NotSupportedException();
-        public Task<string?> ResolveAsync(string name, CancellationToken ct) => Task.FromResult(_value);
+        public Task SaveAsync(string name, string value, string? description, CredentialKind kind,
+            IReadOnlyCollection<string>? allowedTools, CancellationToken ct) => throw new NotSupportedException();
+        public Task<string?> ResolveAsync(string name, CancellationToken ct)
+        {
+            ResolveCalls++;
+            return Task.FromResult(_value);
+        }
         public Task<bool> DeleteAsync(string name, CancellationToken ct) => throw new NotSupportedException();
     }
 
