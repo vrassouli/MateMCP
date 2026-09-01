@@ -9,9 +9,11 @@ public sealed class AuditLog
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path;
 
-    public AuditLog(string? path = null)
+    public AuditLog() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP", "audit.jsonl")) { }
+
+    public AuditLog(string path)
     {
-        _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP", "audit.jsonl");
+        _path = path;
     }
 
     public async Task WriteAsync(string capability, string target, string result, CancellationToken cancellationToken = default)
