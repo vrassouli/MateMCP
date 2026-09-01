@@ -1,0 +1,109 @@
+@implements IAsyncDisposable
+@inject DesktopUpdateService Updates
+
+<div class="panel">
+    <strong>Desktop updates</strong>
+    <div class="row">
+        <span class="muted">Status</span>
+        <div>@StatusText</div>
+        @if (UpdateStatus?.UpdatedAt is { } updatedAt)
+        {
+            <div class="muted">Latest package: @updatedAt.LocalDateTime</div>
+        }
+    </div>
+    <div class="row update-toggle-row">
+        <label class="update-toggle">
+            <input type="checkbox" checked="@AutoUpdateEnabled" @onchange="SetAutoUpdate" />
+            <span>Automatically install new Desktop builds while Companion is running</span>
+        </label>
+        <div class="muted">Auto Update is opt-in. Agent and Companion are upgraded together using the official MateMCP bootstrap installer.</div>
+    </div>
+    <div class="actions">
+        <Button Text="Check for updates" OnClick="CheckNowAsync" />
+        @if (UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
+        {
+            <Button Text="Update now" OnClick="() => BeginUpdate(assetId)" />
+        }
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="error">@Error</div>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private Task? _worker;
+    private DesktopUpdateStatus? UpdateStatus { get; set; }
+    private string? Error { get; set; }
+    private bool Checking { get; set; }
+    private bool AutoUpdateEnabled { get; set; }
+
+    private string StatusText => Checking
+        ? "Checking..."
+        : UpdateStatus?.Message ?? "Not checked yet.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        AutoUpdateEnabled = Updates.AutoUpdateEnabled;
+        await CheckNowAsync();
+        _worker = RunPeriodicChecksAsync(_cts.Token);
+    }
+
+    private async Task CheckNowAsync()
+    {
+        if (Checking) return;
+        Checking = true;
+        Error = null;
+        try
+        {
+            UpdateStatus = await Updates.CheckAsync(_cts.Token);
+            if (AutoUpdateEnabled && UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
+                BeginUpdate(assetId);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Update check failed: {ex.Message}";
+        }
+        finally
+        {
+            Checking = false;
+        }
+    }
+
+    private void SetAutoUpdate(ChangeEventArgs args)
+    {
+        AutoUpdateEnabled = args.Value is bool value && value;
+        Updates.AutoUpdateEnabled = AutoUpdateEnabled;
+        if (AutoUpdateEnabled && UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
+            BeginUpdate(assetId);
+    }
+
+    private void BeginUpdate(long assetId)
+    {
+        Error = null;
+        Updates.BeginUpdate(assetId);
+    }
+
+    private async Task RunPeriodicChecksAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(30));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+                await InvokeAsync(async () => { await CheckNowAsync(); StateHasChanged(); });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_worker is not null)
+        {
+            try { await _worker; } catch (OperationCanceledException) { }
+        }
+        _cts.Dispose();
+    }
+}
