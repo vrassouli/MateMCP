@@ -30,7 +30,7 @@
         @if (Section == "dashboard")
         {
             <div class="grid">
-                <div class="panel"><div class="muted">Agent</div><div class="metric">@(Status is null ? "Offline" : "Online")</div><div>@Status?.Endpoint</div></div>
+                <div class="panel"><div class="muted">Agent</div><div class="metric">@(Status is null ? "Offline" : "Online")</div><div class="muted">Local background service endpoint</div></div>
                 <div class="panel"><div class="muted">Pending approvals</div><div class="metric">@Approvals.Count</div></div>
                 <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ShellSessions.Count)</div></div>
                 <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? "Unavailable")</div></div>
@@ -39,7 +39,41 @@
             {
                 <div class="panel">
                     <strong>Connection</strong>
-                    <div class="row"><span class="muted">Relay</span><div>@(Status.Relay.Enabled ? Status.Relay.Url : "Disabled")</div></div>
+                    <div class="row">
+                        <span class="muted">MateMCP API</span>
+                        <div><a class="link" href="@ControlPlaneUrl" target="_blank" rel="noopener noreferrer">@ControlPlaneUrl</a></div>
+                    </div>
+                    <div class="row">
+                        <span class="muted">Relay</span>
+                        @if (Status.Relay.Enabled)
+                        {
+                            <div><a class="link" href="@Status.Relay.Url" target="_blank" rel="noopener noreferrer">@Status.Relay.Url</a></div>
+                        }
+                        else
+                        {
+                            <div>Disabled</div>
+                        }
+                    </div>
+                    <div class="row">
+                        <span class="muted">Device MCP URL</span>
+                        @if (DeviceMcpUrl is not null)
+                        {
+                            <div><a class="link" href="@DeviceMcpUrl" target="_blank" rel="noopener noreferrer">@DeviceMcpUrl</a></div>
+                            <div class="actions">
+                                <Button Text="Copy" OnClick="CopyDeviceMcpUrlAsync" />
+                                @if (DeviceUrlCopied)
+                                {
+                                    <span class="muted copy-note">Copied</span>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="muted">Available after this Agent is enrolled and connected to Relay.</div>
+                        }
+                    </div>
+                    <div class="row"><span class="muted">Device ID</span><div>@(Status.Relay.DeviceId ?? "Not enrolled")</div></div>
+                    <div class="row"><span class="muted">Local management</span><div><a class="link" href="@Status.Management" target="_blank" rel="noopener noreferrer">@Status.Management</a></div></div>
                     <div class="row"><span class="muted">Projects</span><div>@string.Join(", ", Status.Projects)</div></div>
                     <div class="row"><span class="muted">Configuration</span><div>@Status.Configuration</div></div>
                 </div>
@@ -164,6 +198,7 @@
 <Containers />
 
 @code {
+    private const string ControlPlaneUrl = "https://api.matemcp.com";
     private readonly CancellationTokenSource _disposeCts = new();
     private Task? _pollTask;
     private string Section { get; set; } = "dashboard";
@@ -181,6 +216,11 @@
     private string SecretDescription { get; set; } = string.Empty;
     private string SecretValue { get; set; } = string.Empty;
     private string SecretAllowedTools { get; set; } = "shell_session_send_secret";
+    private bool DeviceUrlCopied { get; set; }
+
+    private string? DeviceMcpUrl => Status?.Relay is { Enabled: true, Url: { Length: > 0 } relayUrl, DeviceId: { Length: > 0 } deviceId }
+        ? $"{relayUrl.TrimEnd('/')}/mcp/{Uri.EscapeDataString(deviceId)}"
+        : null;
 
     private string Title => Section switch
     {
@@ -206,6 +246,7 @@
             Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
             ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
             Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
+            DeviceUrlCopied = false;
             Error = null;
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
@@ -244,6 +285,13 @@
                 await InvokeAsync(async () => { await RefreshDynamicAsync(); StateHasChanged(); });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    private async Task CopyDeviceMcpUrlAsync()
+    {
+        if (DeviceMcpUrl is null) return;
+        await Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard.Default.SetTextAsync(DeviceMcpUrl);
+        DeviceUrlCopied = true;
     }
 
     private async Task DecideAsync(string id, string decision)
