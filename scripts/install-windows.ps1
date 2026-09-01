@@ -1,9 +1,28 @@
 param(
     [string]$Source = (Join-Path $PSScriptRoot 'payload'),
-    [switch]$NoStart
+    [switch]$NoStart,
+    [switch]$AgentOnly
 )
 
 $ErrorActionPreference = 'Stop'
+
+# In a unified Desktop package, install-windows.ps1 is the obvious entry point a
+# user will choose. Delegate to the Desktop installer unless this script is being
+# invoked internally for the Agent component only.
+$DesktopInstaller = Join-Path $PSScriptRoot 'install-desktop-windows.ps1'
+$AgentPayload = Join-Path $PSScriptRoot 'agent-payload'
+$CompanionPayload = Join-Path $PSScriptRoot 'companion-payload'
+if (-not $AgentOnly -and
+    (Test-Path $DesktopInstaller) -and
+    (Test-Path (Join-Path $AgentPayload 'MateMCP.Agent.exe')) -and
+    (Test-Path (Join-Path $CompanionPayload 'MateMCP.Agent.Companion.exe'))) {
+    if ($NoStart) {
+        & $DesktopInstaller -NoStart
+    } else {
+        & $DesktopInstaller
+    }
+    return
+}
 
 $Target = Join-Path $env:LOCALAPPDATA 'MateMCP'
 $Bin = Join-Path $Target 'bin'
