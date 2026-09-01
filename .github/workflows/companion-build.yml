@@ -22,6 +22,7 @@ on:
       - 'scripts/install-desktop-windows.ps1'
       - 'scripts/uninstall-desktop-windows.ps1'
       - 'MateMCP.Agent.Companion.slnx'
+      - 'README.md'
       - '.github/workflows/companion-build.yml'
   pull_request:
     paths:
@@ -42,6 +43,7 @@ on:
       - 'scripts/install-desktop-windows.ps1'
       - 'scripts/uninstall-desktop-windows.ps1'
       - 'MateMCP.Agent.Companion.slnx'
+      - 'README.md'
       - '.github/workflows/companion-build.yml'
   workflow_dispatch:
 
