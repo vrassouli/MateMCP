@@ -53,7 +53,9 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
             connection = null;
             session.StartReader();
-            await Task.Delay(150, ct);
+            // Once the process is registered, do not let cancellation of this small warm-up delay
+            // strand an already-live session while releasing its slot in the catch block.
+            await Task.Delay(150, CancellationToken.None);
             return session.Snapshot(0);
         }
         catch
