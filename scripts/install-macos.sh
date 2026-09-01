@@ -1,9 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PACKAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="${1:-./payload}"
 NO_START="${2:-}"
-PACKAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODE="${3:-}"
+DESKTOP_INSTALLER="$PACKAGE_DIR/install-desktop-macos.sh"
+
+# In a unified Desktop package, install-macos.sh is the natural entry point.
+# Delegate to the Desktop installer unless this script is being invoked
+# internally for the Agent component only.
+if [[ "$MODE" != "--agent-only" \
+   && -x "$DESKTOP_INSTALLER" \
+   && -x "$PACKAGE_DIR/agent-payload/MateMCP.Agent" \
+   && -d "$PACKAGE_DIR/companion-payload" ]]; then
+  if [[ "$SOURCE" == "--no-start" || "$NO_START" == "--no-start" ]]; then
+    "$DESKTOP_INSTALLER" --no-start
+  else
+    "$DESKTOP_INSTALLER"
+  fi
+  exit 0
+fi
+
 TARGET="$HOME/.local/share/matemcp"
 BIN="$HOME/.local/bin"
 CONFIG="$HOME/Library/Application Support/MateMCP"
