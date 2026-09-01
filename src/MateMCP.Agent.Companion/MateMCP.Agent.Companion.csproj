@@ -28,6 +28,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
-    <PackageReference Include="Bluent.UI" Version="1.0.367" />
+    <PackageReference Include="Bluent.UI" Version="2.0.0" />
   </ItemGroup>
 </Project>
