@@ -26,8 +26,8 @@ public sealed class DesktopUpdateService : IDisposable
 
     public bool AutoUpdateEnabled
     {
-        get => Preferences.Default.Get(AutoUpdatePreference, false);
-        set => Preferences.Default.Set(AutoUpdatePreference, value);
+        get => Microsoft.Maui.Storage.Preferences.Default.Get(AutoUpdatePreference, false);
+        set => Microsoft.Maui.Storage.Preferences.Default.Set(AutoUpdatePreference, value);
     }
 
     public async Task<DesktopUpdateStatus> CheckAsync(CancellationToken ct = default)
