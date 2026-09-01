@@ -26,7 +26,10 @@ switch ($arch) {
 $desktop = $rid -eq 'win-x64'
 if ($desktop) {
     $asset = "MateMCP-Desktop-$rid.zip"
-    $installerName = 'install-desktop-windows.ps1'
+    # The Desktop package deliberately uses the obvious public entry point.
+    # install-windows.ps1 detects the Companion payload and delegates to the
+    # unified Desktop installer.
+    $installerName = 'install-windows.ps1'
     $productName = 'MateMCP Desktop (Agent + Companion)'
 } else {
     $asset = "MateMCP-$rid.zip"
