@@ -15,7 +15,7 @@ else
 fi
 
 if [[ -x "$AGENT_UNINSTALL" ]]; then
-  "$AGENT_UNINSTALL"
+  "$AGENT_UNINSTALL" --agent-only
 else
   launchctl bootout "gui/$(id -u)/com.matemcp.agent" >/dev/null 2>&1 || true
   rm -f "$HOME/Library/LaunchAgents/com.matemcp.agent.plist"
