@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using Porta.Pty;
 
@@ -14,14 +14,14 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
     {
         CleanupExpired();
         var id = Guid.NewGuid().ToString("N");
-        var options = CreateOptions(id, command, workingDirectory);
-        var connection = await PtyProvider.SpawnAsync(options, ct);
+        var connection = await PtyProvider.SpawnAsync(CreateOptions(id, command, workingDirectory), ct);
         var session = new ShellSession(id, command, workingDirectory, connection);
         if (!_sessions.TryAdd(id, session))
         {
             connection.Dispose();
             throw new InvalidOperationException("Could not register interactive shell session.");
         }
+
         session.StartReader();
         await Task.Delay(150, ct);
         return session.Snapshot(0);
@@ -36,15 +36,13 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
     public async Task WriteAsync(string sessionId, string text, bool submit, CancellationToken ct)
     {
         CleanupExpired();
-        var session = Get(sessionId);
-        await session.WriteAsync(text, submit, ct);
+        await Get(sessionId).WriteAsync(text, submit, ct);
     }
 
     public async Task WriteSecretAsync(string sessionId, string secret, bool submit, CancellationToken ct)
     {
         CleanupExpired();
-        var session = Get(sessionId);
-        await session.WriteSecretAsync(secret, submit, ct);
+        await Get(sessionId).WriteSecretAsync(secret, submit, ct);
     }
 
     public bool Close(string sessionId)
@@ -54,7 +52,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         return true;
     }
 
-    public string? GetCommand(string sessionId) => Get(sessionId).Command;
+    public string GetCommand(string sessionId) => Get(sessionId).Command;
 
     private ShellSession Get(string sessionId)
     {
@@ -104,7 +102,8 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             Cwd = workingDirectory,
             App = app,
             CommandLine = arguments,
-            Environment = environment
+            Environment = environment,
+            UseAsyncIo = true
         };
     }
 
@@ -131,6 +130,8 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         private readonly CancellationTokenSource _readerCts = new();
         private int _trimmedChars;
         private bool _disposed;
+        private bool _exited;
+        private int? _exitCode;
 
         public ShellSession(string id, string command, string workingDirectory, IPtyConnection connection)
         {
@@ -140,7 +141,15 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             _connection = connection;
             CreatedAt = DateTimeOffset.UtcNow;
             LastTouched = CreatedAt;
-            _connection.ProcessExited += (_, _) => Touch();
+            _connection.ProcessExited += (_, e) =>
+            {
+                lock (_sync)
+                {
+                    _exited = true;
+                    _exitCode = e.ExitCode;
+                }
+                Touch();
+            };
         }
 
         public string Id { get; }
@@ -150,7 +159,6 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         public DateTimeOffset LastTouched { get; private set; }
 
         public void Touch() => LastTouched = DateTimeOffset.UtcNow;
-
         public void StartReader() => _ = Task.Run(ReadLoopAsync);
 
         public ShellSessionSnapshot Snapshot(int absoluteOffset)
@@ -161,8 +169,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
                 var start = Math.Clamp(absoluteOffset - _trimmedChars, 0, _output.Length);
                 var chunk = _output.ToString(start, _output.Length - start);
                 var nextOffset = _trimmedChars + _output.Length;
-                var exited = _connection.ExitCode is not null;
-                return new ShellSessionSnapshot(Id, _connection.Pid, chunk, nextOffset, exited, _connection.ExitCode, WorkingDirectory, CreatedAt, LastTouched);
+                return new ShellSessionSnapshot(Id, _connection.Pid, chunk, nextOffset, _exited, _exitCode, WorkingDirectory, CreatedAt, LastTouched);
             }
         }
 
@@ -191,10 +198,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
                 await _connection.WriterStream.FlushAsync(ct);
                 Touch();
             }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(bytes);
-            }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
         }
 
         private async Task ReadLoopAsync()
@@ -209,7 +213,8 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
                     var text = Encoding.UTF8.GetString(buffer, 0, count);
                     lock (_sync)
                     {
-                        foreach (var secret in _redactions) text = text.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
+                        foreach (var secret in _redactions)
+                            text = text.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
                         _output.Append(text);
                         if (_output.Length > MaxOutputChars)
                         {
@@ -230,7 +235,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             if (_disposed) return;
             _disposed = true;
             _readerCts.Cancel();
-            try { if (_connection.ExitCode is null) _connection.Kill(); } catch { }
+            try { if (!_exited) _connection.Kill(); } catch { }
             _connection.Dispose();
             _readerCts.Dispose();
         }
