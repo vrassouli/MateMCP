@@ -2,17 +2,21 @@ name: build
 
 on:
   push:
-    branches: [ main, 'feat/**' ]
+    branches: [ main, 'feat/**', 'fix/**' ]
     tags: [ 'v*' ]
     paths:
       - 'src/MateMCP.Agent/**'
+      - 'src/MateMCP.Relay/**'
       - 'tests/MateMCP.Agent.Tests/**'
+      - 'tests/MateMCP.Relay.Tests/**'
       - 'MateMCP.slnx'
       - '.github/workflows/build.yml'
   pull_request:
     paths:
       - 'src/MateMCP.Agent/**'
+      - 'src/MateMCP.Relay/**'
       - 'tests/MateMCP.Agent.Tests/**'
+      - 'tests/MateMCP.Relay.Tests/**'
       - 'MateMCP.slnx'
       - '.github/workflows/build.yml'
   workflow_dispatch:
@@ -36,6 +40,8 @@ jobs:
       - run: dotnet build MateMCP.slnx -c Release --no-restore
       - name: Run Agent tests
         run: dotnet test tests/MateMCP.Agent.Tests/MateMCP.Agent.Tests.csproj -c Release --no-build
+      - name: Run Relay tests
+        run: dotnet test tests/MateMCP.Relay.Tests/MateMCP.Relay.Tests.csproj -c Release --no-build
       - name: Publish self-contained agent
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
       - name: Build installable archive
@@ -65,6 +71,8 @@ jobs:
       - run: dotnet build MateMCP.slnx -c Release --no-restore
       - name: Run Agent tests
         run: dotnet test tests/MateMCP.Agent.Tests/MateMCP.Agent.Tests.csproj -c Release --no-build
+      - name: Run Relay tests
+        run: dotnet test tests/MateMCP.Relay.Tests/MateMCP.Relay.Tests.csproj -c Release --no-build
       - name: Publish self-contained agent
         shell: pwsh
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
