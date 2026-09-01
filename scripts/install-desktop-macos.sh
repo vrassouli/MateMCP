@@ -15,7 +15,8 @@ COMPANION_PLIST="$HOME/Library/LaunchAgents/com.matemcp.agent.companion.plist"
 [[ -x "$AGENT_INSTALLER" ]] || { echo "Agent installer not found: $AGENT_INSTALLER" >&2; exit 1; }
 [[ -x "$COMPANION_INSTALLER" ]] || { echo "Companion installer not found: $COMPANION_INSTALLER" >&2; exit 1; }
 
-"$AGENT_INSTALLER" "$AGENT_PAYLOAD" --no-start
+# --agent-only prevents install-macos.sh from delegating back to this Desktop wrapper.
+"$AGENT_INSTALLER" "$AGENT_PAYLOAD" --no-start --agent-only
 "$COMPANION_INSTALLER" "$COMPANION_PAYLOAD" --no-start
 
 mkdir -p "$CONFIG"
