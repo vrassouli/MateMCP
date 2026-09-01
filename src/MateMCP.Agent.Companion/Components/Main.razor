@@ -62,10 +62,10 @@
                                 <div>@approval.Target</div>
                                 <div class="muted">@approval.Summary</div>
                                 <div class="actions">
-                                    <Button Text="Approve" OnClick="() => DecideAsync(approval.Id, \"allow\")" />
-                                    <Button Text="Approve for session" OnClick="() => DecideAsync(approval.Id, \"allow-session\")" />
-                                    <Button Text="Always allow" OnClick="() => DecideAsync(approval.Id, \"allow-always\")" />
-                                    <Button Text="Deny" OnClick="() => DecideAsync(approval.Id, \"deny\")" />
+                                    <Button Text="Approve" OnClick='() => DecideAsync(approval.Id, "allow")' />
+                                    <Button Text="Approve for session" OnClick='() => DecideAsync(approval.Id, "allow-session")' />
+                                    <Button Text="Always allow" OnClick='() => DecideAsync(approval.Id, "allow-always")' />
+                                    <Button Text="Deny" OnClick='() => DecideAsync(approval.Id, "deny")' />
                                 </div>
                             </div>
                         }
@@ -134,7 +134,7 @@
                         <div class="row" @key="secret.Name">
                             <strong>@secret.Name</strong>
                             <div>@secret.Description</div>
-                            <div class="muted">Allowed: @string.Join(", ", secret.AllowedTools ?? ["shell_session_send_secret"])</div>
+                            <div class="muted">Allowed: @string.Join(", ", secret.AllowedTools ?? new[] { "shell_session_send_secret" })</div>
                             <div class="actions"><Button Text="Delete" OnClick="() => DeleteSecretAsync(secret.Name)" /></div>
                         </div>
                     }
@@ -231,7 +231,6 @@
             }
             Error = null;
         }
-        catch (KeyNotFoundException) { SelectedSessionId = null; ShellOutput = string.Empty; ShellOffset = 0; }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
         catch (Exception ex) { Error = $"Agent unavailable: {ex.Message}"; }
     }
