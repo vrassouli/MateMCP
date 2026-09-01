@@ -1,0 +1,53 @@
+name: companion-build
+
+on:
+  push:
+    branches: [ main, 'feature/**', 'feat/**', 'fix/**' ]
+    paths:
+      - 'src/MateMCP.Agent.Companion/**'
+      - 'src/MateMCP.Agent/Program.cs'
+      - 'src/MateMCP.Agent/Audit/**'
+      - 'src/MateMCP.Agent/Desktop/**'
+      - 'MateMCP.Agent.Companion.slnx'
+      - '.github/workflows/companion-build.yml'
+  pull_request:
+    paths:
+      - 'src/MateMCP.Agent.Companion/**'
+      - 'src/MateMCP.Agent/Program.cs'
+      - 'src/MateMCP.Agent/Audit/**'
+      - 'src/MateMCP.Agent/Desktop/**'
+      - 'MateMCP.Agent.Companion.slnx'
+      - '.github/workflows/companion-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install .NET MAUI workload
+        run: sudo dotnet workload install maui
+      - name: Restore Companion
+        run: dotnet restore MateMCP.Agent.Companion.slnx
+      - name: Build Mac Catalyst Companion
+        run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-maccatalyst --no-restore
+
+  build-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install .NET MAUI workload
+        run: dotnet workload install maui
+      - name: Restore Companion
+        run: dotnet restore MateMCP.Agent.Companion.slnx
+      - name: Build Windows Companion
+        run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 --no-restore
