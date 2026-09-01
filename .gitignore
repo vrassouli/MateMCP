@@ -1,0 +1,54 @@
+# .NET build output
+**/bin/
+**/obj/
+artifacts/
+publish/
+package/
+
+# Test and coverage output
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.lcov
+
+# NuGet packages and generated archives
+packages/
+*.nupkg
+*.snupkg
+MateMCP-*.zip
+MateMCP-*.tar.gz
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+*.pfx
+*.p12
+*.key
+*.pem
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
