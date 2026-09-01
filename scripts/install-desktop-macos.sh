@@ -10,7 +10,7 @@ COMPANION_INSTALLER="$PACKAGE_DIR/install-companion-macos.sh"
 CONFIG="$HOME/Library/Application Support/MateMCP"
 LAUNCH_DOMAIN="gui/$(id -u)"
 AGENT_PLIST="$HOME/Library/LaunchAgents/com.matemcp.agent.plist"
-COMPANION_PLIST="$HOME/Library/LaunchAgents/com.matemcp.agent.companion.plist"
+COMPANION_APP="$HOME/Applications/MateMCP Agent Companion.app"
 
 [[ -x "$AGENT_INSTALLER" ]] || { echo "Agent installer not found: $AGENT_INSTALLER" >&2; exit 1; }
 [[ -x "$COMPANION_INSTALLER" ]] || { echo "Companion installer not found: $COMPANION_INSTALLER" >&2; exit 1; }
@@ -25,13 +25,13 @@ chmod +x "$CONFIG/uninstall-desktop-macos.sh"
 
 echo
 echo "MateMCP Desktop installed/upgraded."
-echo "Components: Agent + Agent Companion"
+echo "Components: background Agent + on-demand Agent Companion"
 echo "Uninstall: $CONFIG/uninstall-desktop-macos.sh"
 
 if [[ "$NO_START" != "--no-start" ]]; then
-  launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST"
+  launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST" >/dev/null 2>&1 || true
   launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent"
-  launchctl bootstrap "$LAUNCH_DOMAIN" "$COMPANION_PLIST"
-  launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent.companion"
-  echo "MateMCP Agent and Companion started."
+  open "$COMPANION_APP"
+  echo "MateMCP Agent started in the background; Companion opened for this install session."
+  echo "Companion will not open automatically on future sign-ins."
 fi
