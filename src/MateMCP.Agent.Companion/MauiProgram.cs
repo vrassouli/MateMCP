@@ -1,3 +1,6 @@
+using Bluent.UI.Extensions;
+using MateMCP.Agent.Companion.Services;
+
 namespace MateMCP.Agent.Companion;
 
 public static class MauiProgram
@@ -6,14 +9,10 @@ public static class MauiProgram
     {
         var builder = MauiApp.CreateBuilder();
 
-        builder
-            .UseMauiApp<App>()
-            .ConfigureFonts(fonts =>
-            {
-                fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
-            });
-
+        builder.UseMauiApp<App>();
         builder.Services.AddMauiBlazorWebView();
+        builder.Services.AddBluentUI();
+        builder.Services.AddSingleton<AgentApiClient>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
