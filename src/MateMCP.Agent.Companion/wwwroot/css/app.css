@@ -21,6 +21,9 @@ html, body { margin: 0; min-height: 100%; font-family: system-ui, -apple-system,
 a.link { color: inherit; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
 .copy-note { margin-left: 8px; }
 input, textarea, select { width: 100%; padding: 9px 10px; border: 1px solid rgba(0,0,0,.18); border-radius: 7px; background: transparent; color: inherit; }
+.update-toggle-row { display: grid; gap: 6px; }
+.update-toggle { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.update-toggle input { width: auto; margin: 0; padding: 0; }
 .field { display: grid; gap: 6px; margin-bottom: 12px; }
 .terminal { background: #111; color: #ddd; padding: 14px; min-height: 320px; max-height: 60vh; overflow: auto; border-radius: 8px; white-space: pre-wrap; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .session-layout { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; gap: 14px; }
