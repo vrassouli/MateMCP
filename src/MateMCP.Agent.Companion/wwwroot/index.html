@@ -11,9 +11,14 @@
 </head>
 <body>
     <div id="app">Loading MateMCP Agent…</div>
-    <div id="blazor-error-ui" data-nosnippet>
-        An unhandled error has occurred.
-        <a href="." class="reload">Reload</a>
+    <div id="blazor-error-ui" data-nosnippet role="alert" aria-live="assertive">
+        <div class="blazor-error-content">
+            <div>
+                <strong>Something went wrong</strong>
+                <div class="blazor-error-message">MateMCP Companion ran into an unexpected error.</div>
+            </div>
+            <button type="button" class="reload" onclick="window.location.reload()">Reload</button>
+        </div>
     </div>
     <script src="_framework/blazor.webview.js" autostart="false"></script>
 </body>

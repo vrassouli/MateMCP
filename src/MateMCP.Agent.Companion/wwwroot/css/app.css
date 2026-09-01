@@ -29,4 +29,11 @@ input, textarea, select { width: 100%; padding: 9px 10px; border: 1px solid rgba
 .session-layout { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; gap: 14px; }
 .session-item { cursor: pointer; padding: 10px; border-radius: 7px; }
 .session-item.active, .session-item:hover { background: rgba(0,0,0,.06); }
-@media (max-width: 760px) { .shell { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid rgba(0,0,0,.08); } .nav { grid-template-columns: repeat(5, 1fr); overflow: auto; } .session-layout { grid-template-columns: 1fr; } }
+#blazor-error-ui { display: none; position: fixed; left: 24px; right: 24px; bottom: 20px; z-index: 10000; pointer-events: none; }
+#blazor-error-ui .blazor-error-content { max-width: 760px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 16px; border: 1px solid rgba(177,14,28,.24); border-radius: 12px; background: var(--neutral-layer-floating, var(--neutral-layer-2, #fff)); box-shadow: 0 10px 30px rgba(0,0,0,.16); color: inherit; pointer-events: auto; }
+#blazor-error-ui strong { display: block; color: #b10e1c; font-size: 14px; line-height: 1.35; }
+#blazor-error-ui .blazor-error-message { margin-top: 2px; color: inherit; opacity: .78; font-size: 13px; line-height: 1.4; }
+#blazor-error-ui .reload { flex: 0 0 auto; border: 1px solid rgba(0,0,0,.16); border-radius: 7px; padding: 8px 12px; background: var(--neutral-fill-rest, rgba(0,0,0,.04)); color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+#blazor-error-ui .reload:hover { background: var(--neutral-fill-hover, rgba(0,0,0,.08)); }
+#blazor-error-ui .reload:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+@media (max-width: 760px) { .shell { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid rgba(0,0,0,.08); } .nav { grid-template-columns: repeat(5, 1fr); overflow: auto; } .session-layout { grid-template-columns: 1fr; } #blazor-error-ui { left: 12px; right: 12px; bottom: 12px; } #blazor-error-ui .blazor-error-content { align-items: flex-start; } }
