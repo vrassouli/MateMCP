@@ -41,13 +41,12 @@
 
     private string StatusText => Checking
         ? "Checking..."
-        : UpdateStatus?.Message ?? "Not checked yet.";
+        : UpdateStatus?.Message ?? "Checking for updates in the background...";
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         AutoUpdateEnabled = Updates.AutoUpdateEnabled;
-        await CheckNowAsync();
-        _worker = RunPeriodicChecksAsync(_cts.Token);
+        _worker = RunUpdateLoopAsync(_cts.Token);
     }
 
     private async Task CheckNowAsync()
@@ -86,11 +85,12 @@
         Updates.BeginUpdate(assetId);
     }
 
-    private async Task RunPeriodicChecksAsync(CancellationToken ct)
+    private async Task RunUpdateLoopAsync(CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(30));
         try
         {
+            await InvokeAsync(async () => { await CheckNowAsync(); StateHasChanged(); });
+            using var timer = new PeriodicTimer(TimeSpan.FromMinutes(30));
             while (await timer.WaitForNextTickAsync(ct))
                 await InvokeAsync(async () => { await CheckNowAsync(); StateHasChanged(); });
         }
