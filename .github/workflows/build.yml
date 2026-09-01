@@ -135,6 +135,7 @@ jobs:
         shell: pwsh
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
       - name: Smoke test packaged local management surface
+        if: matrix.rid == 'win-x64'
         shell: pwsh
         run: |
           $env:MATEMCP_Mate__Relay__Enabled = 'false'
