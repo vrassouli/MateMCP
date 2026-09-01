@@ -36,12 +36,11 @@ public sealed class InteractiveShellTests
         var prompt = await WaitForAsync(manager, started.SessionId, 0, s => s.Output.Contains("Prompt:", StringComparison.Ordinal));
 
         await manager.WriteSecretAsync(started.SessionId, secret, submit: true, CancellationToken.None);
-        var completed = await WaitForAsync(manager, started.SessionId, prompt.NextOffset, s => s.Exited || s.Output.Contains("[REDACTED]", StringComparison.Ordinal));
-        var final = await WaitForAsync(manager, started.SessionId, prompt.NextOffset, s => s.Exited);
-        var visible = completed.Output + final.Output;
+        var final = await WaitForAsync(manager, started.SessionId, prompt.NextOffset,
+            s => s.Exited && s.Output.Contains("[REDACTED]", StringComparison.Ordinal));
 
-        Assert.DoesNotContain(secret, visible, StringComparison.Ordinal);
-        Assert.Contains("[REDACTED]", visible, StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, final.Output, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", final.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -74,13 +73,13 @@ public sealed class InteractiveShellTests
     [Fact]
     public async Task Maximum_lifetime_expires_even_when_session_is_touched()
     {
-        await using var manager = CreateManager(idleSeconds: 30, lifetimeSeconds: 1);
+        await using var manager = CreateManager(idleSeconds: 30, lifetimeSeconds: 2);
         var started = await manager.StartAsync(WaitingCommand(), WorkingDirectory(), CancellationToken.None);
-        await Task.Delay(450);
+        await Task.Delay(500);
         _ = manager.Read(started.SessionId, 0);
-        await Task.Delay(450);
+        await Task.Delay(500);
         _ = manager.Read(started.SessionId, 0);
-        await Task.Delay(450);
+        await Task.Delay(1100);
         Assert.Throws<KeyNotFoundException>(() => manager.Read(started.SessionId, 0));
     }
 
@@ -118,7 +117,7 @@ public sealed class InteractiveShellTests
 
         await Assert.ThrowsAsync<McpException>(() => tools.SendSecret(started.SessionId, "ssh-prod", true, CancellationToken.None));
         Assert.Equal(1, approvals.Calls);
-        Assert.StartsWith("ssh-prod@cmd:", approvals.LastTarget, StringComparison.Ordinal);
+        Assert.True(approvals.LastTarget.StartsWith("ssh-prod@cmd:", StringComparison.Ordinal));
         Assert.False(manager.Read(started.SessionId, 0).Exited);
     }
 
@@ -134,7 +133,8 @@ public sealed class InteractiveShellTests
         var tools = CreateTools(manager, new FakeCredentialStore("server-admin-password", secret), approvals, auditPath);
 
         var response = await tools.SendSecret(started.SessionId, "server-admin-password", true, CancellationToken.None);
-        var final = await WaitForAsync(manager, started.SessionId, prompt.NextOffset, s => s.Exited);
+        var final = await WaitForAsync(manager, started.SessionId, prompt.NextOffset,
+            s => s.Exited && s.Output.Contains("[REDACTED]", StringComparison.Ordinal));
         var responseJson = JsonSerializer.Serialize(response);
         var auditText = await File.ReadAllTextAsync(auditPath);
 
