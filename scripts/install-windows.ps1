@@ -9,6 +9,8 @@ $Target = Join-Path $env:LOCALAPPDATA 'MateMCP'
 $Bin = Join-Path $Target 'bin'
 $Exe = Join-Path $Target 'MateMCP.Agent.exe'
 $Shim = Join-Path $Bin 'matemcp.cmd'
+$StartupDirectory = [Environment]::GetFolderPath('Startup')
+$StartupShortcut = Join-Path $StartupDirectory 'MateMCP Agent.lnk'
 
 if (-not (Test-Path (Join-Path $Source 'MateMCP.Agent.exe'))) {
     throw "MateMCP payload not found at: $Source"
@@ -31,6 +33,14 @@ if (Test-Path $packageUninstall) {
     Copy-Item $packageUninstall (Join-Path $Target 'uninstall-windows.ps1') -Force
 }
 
+$shortcutShell = New-Object -ComObject WScript.Shell
+$shortcut = $shortcutShell.CreateShortcut($StartupShortcut)
+$shortcut.TargetPath = $Exe
+$shortcut.WorkingDirectory = $Target
+$shortcut.WindowStyle = 7
+$shortcut.Description = 'MateMCP Agent'
+$shortcut.Save()
+
 $currentUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $parts = @($currentUserPath -split ';' | Where-Object { $_ })
 if ($parts -notcontains $Bin) {
@@ -48,6 +58,7 @@ Write-Host "Binary: $Exe"
 Write-Host "Command: $Shim"
 Write-Host "Config: $env:APPDATA\MateMCP\appsettings.json"
 Write-Host "Credentials: Windows Credential Manager"
+Write-Host "Startup shortcut: $StartupShortcut"
 Write-Host "Uninstall: powershell -ExecutionPolicy Bypass -File `"$Target\uninstall-windows.ps1`""
 Write-Host ''
 Write-Host 'The matemcp command is now available in this installer process and in newly opened terminals.'

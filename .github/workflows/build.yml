@@ -9,6 +9,12 @@ on:
       - 'src/MateMCP.Relay/**'
       - 'tests/MateMCP.Agent.Tests/**'
       - 'tests/MateMCP.Relay.Tests/**'
+      - 'scripts/bootstrap-macos.sh'
+      - 'scripts/bootstrap-windows.ps1'
+      - 'scripts/install-macos.sh'
+      - 'scripts/install-windows.ps1'
+      - 'scripts/uninstall-macos.sh'
+      - 'scripts/uninstall-windows.ps1'
       - 'MateMCP.slnx'
       - '.github/workflows/build.yml'
   pull_request:
@@ -17,6 +23,12 @@ on:
       - 'src/MateMCP.Relay/**'
       - 'tests/MateMCP.Agent.Tests/**'
       - 'tests/MateMCP.Relay.Tests/**'
+      - 'scripts/bootstrap-macos.sh'
+      - 'scripts/bootstrap-windows.ps1'
+      - 'scripts/install-macos.sh'
+      - 'scripts/install-windows.ps1'
+      - 'scripts/uninstall-macos.sh'
+      - 'scripts/uninstall-windows.ps1'
       - 'MateMCP.slnx'
       - '.github/workflows/build.yml'
   workflow_dispatch:
@@ -69,6 +81,27 @@ jobs:
         run: dotnet test tests/MateMCP.Relay.Tests/MateMCP.Relay.Tests.csproj -c Release --no-build
       - name: Publish self-contained agent
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
+      - name: Smoke test packaged local management surface
+        shell: bash
+        run: |
+          export MATEMCP_Mate__Relay__Enabled=false
+          export MATEMCP_Mate__Port=45872
+          package/payload/MateMCP.Agent >agent.log 2>&1 &
+          AGENT_PID=$!
+          trap 'kill "$AGENT_PID" >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:45872/health >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$AGENT_PID" >/dev/null 2>&1; then
+              cat agent.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:45872/health | grep -q '"status":"ok"'
+          curl -fsSL http://127.0.0.1:45872/ | grep -q 'Secrets & credentials'
+          curl -fsS http://127.0.0.1:45872/secrets | grep -q '^\['
       - name: Build installable archive
         run: |
           cp scripts/install-macos.sh package/install-macos.sh
@@ -101,6 +134,34 @@ jobs:
       - name: Publish self-contained agent
         shell: pwsh
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
+      - name: Smoke test packaged local management surface
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: |
+          $env:MATEMCP_Mate__Relay__Enabled = 'false'
+          $env:MATEMCP_Mate__Port = '45872'
+          $agent = Start-Process -FilePath package/payload/MateMCP.Agent.exe -PassThru -RedirectStandardOutput agent.log -RedirectStandardError agent-error.log
+          try {
+            $ready = $false
+            foreach ($attempt in 1..30) {
+              if ($agent.HasExited) {
+                Get-Content agent.log, agent-error.log -ErrorAction SilentlyContinue
+                throw "Packaged Agent exited before becoming healthy."
+              }
+              try {
+                $health = Invoke-RestMethod http://127.0.0.1:45872/health
+                if ($health.status -eq 'ok') { $ready = $true; break }
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ready) { throw "Packaged Agent did not become healthy." }
+            $ui = Invoke-WebRequest http://127.0.0.1:45872/ -UseBasicParsing
+            if ($ui.Content -notlike '*Secrets & credentials*') { throw "Management UI is missing secret management." }
+            $secrets = Invoke-WebRequest http://127.0.0.1:45872/secrets -UseBasicParsing
+            if ($secrets.Content -notmatch '^\s*\[') { throw "Secrets endpoint did not return a JSON collection." }
+          }
+          finally {
+            Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Build installable archive
         shell: pwsh
         run: |

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="${MATEMCP_REPO:-vrassouli/MateMCP}"
-RELEASE_TAG="${MATEMCP_RELEASE_TAG:-agent-dev}"
+RELEASE_TAG="${MATEMCP_AGENT_RELEASE_TAG:-${MATEMCP_RELEASE_TAG:-agent-latest}}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This installer currently supports macOS only." >&2
@@ -38,4 +38,5 @@ fi
 
 echo
 echo "MateMCP Agent installation complete."
-echo "Run: $HOME/.local/bin/matemcp"
+echo "The Agent is running and will start automatically when you sign in."
+echo "Management UI: http://127.0.0.1:45871/ui"

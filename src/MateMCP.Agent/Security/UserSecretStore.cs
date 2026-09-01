@@ -14,11 +14,20 @@ public sealed class UserSecretStore : ICredentialStore
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _indexPath;
 
-    public UserSecretStore()
+    public UserSecretStore() : this(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "MateMCP",
+        "secrets.json"))
     {
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP");
+    }
+
+    public UserSecretStore(string indexPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(indexPath);
+        var directory = Path.GetDirectoryName(Path.GetFullPath(indexPath))
+            ?? throw new ArgumentException("Secret index path must include a directory.", nameof(indexPath));
         Directory.CreateDirectory(directory);
-        _indexPath = Path.Combine(directory, "secrets.json");
+        _indexPath = Path.Combine(directory, Path.GetFileName(indexPath));
     }
 
     public async Task<IReadOnlyList<UserSecretInfo>> ListAsync(CancellationToken ct)

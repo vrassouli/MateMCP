@@ -47,6 +47,13 @@ If verification is incomplete, leave the Issue open and state what remains.
 - For Relay/API/container changes, verify that the corresponding image build/publish workflow succeeds before calling the change deployable.
 - For Agent packaging/install changes, verify the relevant platform packaging workflow and installation path.
 
+## Agent platform parity
+
+- Agent capabilities are shared across macOS and Windows unless a technical limitation is documented.
+- A change to Agent behavior, local routes/UI, secure storage, installation, startup, or update delivery must be evaluated on every supported Agent platform.
+- Update `docs/agent-feature-parity.md` when adding a capability or documenting an exception.
+- Do not complete a platform-parity Issue until the relevant macOS and Windows build/package jobs pass.
+
 ## Repository memory
 
 - Durable project rules belong in this repository, primarily in `AGENTS.md` and supporting files under `docs/`.

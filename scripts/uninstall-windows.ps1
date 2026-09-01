@@ -2,8 +2,10 @@ $ErrorActionPreference = 'Stop'
 
 $Target = Join-Path $env:LOCALAPPDATA 'MateMCP'
 $Bin = Join-Path $Target 'bin'
+$StartupShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'MateMCP Agent.lnk'
 
 Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Remove-Item $StartupShortcut -Force -ErrorAction SilentlyContinue
 
 $currentUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($currentUserPath) {
