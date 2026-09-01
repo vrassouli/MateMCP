@@ -39,11 +39,10 @@ mkdir -p "$TMP/package"
 tar -xzf "$ARCHIVE" -C "$TMP/package"
 
 if [[ "$DESKTOP" == true ]]; then
-  # The Desktop package deliberately uses the obvious public entry point.
-  # install-macos.sh detects the Companion payload and delegates to the unified
-  # Desktop installer.
-  INSTALLER="$TMP/package/install-macos.sh"
-  [[ -f "$INSTALLER" ]] || { echo "Downloaded package does not contain install-macos.sh" >&2; exit 1; }
+  # Use the explicit Desktop wrapper here so the bootstrap remains compatible
+  # during release rollover with both old and new Desktop package layouts.
+  INSTALLER="$TMP/package/install-desktop-macos.sh"
+  [[ -f "$INSTALLER" ]] || { echo "Downloaded package does not contain install-desktop-macos.sh" >&2; exit 1; }
   chmod +x "$INSTALLER"
   "$INSTALLER"
   echo
