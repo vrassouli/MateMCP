@@ -29,6 +29,8 @@ Prefer a manual download instead? Use the stable Desktop asset:
 - [Download MateMCP Desktop for macOS Apple Silicon](https://github.com/vrassouli/MateMCP/releases/download/agent-latest/MateMCP-Desktop-macos-arm64.tar.gz)
 - [View the latest stable release](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest)
 
+After extracting the archive, run `./install-macos.sh`. In a Desktop package that entry point installs **both Agent + Companion**. The lower-level Agent installer automatically delegates to the Desktop installer when the Companion payload is present.
+
 The Agent starts as a per-user LaunchAgent. The native Companion is installed in `~/Applications/MateMCP Agent Companion.app` and also starts automatically when you sign in. Private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; enrolled Agent credentials and user-managed secrets are stored in macOS Keychain.
 
 Intel Macs continue to receive the Agent-only package through the same bootstrap command until the native Companion is published for Intel Mac.
@@ -47,6 +49,14 @@ Prefer a manual download instead? Use the stable Desktop asset:
 
 - [Download MateMCP Desktop for Windows x64](https://github.com/vrassouli/MateMCP/releases/download/agent-latest/MateMCP-Desktop-win-x64.zip)
 - [View the latest stable release](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest)
+
+After extracting the ZIP, run:
+
+```powershell
+.\install-windows.ps1
+```
+
+In a Desktop package that entry point installs **both Agent + Companion**. You do not need to choose between component-specific scripts.
 
 The Agent and Companion create per-user startup entries for future sign-ins. Private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials and user-managed secrets are stored in Windows Credential Manager. Normal upgrades preserve configuration, credentials, and enrolled device identity.
 
