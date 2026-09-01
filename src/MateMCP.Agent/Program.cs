@@ -41,6 +41,7 @@ builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<ApprovalPolicyStore>();
 builder.Services.AddSingleton<LocalNotificationService>();
 builder.Services.AddSingleton<ApprovalService>();
+builder.Services.AddSingleton<IApprovalService>(sp => sp.GetRequiredService<ApprovalService>());
 builder.Services.AddHttpClient();
 builder.Services.AddHostedService<EnrollmentService>();
 builder.Services.AddHostedService<RelayConnector>();
