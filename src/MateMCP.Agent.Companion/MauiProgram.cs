@@ -13,6 +13,8 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddBluentUI();
         builder.Services.AddSingleton<AgentApiClient>();
+        builder.Services.AddSingleton<NativeApprovalNotifier>();
+        builder.Services.AddSingleton<ApprovalNotificationWatcher>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
