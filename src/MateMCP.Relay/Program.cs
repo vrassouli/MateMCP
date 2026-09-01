@@ -225,7 +225,7 @@ static bool ScopeAllowsPayload(ClaimsPrincipal principal, byte[] body)
                 continue;
             }
             var name = call.TryGetProperty("params", out var parameters) && parameters.TryGetProperty("name", out var tool) ? tool.GetString() : null;
-            var required = name switch { "filesystem_write" => "mcp:write", "shell_exec" => "mcp:shell", _ => "mcp:read" };
+            var required = McpScopePolicy.RequiredScopeForTool(name);
             if (!principal.HasScope(required)) return false;
         }
         return true;

@@ -11,7 +11,7 @@ MateMCP supports long-lived interactive shell sessions for commands that require
 - `shell_session_close(sessionId)` terminates and removes the session.
 - `secret_list()` exposes only safe metadata: credential name, type, and description.
 
-Cursor-based polling is used instead of server-pushed streaming because the current MateMCP MCP path is stateless HTTP through Relay. This keeps the Relay/API contract unchanged while still allowing incremental terminal interaction.
+Cursor-based polling is used instead of server-pushed streaming because the current MateMCP MCP path is stateless HTTP through Relay. No process state or secret value is stored by Relay/API.
 
 ## Complete SSH example
 
@@ -62,6 +62,7 @@ Linux PTY operation is supported by the terminal layer, but persistent named-sec
 - Common ambient API/cloud secrets are removed from the child process environment.
 - Session ids are high-entropy random capabilities local to one Agent. Relay routes requests to one Agent only after its existing owner/agent authorization checks, so sessions cannot cross devices; possession of the unpredictable session id is additionally required for follow-up operations.
 - The Agent enforces configurable maximum concurrent sessions, inactivity TTL, maximum lifetime, input size, and output buffer size. Expired/orphaned processes are killed and removed.
+- Relay classifies all `shell_session_*` operations as `mcp:shell`; `secret_list` remains `mcp:read`. This prevents interactive execution or credential injection from being authorized by read-only OAuth scope.
 
 Default limits are:
 
@@ -73,13 +74,24 @@ Default limits are:
 
 They can be overridden under `Mate:InteractiveShell` in Agent configuration.
 
-## Why Relay and API do not need an update
+## Relay/API update requirements
 
-No secret value or process stream is introduced into a new server-side protocol. The new operations are ordinary MCP tool calls already transported by Relay:
+The wire protocol itself remains unchanged: interactive operations are ordinary MCP tool calls, and all process/PTY state plus secret resolution remain Agent-local. The **API/Control Plane does not require an update** for this feature.
 
-1. Relay forwards `shell_session_start` to the selected Agent.
-2. The Agent owns the process and keeps all PTY state locally.
-3. Later MCP calls contain only `sessionId`, cursor, normal text, or credential **identifier**.
-4. Credential resolution and injection happen entirely inside that Agent.
+The **Relay does require the authorization update that ships with this feature**. Relay already forwards arbitrary MCP tool calls generically, but its OAuth scope classifier must explicitly require `mcp:shell` for:
 
-Therefore the existing Relay/API routing, OAuth ownership checks, scopes, approval transport, and MCP forwarding are sufficient. Only the Agent package must contain this feature.
+- `shell_session_start`
+- `shell_session_read`
+- `shell_session_write`
+- `shell_session_send_secret`
+- `shell_session_close`
+
+Without that mapping, new tool names would fall through to the default `mcp:read` scope. This is an authorization issue, not a transport/state requirement.
+
+The runtime flow remains:
+
+1. Relay verifies user/Agent/resource ownership and requires `mcp:shell` for interactive shell calls.
+2. Relay forwards the MCP call to the selected Agent.
+3. The Agent owns the process and keeps all PTY state locally.
+4. Follow-up calls contain only `sessionId`, cursor, ordinary input, or a credential **identifier**.
+5. Credential value resolution and injection happen entirely inside that Agent; Relay and API never receive the value.
