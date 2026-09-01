@@ -33,6 +33,7 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 builder.Services.AddSingleton(credentialStore);
 builder.Services.AddSingleton(new LocalAccessCredential(localAccessToken));
 builder.Services.AddSingleton<UserSecretStore>();
+builder.Services.AddSingleton<ICredentialStore>(sp => sp.GetRequiredService<UserSecretStore>());
 builder.Services.AddSingleton<InteractiveShellSessionManager>();
 builder.Services.AddSingleton<ProjectRegistry>();
 builder.Services.AddSingleton<ProjectConfigurationService>();
@@ -51,10 +52,10 @@ app.UseRateLimiter(); app.UseMiddleware<BearerTokenMiddleware>();
 app.MapGet("/", (HttpContext context) => IsLoopback(context) ? Results.Redirect("/ui", permanent: false) : Results.NotFound());
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP", status = "ok" }));
 app.MapGet("/ui", (HttpContext context) => IsLoopback(context) ? Results.Content(AgentUi.Html, "text/html; charset=utf-8") : Results.NotFound());
-app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions, ProjectRegistry projects) =>
+app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions, ProjectRegistry projects, InteractiveShellSessionManager sessions) =>
 {
     if (!IsLoopback(context)) return Results.NotFound(); var current = currentOptions.CurrentValue;
-    return Results.Ok(new { service = "MateMCP", endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp", management = $"http://127.0.0.1:{current.Port}/ui", configuration = userConfigPath, projects = projects.All.Select(p => p.Name).ToArray(), shellApproval = current.RequireShellApproval, relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId }, credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store" });
+    return Results.Ok(new { service = "MateMCP", endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp", management = $"http://127.0.0.1:{current.Port}/ui", configuration = userConfigPath, projects = projects.All.Select(p => p.Name).ToArray(), shellApproval = current.RequireShellApproval, interactiveSessions = sessions.ActiveSessionCount, relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId }, credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store" });
 });
 
 app.MapGet("/approvals", (HttpContext context, ApprovalService approvals) => IsLoopback(context) ? Results.Ok(approvals.GetPending()) : Results.NotFound());
@@ -99,7 +100,7 @@ app.MapGet("/secrets", async (HttpContext context, UserSecretStore secrets, Canc
 app.MapPost("/secrets", async (SecretUpdate update, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
-    try { await secrets.SaveAsync(update.Name, update.Value, update.Description, ct); return Results.Ok(new { update.Name }); }
+    try { await secrets.SaveAsync(update.Name, update.Value, update.Description, update.Kind, ct); return Results.Ok(new { update.Name, type = update.Kind.ToString() }); }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
 });
 app.MapDelete("/secrets/{name}", async (string name, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
@@ -114,4 +115,4 @@ app.Run();
 
 static bool IsLoopback(HttpContext context) { var remote = context.Connection.RemoteIpAddress; return remote is not null && IPAddress.IsLoopback(remote); }
 
-public sealed record SecretUpdate(string Name, string Value, string? Description);
+public sealed record SecretUpdate(string Name, string Value, string? Description, CredentialKind Kind = CredentialKind.Password);
