@@ -26,7 +26,9 @@ public sealed class AgentDeliveryParityTests
 
         Assert.Contains("start-agent-hidden.vbs", windows, StringComparison.Ordinal);
         Assert.Contains("CreateShortcut($StartupShortcut)", windows, StringComparison.Ordinal);
-        Assert.Contains("$shortcut.TargetPath = $HiddenLauncher", windows, StringComparison.Ordinal);
+        Assert.Contains("$shortcut.TargetPath = $WScript", windows, StringComparison.Ordinal);
+        Assert.Contains("$shortcut.Arguments = \"`\"$HiddenLauncher`\"\"", windows, StringComparison.Ordinal);
+        Assert.Contains("Start-Process -FilePath $WScript", windows, StringComparison.Ordinal);
         Assert.DoesNotContain("Start-Process -FilePath $Exe", windows, StringComparison.Ordinal);
     }
 
