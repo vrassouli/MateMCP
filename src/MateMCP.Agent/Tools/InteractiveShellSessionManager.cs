@@ -13,6 +13,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
     private readonly InteractiveShellOptions _settings;
     private readonly SemaphoreSlim _sessionSlots;
     private readonly Timer _cleanupTimer;
+    private int _disposed;
 
     public InteractiveShellSessionManager(IOptions<MateOptions> options)
     {
@@ -34,6 +35,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     public async Task<ShellSessionSnapshot> StartAsync(string command, string workingDirectory, CancellationToken ct)
     {
+        ThrowIfDisposed();
         if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException("Command cannot be empty.", nameof(command));
         if (command.Length > 32_768) throw new ArgumentException("Command is too large.", nameof(command));
         if (!Directory.Exists(workingDirectory)) throw new DirectoryNotFoundException(workingDirectory);
@@ -45,6 +47,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         IPtyConnection? connection = null;
         try
         {
+            ThrowIfDisposed();
             var id = Guid.NewGuid().ToString("N");
             connection = await PtyProvider.SpawnAsync(CreateOptions(id, command, workingDirectory), ct);
             var session = new ShellSession(id, command, workingDirectory, connection, _settings.MaxOutputChars, _settings.MaxInputChars);
@@ -68,31 +71,39 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     public ShellSessionSnapshot Read(string sessionId, int offset)
     {
+        ThrowIfDisposed();
         CleanupExpired();
         return Get(sessionId).Snapshot(Math.Max(0, offset));
     }
 
     public async Task WriteAsync(string sessionId, string text, bool submit, CancellationToken ct)
     {
+        ThrowIfDisposed();
         CleanupExpired();
         await Get(sessionId).WriteAsync(text, submit, ct);
     }
 
     public async Task WriteSecretAsync(string sessionId, string secret, bool submit, CancellationToken ct)
     {
+        ThrowIfDisposed();
         CleanupExpired();
         await Get(sessionId).WriteSecretAsync(secret, submit, ct);
     }
 
     public bool Close(string sessionId)
     {
+        ThrowIfDisposed();
         if (!_sessions.TryRemove(sessionId, out var session)) return false;
         session.Dispose();
         _sessionSlots.Release();
         return true;
     }
 
-    public string GetCommand(string sessionId) => Get(sessionId).Command;
+    public string GetCommand(string sessionId)
+    {
+        ThrowIfDisposed();
+        return Get(sessionId).Command;
+    }
 
     private ShellSession Get(string sessionId)
     {
@@ -104,6 +115,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     private void CleanupExpired()
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         var now = DateTimeOffset.UtcNow;
         var idleCutoff = now.AddSeconds(-_settings.IdleTimeoutSeconds);
         var lifetimeCutoff = now.AddSeconds(-_settings.MaxLifetimeSeconds);
@@ -114,6 +126,11 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             removed.Dispose();
             _sessionSlots.Release();
         }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
     }
 
     private static PtyOptions CreateOptions(string id, string command, string workingDirectory)
@@ -159,6 +176,8 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+        _cleanupTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _cleanupTimer.Dispose();
         foreach (var pair in _sessions)
         {
@@ -166,7 +185,9 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             session.Dispose();
             _sessionSlots.Release();
         }
-        _sessionSlots.Dispose();
+        // Do not dispose _sessionSlots: a timer callback that began immediately before disposal may
+        // still complete a final Release. The semaphore owns no unmanaged resource, and leaving it
+        // undisposed avoids a shutdown race without leaking processes or sessions.
         return ValueTask.CompletedTask;
     }
 
