@@ -29,11 +29,13 @@ public sealed class UserSecretStore : ICredentialStore
     }
 
     public Task SaveAsync(string name, string value, string? description, CancellationToken ct)
-        => SaveAsync(name, value, description, CredentialKind.Password, ct);
+        => SaveAsync(name, value, description, CredentialKind.Password, null, ct);
 
-    public async Task SaveAsync(string name, string value, string? description, CredentialKind kind, CancellationToken ct)
+    public async Task SaveAsync(string name, string value, string? description, CredentialKind kind,
+        IReadOnlyCollection<string>? allowedTools, CancellationToken ct)
     {
         name = NormalizeName(name);
+        var normalizedTools = NormalizeAllowedTools(allowedTools);
         if (string.IsNullOrEmpty(value)) throw new ArgumentException("Secret value cannot be empty.", nameof(value));
         if (value.Length > 16_384) throw new ArgumentException("Secret value is too large.", nameof(value));
         EnsureSupported();
@@ -48,11 +50,18 @@ public sealed class UserSecretStore : ICredentialStore
             if (existing >= 0)
             {
                 var old = items[existing];
-                items[existing] = old with { Name = name, Description = CleanDescription(description), UpdatedAt = now, Kind = kind };
+                items[existing] = old with
+                {
+                    Name = name,
+                    Description = CleanDescription(description),
+                    UpdatedAt = now,
+                    Kind = kind,
+                    AllowedTools = normalizedTools
+                };
             }
             else
             {
-                items.Add(new UserSecretInfo(name, CleanDescription(description), now, now, kind));
+                items.Add(new UserSecretInfo(name, CleanDescription(description), now, now, kind, normalizedTools));
             }
             await WriteIndexAsync(items, ct);
         }
@@ -111,6 +120,20 @@ public sealed class UserSecretStore : ICredentialStore
         description = description?.Trim();
         if (string.IsNullOrEmpty(description)) return null;
         return description.Length <= 300 ? description : description[..300];
+    }
+
+    private static IReadOnlyList<string> NormalizeAllowedTools(IReadOnlyCollection<string>? allowedTools)
+    {
+        allowedTools ??= [UserSecretInfo.ShellSessionSendSecretTool];
+        var normalized = allowedTools
+            .Select(x => x?.Trim() ?? string.Empty)
+            .Where(x => x.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        if (normalized.Any(x => x.Length > 100 || x.Any(c => !char.IsLetterOrDigit(c) && c is not '_' and not '-' and not '.')))
+            throw new ArgumentException("Allowed tool names may contain only letters, digits, '.', '-' and '_' and must be at most 100 characters.", nameof(allowedTools));
+        return normalized;
     }
 
     private static void EnsureSupported()

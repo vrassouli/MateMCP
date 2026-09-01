@@ -23,6 +23,8 @@ public sealed class InteractiveShellOptions
     public int MaxLifetimeSeconds { get; set; } = 3600;
     public int MaxOutputChars { get; set; } = 500_000;
     public int MaxInputChars { get; set; } = 65_536;
+    public int SecretInjectionMaxAttempts { get; set; } = 5;
+    public int SecretInjectionWindowSeconds { get; set; } = 60;
 }
 
 public sealed class RelayOptions

@@ -12,19 +12,18 @@ Remote approval remains available through the control plane. Its status polling 
 
 Current decisions:
 
-- **Approve** — approve exactly one pending operation.
+- **Allow once** — approve exactly one pending operation.
+- **Allow for session** — cache the exact capability + target rule in memory until the Agent stops.
+- **Always allow** — persist the exact capability + target rule in the local policy file.
 - **Deny** — reject the pending operation.
 
-Planned policy extensions:
-
-- **Allow for session** — approve matching operations for the current AI connection/session scope.
-- **Always allow** — persist a narrowly scoped local policy rule.
+Credential approvals use `secret.use` as the capability and `<credential>@cmd:<fingerprint>` as the target. This binds session and persistent approval rules to both the named credential and the exact interactive command; a rule for another credential or command does not match. Persistent rules can be inspected and removed from the loopback-only management UI.
 
 Rules are owned by MateMCP, not MCP Roots.
 
 Project-relative operations are pre-authorized according to project read/write/shell flags. Operations outside project roots must never silently fall back to unrestricted host access.
 
-Persistent rules should be expressed in terms of capability + target scope, for example:
+Persistent rules are expressed in terms of capability + target scope, for example:
 
 ```text
 filesystem.read /Users/me/Documents/example.txt

@@ -39,6 +39,7 @@ builder.Services.AddSingleton<ProjectRegistry>();
 builder.Services.AddSingleton<ProjectConfigurationService>();
 builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<ApprovalPolicyStore>();
+builder.Services.AddSingleton<CredentialInjectionRateLimiter>();
 builder.Services.AddSingleton<LocalNotificationService>();
 builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddSingleton<IApprovalService>(sp => sp.GetRequiredService<ApprovalService>());
@@ -75,6 +76,11 @@ app.MapDelete("/approval-policies", async (string capability, string target, Htt
 {
     if (!IsLoopback(context)) return Results.NotFound(); return await approvals.RemovePolicyAsync(capability, target, ct) ? Results.Ok(new { status = "removed" }) : Results.NotFound();
 });
+app.MapGet("/credential-audit", async (HttpContext context, AuditLog audit, int? limit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return Results.Ok(await audit.ReadCredentialUsageAsync(limit ?? 200, ct));
+});
 
 app.MapGet("/projects", (HttpContext context, ProjectRegistry projects) => IsLoopback(context) ? Results.Ok(projects.All.OrderBy(p => p.Name).ToArray()) : Results.NotFound());
 app.MapPost("/projects", (ProjectUpdate update, HttpContext context, ProjectConfigurationService projects) =>
@@ -101,7 +107,11 @@ app.MapGet("/secrets", async (HttpContext context, UserSecretStore secrets, Canc
 app.MapPost("/secrets", async (SecretUpdate update, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
-    try { await secrets.SaveAsync(update.Name, update.Value, update.Description, update.Kind, ct); return Results.Ok(new { update.Name, type = update.Kind.ToString() }); }
+    try
+    {
+        await secrets.SaveAsync(update.Name, update.Value, update.Description, update.Kind, update.AllowedTools, ct);
+        return Results.Ok(new { update.Name, type = update.Kind.ToString(), allowedTools = update.AllowedTools });
+    }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
 });
 app.MapDelete("/secrets/{name}", async (string name, HttpContext context, UserSecretStore secrets, CancellationToken ct) =>
@@ -116,4 +126,5 @@ app.Run();
 
 static bool IsLoopback(HttpContext context) { var remote = context.Connection.RemoteIpAddress; return remote is not null && IPAddress.IsLoopback(remote); }
 
-public sealed record SecretUpdate(string Name, string Value, string? Description, CredentialKind Kind = CredentialKind.Password);
+public sealed record SecretUpdate(string Name, string Value, string? Description, CredentialKind Kind = CredentialKind.Password,
+    IReadOnlyCollection<string>? AllowedTools = null);

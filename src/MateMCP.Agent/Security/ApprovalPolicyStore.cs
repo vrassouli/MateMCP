@@ -9,7 +9,15 @@ public sealed class ApprovalPolicyStore
 {
     private readonly ConcurrentDictionary<string, ApprovalPolicy> _session = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly string _path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP", "approval-policies.json");
+    private readonly string _path;
+
+    public ApprovalPolicyStore() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "MateMCP", "approval-policies.json")) { }
+
+    public ApprovalPolicyStore(string path)
+    {
+        _path = path;
+    }
 
     public bool IsSessionAllowed(string capability, string target) => _session.ContainsKey(Key(capability, target));
 

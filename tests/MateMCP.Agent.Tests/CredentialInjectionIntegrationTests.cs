@@ -212,8 +212,10 @@ public sealed class CredentialInjectionIntegrationTests
         IApprovalService approvals, string auditPath)
     {
         var options = new MateOptions { RequireShellApproval = false };
+        var optionWrapper = Options.Create(options);
         return new InteractiveShellTools(new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options)),
-            new AuditLog(auditPath), approvals, Options.Create(options), sessions, credentials);
+            new AuditLog(auditPath), approvals, optionWrapper, sessions, credentials,
+            new CredentialInjectionRateLimiter(optionWrapper));
     }
 
     private static async Task<ShellSessionSnapshot> StartCredentialPromptAsync(InteractiveShellSessionManager sessions)
@@ -320,7 +322,8 @@ public sealed class CredentialInjectionIntegrationTests
             return Task.FromResult(_value);
         }
 
-        public Task SaveAsync(string name, string value, string? description, CredentialKind kind, CancellationToken ct)
+        public Task SaveAsync(string name, string value, string? description, CredentialKind kind,
+            IReadOnlyCollection<string>? allowedTools, CancellationToken ct)
             => throw new NotSupportedException();
 
         public Task<bool> DeleteAsync(string name, CancellationToken ct) => throw new NotSupportedException();

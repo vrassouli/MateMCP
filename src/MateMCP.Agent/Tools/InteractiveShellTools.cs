@@ -18,8 +18,10 @@ public sealed class InteractiveShellTools(
     IApprovalService approvals,
     IOptions<MateOptions> options,
     InteractiveShellSessionManager sessions,
-    ICredentialStore secrets)
+    ICredentialStore secrets,
+    CredentialInjectionRateLimiter injectionRateLimiter)
 {
+    private const string SendSecretTool = UserSecretInfo.ShellSessionSendSecretTool;
     [McpServerTool(Name = "shell_session_start"), Description("Starts an interactive shell command in a real PTY/ConPTY and returns a session id plus initial terminal output. Use shell_session_read to observe later output and shell_session_write or shell_session_send_secret to respond to prompts.")]
     public async Task<object> Start(string command, string? project = null, CancellationToken cancellationToken = default)
     {
@@ -84,16 +86,29 @@ public sealed class InteractiveShellTools(
         if (info is null) throw new McpException($"Named credential '{credential}' does not exist.");
 
         var commandFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))).ToLowerInvariant()[..16];
+        if (!info.IsAllowedForTool(SendSecretTool))
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}",
+                "denied:tool-policy", cancellationToken);
+            throw new McpException($"Credential '{info.Name}' is not authorized for tool '{SendSecretTool}'.");
+        }
+        if (!injectionRateLimiter.TryAcquire(info.Name, out var retryAfter))
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}",
+                "denied:rate-limit", cancellationToken);
+            throw new McpException($"Credential injection rate limit exceeded. Retry after {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds.");
+        }
+
         var approvalTarget = $"{info.Name}@cmd:{commandFingerprint}";
         var decision = await approvals.RequestAsync("secret.use", approvalTarget, $"Use credential {info.Name} in shell session {sessionId[..Math.Min(8, sessionId.Length)]}: {Trim(command)}", cancellationToken);
         if (decision == ApprovalDecision.Deny)
         {
-            await audit.WriteAsync("secret.use", $"{info.Name}:{sessionId}", "denied:approval", cancellationToken);
+            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}", "denied:approval", cancellationToken);
             throw new McpException("Credential use denied by local user.");
         }
         if (decision == ApprovalDecision.Timeout)
         {
-            await audit.WriteAsync("secret.use", $"{info.Name}:{sessionId}", "denied:approval-timeout", cancellationToken);
+            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}", "denied:approval-timeout", cancellationToken);
             throw new McpException("Credential use approval timed out.");
         }
 
@@ -102,7 +117,7 @@ public sealed class InteractiveShellTools(
         try
         {
             await sessions.WriteSecretAsync(sessionId, value, submit, cancellationToken);
-            await audit.WriteAsync("secret.use", $"{info.Name}:{sessionId}", $"injected:cmd:{commandFingerprint}", cancellationToken);
+            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}", "injected", cancellationToken);
             return new { sessionId, credential = info.Name, injected = true, submit };
         }
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
@@ -121,7 +136,7 @@ public sealed class InteractiveShellTools(
     public async Task<object> ListSecrets(CancellationToken cancellationToken = default)
     {
         var list = await secrets.ListAsync(cancellationToken);
-        return list.Select(x => new { x.Name, type = x.Kind.ToString(), x.Description }).ToArray();
+        return list.Select(x => new { x.Name, type = x.Kind.ToString(), x.Description, allowedTools = x.EffectiveAllowedTools }).ToArray();
     }
 
     private (string WorkingDirectory, string Scope) ResolveWorkingDirectory(string? project)
