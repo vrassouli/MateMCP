@@ -11,6 +11,7 @@ namespace MateMCP.Agent.Companion.Services;
 public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
 {
     private bool _initialized;
+    public bool IsAvailable { get; private set; }
 
 #if WINDOWS
     private AppNotificationManager? _windowsManager;
@@ -23,9 +24,19 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
         if (_initialized) return;
 
 #if WINDOWS
+        // AppNotificationManager depends on the Windows App SDK Singleton package.
+        // Self-contained desktop deployments can legitimately report it unsupported.
+        if (!AppNotificationManager.IsSupported())
+        {
+            _initialized = true;
+            IsAvailable = false;
+            return;
+        }
+
         _windowsManager = AppNotificationManager.Default;
         _windowsManager.NotificationInvoked += OnWindowsNotificationInvoked;
         _windowsManager.Register();
+        IsAvailable = _windowsManager.Setting == AppNotificationSetting.Enabled;
 #elif MACCATALYST
         var center = UNUserNotificationCenter.Current;
         _macDelegate = new MacNotificationDelegate(DecideFromNotificationAsync);
@@ -41,8 +52,10 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
         var category = UNNotificationCategory.FromIdentifier("matemcp.approval", actions, [], UNNotificationCategoryOptions.None);
         center.SetNotificationCategories(new NSSet<UNNotificationCategory>(category));
         await center.RequestAuthorizationAsync(UNAuthorizationOptions.Alert | UNAuthorizationOptions.Sound);
+        IsAvailable = true;
 #else
         await Task.CompletedTask;
+        IsAvailable = false;
 #endif
 
         _initialized = true;
@@ -51,6 +64,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
     public async Task ShowAsync(PendingApproval approval)
     {
         await InitializeAsync();
+        if (!IsAvailable) return;
 
 #if WINDOWS
         var notification = new AppNotificationBuilder()
