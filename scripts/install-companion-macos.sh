@@ -5,6 +5,7 @@ SOURCE="${1:-./payload}"
 NO_START="${2:-}"
 PACKAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APPLICATIONS="$HOME/Applications"
+SUPPORT="$HOME/Library/Application Support/MateMCP"
 APP_SOURCE="$(find "$SOURCE" -maxdepth 1 -type d -name '*.app' -print -quit)"
 APP_TARGET="$APPLICATIONS/MateMCP Agent Companion.app"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
@@ -17,7 +18,7 @@ if [[ -z "$APP_SOURCE" || ! -d "$APP_SOURCE" ]]; then
   exit 1
 fi
 
-mkdir -p "$APPLICATIONS" "$LAUNCH_AGENTS"
+mkdir -p "$APPLICATIONS" "$LAUNCH_AGENTS" "$SUPPORT"
 launchctl bootout "$LAUNCH_DOMAIN/$LAUNCH_LABEL" >/dev/null 2>&1 || true
 rm -rf "$APP_TARGET"
 cp -R "$APP_SOURCE" "$APP_TARGET"
@@ -34,8 +35,8 @@ chmod +x "$EXECUTABLE"
 chmod 600 "$LAUNCH_PLIST"
 
 if [[ -f "$PACKAGE_DIR/uninstall-companion-macos.sh" ]]; then
-  cp "$PACKAGE_DIR/uninstall-companion-macos.sh" "$HOME/Library/Application Support/MateMCP/uninstall-companion-macos.sh"
-  chmod +x "$HOME/Library/Application Support/MateMCP/uninstall-companion-macos.sh"
+  cp "$PACKAGE_DIR/uninstall-companion-macos.sh" "$SUPPORT/uninstall-companion-macos.sh"
+  chmod +x "$SUPPORT/uninstall-companion-macos.sh"
 fi
 
 echo "MateMCP Agent Companion installed/upgraded."
