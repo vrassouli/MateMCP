@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 $Target = Join-Path $env:LOCALAPPDATA 'MateMCP\Companion'
 $StartupDirectory = [Environment]::GetFolderPath('Startup')
 $StartupShortcut = Join-Path $StartupDirectory 'MateMCP Agent Companion.lnk'
+$ProgramsDirectory = [Environment]::GetFolderPath('Programs')
+$ProgramsShortcut = Join-Path $ProgramsDirectory 'MateMCP Agent Companion.lnk'
 
 # Stop every Companion process and wait for Windows to release the self-contained
 # runtime files before removing the installation directory. Stop-Process can
@@ -12,15 +14,12 @@ foreach ($process in $processes) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
 }
 foreach ($process in $processes) {
-    try {
-        Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
-    }
-    catch {
-        # The process may already be gone; removal retries below are authoritative.
-    }
+    try { Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue }
+    catch { }
 }
 
 Remove-Item $StartupShortcut -Force -ErrorAction SilentlyContinue
+Remove-Item $ProgramsShortcut -Force -ErrorAction SilentlyContinue
 
 if (Test-Path $Target) {
     $removed = $false
