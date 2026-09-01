@@ -14,6 +14,7 @@ public static class MauiProgram
         builder.Services.AddBluentUI();
         builder.Services.AddSingleton<AgentApiClient>();
         builder.Services.AddSingleton<AgentProcessController>();
+        builder.Services.AddSingleton<DesktopUpdateService>();
         builder.Services.AddSingleton<NativeApprovalNotifier>();
         builder.Services.AddSingleton<ApprovalNotificationWatcher>();
 
