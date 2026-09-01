@@ -87,22 +87,10 @@ app.MapGet("/audit", async (HttpContext context, AuditLog audit, int? limit, Can
     return Results.Ok(await audit.ReadAsync(limit ?? 200, ct));
 });
 
-app.MapGet("/shell/sessions", async (HttpContext context, InteractiveShellSessionManager sessions, AuditLog audit, CancellationToken ct) =>
+app.MapGet("/shell/sessions", (HttpContext context, InteractiveShellSessionManager sessions) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
-    var history = await audit.ReadAsync(1000, ct);
-    var ids = history
-        .Where(x => string.Equals(x.Capability, "shell.session.start", StringComparison.Ordinal) && x.Result.StartsWith("started:", StringComparison.Ordinal))
-        .Select(x => x.Result["started:".Length..])
-        .Distinct(StringComparer.Ordinal)
-        .ToArray();
-    var active = new List<ShellSessionSnapshot>();
-    foreach (var id in ids)
-    {
-        try { active.Add(sessions.Read(id, 0)); }
-        catch (KeyNotFoundException) { }
-    }
-    return Results.Ok(active.OrderByDescending(x => x.LastTouched).ToArray());
+    return Results.Ok(sessions.List());
 });
 app.MapGet("/shell/sessions/{id}", (string id, int? offset, HttpContext context, InteractiveShellSessionManager sessions) =>
 {
