@@ -10,7 +10,7 @@ if (Test-Path $CompanionUninstall) {
 }
 
 if (Test-Path $AgentUninstall) {
-    & $AgentUninstall
+    & $AgentUninstall -AgentOnly
 } else {
     Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     if (Test-Path $Root) { Remove-Item $Root -Recurse -Force }
