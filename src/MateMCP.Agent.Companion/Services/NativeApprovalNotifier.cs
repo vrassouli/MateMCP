@@ -39,7 +39,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
             UNNotificationAction.FromIdentifier("deny", "Deny", UNNotificationActionOptions.Destructive)
         };
         var category = UNNotificationCategory.FromIdentifier("matemcp.approval", actions, [], UNNotificationCategoryOptions.None);
-        center.SetNotificationCategories(new NSSet<UNNotificationCategory>([category]));
+        center.SetNotificationCategories(new NSSet<UNNotificationCategory>(category));
         await center.RequestAuthorizationAsync(UNAuthorizationOptions.Alert | UNAuthorizationOptions.Sound);
 #else
         await Task.CompletedTask;
@@ -107,8 +107,8 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
     {
         public override void DidReceiveNotificationResponse(UNUserNotificationCenter center, UNNotificationResponse response, Action completionHandler)
         {
-            var approvalId = response.Notification.Request.Identifier;
-            var decision = response.ActionIdentifier;
+            var approvalId = response.Notification.Request.Identifier.ToString();
+            var decision = response.ActionIdentifier.ToString();
             if (decision is "allow" or "allow-session" or "allow-always" or "deny")
                 _ = decide(approvalId, decision);
             completionHandler();
@@ -116,7 +116,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
 
         public override void WillPresentNotification(UNUserNotificationCenter center, UNNotification notification,
             Action<UNNotificationPresentationOptions> completionHandler)
-            => completionHandler(UNNotificationPresentationOptions.Alert | UNNotificationPresentationOptions.Sound);
+            => completionHandler(UNNotificationPresentationOptions.List | UNNotificationPresentationOptions.Banner | UNNotificationPresentationOptions.Sound);
     }
 #endif
 
