@@ -22,6 +22,8 @@ mkdir -p "$APPLICATIONS" "$LAUNCH_AGENTS" "$SUPPORT"
 launchctl bootout "$LAUNCH_DOMAIN/$LAUNCH_LABEL" >/dev/null 2>&1 || true
 rm -rf "$APP_TARGET"
 cp -R "$APP_SOURCE" "$APP_TARGET"
+# CI test artifacts are ad-hoc signed rather than notarized. Clear quarantine so local development/test installs can launch.
+xattr -dr com.apple.quarantine "$APP_TARGET" >/dev/null 2>&1 || true
 
 EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_TARGET/Contents/Info.plist")"
 EXECUTABLE="$APP_TARGET/Contents/MacOS/$EXECUTABLE_NAME"
