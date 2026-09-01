@@ -19,7 +19,7 @@ public sealed class ApprovalService(
     ApprovalPolicyStore policies,
     AuditLog audit,
     LocalNotificationService notifications,
-    ILogger<ApprovalService> logger)
+    ILogger<ApprovalService> logger) : IApprovalService
 {
     private sealed class PendingState(PendingApproval approval)
     {

@@ -1,64 +1,109 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using MateMCP.Agent.Configuration;
+using Microsoft.Extensions.Options;
 using Porta.Pty;
 
 namespace MateMCP.Agent.Tools;
 
 public sealed class InteractiveShellSessionManager : IAsyncDisposable
 {
-    private static readonly TimeSpan IdleLifetime = TimeSpan.FromMinutes(10);
     private readonly ConcurrentDictionary<string, ShellSession> _sessions = new(StringComparer.Ordinal);
+    private readonly InteractiveShellOptions _settings;
+    private readonly SemaphoreSlim _sessionSlots;
     private readonly Timer _cleanupTimer;
+    private int _disposed;
 
-    public InteractiveShellSessionManager()
+    public InteractiveShellSessionManager(IOptions<MateOptions> options)
     {
-        _cleanupTimer = new Timer(_ => CleanupExpired(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+        var configured = options.Value.InteractiveShell ?? new InteractiveShellOptions();
+        _settings = new InteractiveShellOptions
+        {
+            MaxSessions = Math.Clamp(configured.MaxSessions, 1, 64),
+            IdleTimeoutSeconds = Math.Clamp(configured.IdleTimeoutSeconds, 1, 86_400),
+            MaxLifetimeSeconds = Math.Clamp(configured.MaxLifetimeSeconds, 1, 604_800),
+            MaxOutputChars = Math.Clamp(configured.MaxOutputChars, 4_096, 2_000_000),
+            MaxInputChars = Math.Clamp(configured.MaxInputChars, 1, 262_144)
+        };
+        _sessionSlots = new SemaphoreSlim(_settings.MaxSessions, _settings.MaxSessions);
+        var cleanupPeriod = TimeSpan.FromSeconds(Math.Clamp(_settings.IdleTimeoutSeconds / 2, 1, 60));
+        _cleanupTimer = new Timer(_ => CleanupExpired(), null, cleanupPeriod, cleanupPeriod);
     }
+
+    public int ActiveSessionCount => _sessions.Count;
 
     public async Task<ShellSessionSnapshot> StartAsync(string command, string workingDirectory, CancellationToken ct)
     {
-        CleanupExpired();
-        var id = Guid.NewGuid().ToString("N");
-        var connection = await PtyProvider.SpawnAsync(CreateOptions(id, command, workingDirectory), ct);
-        var session = new ShellSession(id, command, workingDirectory, connection);
-        if (!_sessions.TryAdd(id, session))
-        {
-            connection.Dispose();
-            throw new InvalidOperationException("Could not register interactive shell session.");
-        }
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException("Command cannot be empty.", nameof(command));
+        if (command.Length > 32_768) throw new ArgumentException("Command is too large.", nameof(command));
+        if (!Directory.Exists(workingDirectory)) throw new DirectoryNotFoundException(workingDirectory);
 
-        session.StartReader();
-        await Task.Delay(150, ct);
-        return session.Snapshot(0);
+        CleanupExpired();
+        if (!await _sessionSlots.WaitAsync(0, ct))
+            throw new InvalidOperationException($"Interactive shell session limit ({_settings.MaxSessions}) reached.");
+
+        IPtyConnection? connection = null;
+        try
+        {
+            ThrowIfDisposed();
+            var id = Guid.NewGuid().ToString("N");
+            connection = await PtyProvider.SpawnAsync(CreateOptions(id, command, workingDirectory), ct);
+            var session = new ShellSession(id, command, workingDirectory, connection, _settings.MaxOutputChars, _settings.MaxInputChars);
+            if (!_sessions.TryAdd(id, session))
+                throw new InvalidOperationException("Could not register interactive shell session.");
+
+            connection = null;
+            session.StartReader();
+            // Once the process is registered, do not let cancellation of this small warm-up delay
+            // strand an already-live session while releasing its slot in the catch block.
+            await Task.Delay(150, CancellationToken.None);
+            return session.Snapshot(0);
+        }
+        catch
+        {
+            connection?.Dispose();
+            _sessionSlots.Release();
+            throw;
+        }
     }
 
     public ShellSessionSnapshot Read(string sessionId, int offset)
     {
+        ThrowIfDisposed();
         CleanupExpired();
         return Get(sessionId).Snapshot(Math.Max(0, offset));
     }
 
     public async Task WriteAsync(string sessionId, string text, bool submit, CancellationToken ct)
     {
+        ThrowIfDisposed();
         CleanupExpired();
         await Get(sessionId).WriteAsync(text, submit, ct);
     }
 
     public async Task WriteSecretAsync(string sessionId, string secret, bool submit, CancellationToken ct)
     {
+        ThrowIfDisposed();
         CleanupExpired();
         await Get(sessionId).WriteSecretAsync(secret, submit, ct);
     }
 
     public bool Close(string sessionId)
     {
+        ThrowIfDisposed();
         if (!_sessions.TryRemove(sessionId, out var session)) return false;
         session.Dispose();
+        _sessionSlots.Release();
         return true;
     }
 
-    public string GetCommand(string sessionId) => Get(sessionId).Command;
+    public string GetCommand(string sessionId)
+    {
+        ThrowIfDisposed();
+        return Get(sessionId).Command;
+    }
 
     private ShellSession Get(string sessionId)
     {
@@ -70,12 +115,22 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     private void CleanupExpired()
     {
-        var cutoff = DateTimeOffset.UtcNow - IdleLifetime;
+        if (Volatile.Read(ref _disposed) != 0) return;
+        var now = DateTimeOffset.UtcNow;
+        var idleCutoff = now.AddSeconds(-_settings.IdleTimeoutSeconds);
+        var lifetimeCutoff = now.AddSeconds(-_settings.MaxLifetimeSeconds);
         foreach (var pair in _sessions)
         {
-            if (pair.Value.LastTouched >= cutoff) continue;
-            if (_sessions.TryRemove(pair.Key, out var removed)) removed.Dispose();
+            if (pair.Value.LastTouched >= idleCutoff && pair.Value.CreatedAt >= lifetimeCutoff) continue;
+            if (!_sessions.TryRemove(pair.Key, out var removed)) continue;
+            removed.Dispose();
+            _sessionSlots.Release();
         }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
     }
 
     private static PtyOptions CreateOptions(string id, string command, string workingDirectory)
@@ -121,32 +176,44 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+        _cleanupTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _cleanupTimer.Dispose();
         foreach (var pair in _sessions)
-            if (_sessions.TryRemove(pair.Key, out var session)) session.Dispose();
+        {
+            if (!_sessions.TryRemove(pair.Key, out var session)) continue;
+            session.Dispose();
+            _sessionSlots.Release();
+        }
+        // Do not dispose _sessionSlots: a timer callback that began immediately before disposal may
+        // still complete a final Release. The semaphore owns no unmanaged resource, and leaving it
+        // undisposed avoids a shutdown race without leaking processes or sessions.
         return ValueTask.CompletedTask;
     }
 
     private sealed class ShellSession : IDisposable
     {
-        private const int MaxOutputChars = 500_000;
         private readonly object _sync = new();
         private readonly IPtyConnection _connection;
         private readonly StringBuilder _output = new();
         private readonly List<string> _redactions = [];
         private readonly CancellationTokenSource _readerCts = new();
+        private readonly int _maxOutputChars;
+        private readonly int _maxInputChars;
         private string _redactionTail = string.Empty;
         private int _trimmedChars;
         private bool _disposed;
         private bool _exited;
         private int? _exitCode;
 
-        public ShellSession(string id, string command, string workingDirectory, IPtyConnection connection)
+        public ShellSession(string id, string command, string workingDirectory, IPtyConnection connection, int maxOutputChars, int maxInputChars)
         {
             Id = id;
             Command = command;
             WorkingDirectory = workingDirectory;
             _connection = connection;
+            _maxOutputChars = maxOutputChars;
+            _maxInputChars = maxInputChars;
             CreatedAt = DateTimeOffset.UtcNow;
             LastTouched = CreatedAt;
             _connection.ProcessExited += (_, e) =>
@@ -175,16 +242,18 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             lock (_sync)
             {
                 Touch();
+                var truncated = absoluteOffset < _trimmedChars;
                 var start = Math.Clamp(absoluteOffset - _trimmedChars, 0, _output.Length);
                 var chunk = _output.ToString(start, _output.Length - start);
                 var nextOffset = _trimmedChars + _output.Length;
-                return new ShellSessionSnapshot(Id, _connection.Pid, chunk, nextOffset, _exited, _exitCode, WorkingDirectory, CreatedAt, LastTouched);
+                return new ShellSessionSnapshot(Id, _connection.Pid, chunk, nextOffset, truncated, _exited, _exitCode, WorkingDirectory, CreatedAt, LastTouched);
             }
         }
 
         public async Task WriteAsync(string text, bool submit, CancellationToken ct)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(ShellSession));
+            ValidateInputLength(text);
             var payload = Encoding.UTF8.GetBytes(text + (submit ? "\r" : string.Empty));
             await _connection.WriterStream.WriteAsync(payload, ct);
             await _connection.WriterStream.FlushAsync(ct);
@@ -195,6 +264,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         {
             if (_disposed) throw new ObjectDisposedException(nameof(ShellSession));
             if (string.IsNullOrEmpty(secret)) throw new ArgumentException("Resolved secret is empty.", nameof(secret));
+            ValidateInputLength(secret);
             lock (_sync)
             {
                 if (!_redactions.Contains(secret, StringComparer.Ordinal)) _redactions.Add(secret);
@@ -208,6 +278,12 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
                 Touch();
             }
             finally { CryptographicOperations.ZeroMemory(bytes); }
+        }
+
+        private void ValidateInputLength(string text)
+        {
+            if (text.Length > _maxInputChars)
+                throw new ArgumentException($"Interactive shell input exceeds the configured {_maxInputChars}-character limit.");
         }
 
         private async Task ReadLoopAsync()
@@ -264,8 +340,8 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         private void AppendOutput(string text)
         {
             _output.Append(text);
-            if (_output.Length <= MaxOutputChars) return;
-            var remove = _output.Length - MaxOutputChars;
+            if (_output.Length <= _maxOutputChars) return;
+            var remove = _output.Length - _maxOutputChars;
             _output.Remove(0, remove);
             _trimmedChars += remove;
         }
@@ -288,6 +364,7 @@ public sealed record ShellSessionSnapshot(
     int ProcessId,
     string Output,
     int NextOffset,
+    bool OutputTruncated,
     bool Exited,
     int? ExitCode,
     string WorkingDirectory,

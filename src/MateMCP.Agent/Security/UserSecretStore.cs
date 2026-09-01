@@ -7,9 +7,7 @@ using MateMCP.Agent.Configuration;
 
 namespace MateMCP.Agent.Security;
 
-public sealed record UserSecretInfo(string Name, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
-
-public sealed class UserSecretStore
+public sealed class UserSecretStore : ICredentialStore
 {
     private const string Service = "MateMCP.Agent";
     private const string AccountPrefix = "user-secret:";
@@ -30,10 +28,14 @@ public sealed class UserSecretStore
         finally { _gate.Release(); }
     }
 
-    public async Task SaveAsync(string name, string value, string? description, CancellationToken ct)
+    public Task SaveAsync(string name, string value, string? description, CancellationToken ct)
+        => SaveAsync(name, value, description, CredentialKind.Password, ct);
+
+    public async Task SaveAsync(string name, string value, string? description, CredentialKind kind, CancellationToken ct)
     {
         name = NormalizeName(name);
         if (string.IsNullOrEmpty(value)) throw new ArgumentException("Secret value cannot be empty.", nameof(value));
+        if (value.Length > 16_384) throw new ArgumentException("Secret value is too large.", nameof(value));
         EnsureSupported();
 
         await SavePlatformSecretAsync(AccountPrefix + name, value, ct);
@@ -46,11 +48,11 @@ public sealed class UserSecretStore
             if (existing >= 0)
             {
                 var old = items[existing];
-                items[existing] = old with { Name = name, Description = CleanDescription(description), UpdatedAt = now };
+                items[existing] = old with { Name = name, Description = CleanDescription(description), UpdatedAt = now, Kind = kind };
             }
             else
             {
-                items.Add(new UserSecretInfo(name, CleanDescription(description), now, now));
+                items.Add(new UserSecretInfo(name, CleanDescription(description), now, now, kind));
             }
             await WriteIndexAsync(items, ct);
         }
