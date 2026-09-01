@@ -1,5 +1,6 @@
 @implements IAsyncDisposable
 @inject AgentApiClient Api
+@inject AgentProcessController AgentProcess
 
 <div class="shell">
     <aside class="sidebar">
@@ -30,10 +31,33 @@
         @if (Section == "dashboard")
         {
             <div class="grid">
-                <div class="panel"><div class="muted">Agent</div><div class="metric">@(Status is null ? "Offline" : "Online")</div><div class="muted">Local background service endpoint</div></div>
+                <div class="panel">
+                    <div class="muted">Agent</div>
+                    <div class="metric">@AgentStateLabel</div>
+                    <div class="muted">Local background process</div>
+                    <div class="actions">
+                        @if (LifecycleBusy)
+                        {
+                            <span class="muted">@LifecycleMessage</span>
+                        }
+                        else if (AgentRunning)
+                        {
+                            <Button Text="Restart" OnClick="RestartAgentAsync" />
+                            <Button Text="Stop" OnClick="StopAgentAsync" />
+                        }
+                        else
+                        {
+                            <Button Text="Start" OnClick="StartAgentAsync" />
+                        }
+                    </div>
+                    @if (!LifecycleBusy && !string.IsNullOrWhiteSpace(LifecycleMessage))
+                    {
+                        <div class="muted" style="margin-top:8px">@LifecycleMessage</div>
+                    }
+                </div>
                 <div class="panel"><div class="muted">Pending approvals</div><div class="metric">@Approvals.Count</div></div>
                 <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ShellSessions.Count)</div></div>
-                <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? "Unavailable")</div></div>
+                <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div></div>
             </div>
             @if (Status is not null)
             {
@@ -76,6 +100,13 @@
                     <div class="row"><span class="muted">Local management</span><div><a class="link" href="@Status.Management" target="_blank" rel="noopener noreferrer">@Status.Management</a></div></div>
                     <div class="row"><span class="muted">Projects</span><div>@string.Join(", ", Status.Projects)</div></div>
                     <div class="row"><span class="muted">Configuration</span><div>@Status.Configuration</div></div>
+                </div>
+            }
+            else if (!AgentRunning)
+            {
+                <div class="panel">
+                    <strong>Agent is stopped</strong>
+                    <div class="muted" style="margin-top:8px">The Companion remains available so you can start the Agent again without using a terminal.</div>
                 </div>
             }
         }
@@ -204,6 +235,9 @@
     private string Section { get; set; } = "dashboard";
     private string? Error { get; set; }
     private AgentStatus? Status { get; set; }
+    private bool AgentRunning { get; set; }
+    private bool LifecycleBusy { get; set; }
+    private string? LifecycleMessage { get; set; }
     private IReadOnlyList<PendingApproval> Approvals { get; set; } = [];
     private IReadOnlyList<UserSecretInfo> Secrets { get; set; } = [];
     private IReadOnlyList<ShellSessionSnapshot> ShellSessions { get; set; } = [];
@@ -217,6 +251,8 @@
     private string SecretValue { get; set; } = string.Empty;
     private string SecretAllowedTools { get; set; } = "shell_session_send_secret";
     private bool DeviceUrlCopied { get; set; }
+
+    private string AgentStateLabel => AgentRunning ? (Status is null ? "Starting…" : "Online") : "Stopped";
 
     private string? DeviceMcpUrl => Status?.Relay is { Enabled: true, Url: { Length: > 0 } relayUrl, DeviceId: { Length: > 0 } deviceId }
         ? $"{relayUrl.TrimEnd('/')}/mcp/{Uri.EscapeDataString(deviceId)}"
@@ -239,6 +275,15 @@
 
     private async Task RefreshAllAsync()
     {
+        AgentRunning = AgentProcess.IsRunning();
+        if (!AgentRunning)
+        {
+            ClearAgentData();
+            DeviceUrlCopied = false;
+            Error = null;
+            return;
+        }
+
         try
         {
             Status = await Api.GetStatusAsync(_disposeCts.Token);
@@ -250,11 +295,23 @@
             Error = null;
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
-        catch (Exception ex) { Error = $"Agent unavailable: {ex.Message}"; }
+        catch (Exception ex)
+        {
+            Status = null;
+            Error = $"Agent process is running but its local API is unavailable: {ex.Message}";
+        }
     }
 
     private async Task RefreshDynamicAsync()
     {
+        AgentRunning = AgentProcess.IsRunning();
+        if (!AgentRunning)
+        {
+            ClearAgentData();
+            Error = null;
+            return;
+        }
+
         try
         {
             Status = await Api.GetStatusAsync(_disposeCts.Token);
@@ -273,7 +330,23 @@
             Error = null;
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
-        catch (Exception ex) { Error = $"Agent unavailable: {ex.Message}"; }
+        catch (Exception ex)
+        {
+            Status = null;
+            Error = $"Agent process is running but its local API is unavailable: {ex.Message}";
+        }
+    }
+
+    private void ClearAgentData()
+    {
+        Status = null;
+        Approvals = [];
+        Secrets = [];
+        ShellSessions = [];
+        Audit = [];
+        SelectedSessionId = null;
+        ShellOffset = 0;
+        ShellOutput = string.Empty;
     }
 
     private async Task PollAsync(CancellationToken ct)
@@ -285,6 +358,36 @@
                 await InvokeAsync(async () => { await RefreshDynamicAsync(); StateHasChanged(); });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    private Task StartAgentAsync() => ChangeAgentStateAsync("Starting Agent…", "Agent started.", AgentProcess.StartAsync);
+    private Task StopAgentAsync() => ChangeAgentStateAsync("Stopping Agent…", "Agent stopped.", AgentProcess.StopAsync);
+    private Task RestartAgentAsync() => ChangeAgentStateAsync("Restarting Agent…", "Agent restarted.", AgentProcess.RestartAsync);
+
+    private async Task ChangeAgentStateAsync(string progress, string completed, Func<CancellationToken, Task> action)
+    {
+        if (LifecycleBusy) return;
+        LifecycleBusy = true;
+        LifecycleMessage = progress;
+        Error = null;
+        try
+        {
+            await action(_disposeCts.Token);
+            await Task.Delay(500, _disposeCts.Token);
+            await RefreshAllAsync();
+            LifecycleMessage = completed;
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Could not change Agent state: {ex.Message}";
+            AgentRunning = AgentProcess.IsRunning();
+            LifecycleMessage = null;
+        }
+        finally
+        {
+            LifecycleBusy = false;
+        }
     }
 
     private async Task CopyDeviceMcpUrlAsync()
