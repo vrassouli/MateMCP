@@ -1,8 +1,12 @@
-using System.Diagnostics;
 using MateMCP.Agent.Security;
 
 namespace MateMCP.Agent.Desktop;
 
+/// <summary>
+/// Passive fallback notification owned by the background Agent.
+/// The Companion application provides actionable Approve/Deny buttons. This service intentionally
+/// never launches a browser; if the Companion is not running the user can open it manually.
+/// </summary>
 public sealed class LocalNotificationService(ILogger<LocalNotificationService> logger)
 {
     public async Task NotifyApprovalAsync(int port, PendingApproval approval, CancellationToken ct)
@@ -10,26 +14,19 @@ public sealed class LocalNotificationService(ILogger<LocalNotificationService> l
         try
         {
             var title = "MateMCP approval required";
-            var message = $"{approval.Capability}: {approval.Target}";
-            var managementUrl = $"http://127.0.0.1:{port}/ui#approvals";
+            var message = $"{approval.Capability}: {approval.Target}. Open MateMCP Agent to review.";
 
             if (OperatingSystem.IsMacOS())
             {
-                using var notification = NewProcess("/usr/bin/osascript", "-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run", title, message);
+                using var notification = NewProcess("/usr/bin/osascript", "-e", "on run argv", "-e",
+                    "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run", title, message);
                 notification.Start();
                 await notification.WaitForExitAsync(ct);
-
-                using var browser = NewProcess("/usr/bin/open", managementUrl);
-                browser.Start();
-                await browser.WaitForExitAsync(ct);
                 return;
             }
 
             if (OperatingSystem.IsWindows())
-            {
                 await TryShowWindowsToastAsync(title, message, ct);
-                Process.Start(new ProcessStartInfo(managementUrl) { UseShellExecute = true });
-            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception ex)
@@ -59,16 +56,16 @@ $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Could not show Windows toast notification.");
+            logger.LogDebug(ex, "Could not show Windows fallback toast notification.");
         }
     }
 
     private static string EscapePowerShell(string value)
         => System.Security.SecurityElement.Escape(value) ?? string.Empty;
 
-    private static Process NewProcess(string fileName, params string[] args)
+    private static System.Diagnostics.Process NewProcess(string fileName, params string[] args)
     {
-        var start = new ProcessStartInfo(fileName)
+        var start = new System.Diagnostics.ProcessStartInfo(fileName)
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -76,6 +73,6 @@ $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
             CreateNoWindow = true
         };
         foreach (var arg in args) start.ArgumentList.Add(arg);
-        return new Process { StartInfo = start };
+        return new System.Diagnostics.Process { StartInfo = start };
     }
 }
