@@ -1,6 +1,21 @@
+param(
+    [switch]$AgentOnly
+)
+
 $ErrorActionPreference = 'Stop'
 
 $Target = Join-Path $env:LOCALAPPDATA 'MateMCP'
+$DesktopUninstall = Join-Path $Target 'uninstall-desktop-windows.ps1'
+$CompanionDir = Join-Path $Target 'Companion'
+
+# If this is a Desktop installation, the obvious uninstall-windows.ps1 entry
+# point removes both components. The Desktop wrapper passes -AgentOnly when it
+# intentionally reaches the Agent component cleanup.
+if (-not $AgentOnly -and (Test-Path $DesktopUninstall) -and (Test-Path $CompanionDir)) {
+    & $DesktopUninstall
+    return
+}
+
 $Bin = Join-Path $Target 'bin'
 $StartupShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'MateMCP Agent.lnk'
 
