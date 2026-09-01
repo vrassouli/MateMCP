@@ -11,8 +11,18 @@ public sealed class MateOptions
     public string? AccessToken { get; set; }
     public bool RequireShellApproval { get; set; } = true;
     public int ApprovalTimeoutSeconds { get; set; } = 120;
+    public InteractiveShellOptions InteractiveShell { get; set; } = new();
     public RelayOptions Relay { get; set; } = new();
     public List<ProjectOptions> Projects { get; set; } = [];
+}
+
+public sealed class InteractiveShellOptions
+{
+    public int MaxSessions { get; set; } = 8;
+    public int IdleTimeoutSeconds { get; set; } = 600;
+    public int MaxLifetimeSeconds { get; set; } = 3600;
+    public int MaxOutputChars { get; set; } = 500_000;
+    public int MaxInputChars { get; set; } = 65_536;
 }
 
 public sealed class RelayOptions
