@@ -9,6 +9,8 @@ $Target = Join-Path $env:LOCALAPPDATA 'MateMCP\Companion'
 $Exe = Join-Path $Target 'MateMCP.Agent.Companion.exe'
 $StartupDirectory = [Environment]::GetFolderPath('Startup')
 $StartupShortcut = Join-Path $StartupDirectory 'MateMCP Agent Companion.lnk'
+$ProgramsDirectory = [Environment]::GetFolderPath('Programs')
+$ProgramsShortcut = Join-Path $ProgramsDirectory 'MateMCP Agent Companion.lnk'
 
 if (-not (Test-Path (Join-Path $Source 'MateMCP.Agent.Companion.exe'))) {
     throw "MateMCP Agent Companion payload not found at: $Source"
@@ -25,8 +27,16 @@ if (Test-Path $packageUninstall) {
     Copy-Item $packageUninstall (Join-Path $Target 'uninstall-companion-windows.ps1') -Force
 }
 
+$shortcutShell = New-Object -ComObject WScript.Shell
+$shortcut = $shortcutShell.CreateShortcut($ProgramsShortcut)
+$shortcut.TargetPath = $Exe
+$shortcut.WorkingDirectory = $Target
+$shortcut.Description = 'MateMCP Agent Companion'
+$shortcut.Save()
+
 Write-Host 'MateMCP Agent Companion installed/upgraded.'
 Write-Host "Application: $Exe"
+Write-Host "Start Menu shortcut: $ProgramsShortcut"
 Write-Host 'Auto-start: disabled (open Companion only when needed)'
 Write-Host "Uninstall: powershell -ExecutionPolicy Bypass -File `"$Target\uninstall-companion-windows.ps1`""
 
