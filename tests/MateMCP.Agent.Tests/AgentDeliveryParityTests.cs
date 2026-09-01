@@ -15,7 +15,7 @@ public sealed class AgentDeliveryParityTests
     }
 
     [Fact]
-    public void Platform_installers_start_the_agent_by_default()
+    public void Platform_installers_start_the_agent_in_the_background_by_default()
     {
         var root = FindRepositoryRoot();
         var mac = File.ReadAllText(Path.Combine(root, "scripts", "install-macos.sh"));
@@ -23,8 +23,11 @@ public sealed class AgentDeliveryParityTests
 
         Assert.Contains("launchctl bootstrap", mac, StringComparison.Ordinal);
         Assert.Contains("launchctl kickstart", mac, StringComparison.Ordinal);
-        Assert.Contains("Start-Process -FilePath $Exe", windows, StringComparison.Ordinal);
+
+        Assert.Contains("start-agent-hidden.vbs", windows, StringComparison.Ordinal);
         Assert.Contains("CreateShortcut($StartupShortcut)", windows, StringComparison.Ordinal);
+        Assert.Contains("$shortcut.TargetPath = $HiddenLauncher", windows, StringComparison.Ordinal);
+        Assert.DoesNotContain("Start-Process -FilePath $Exe", windows, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
