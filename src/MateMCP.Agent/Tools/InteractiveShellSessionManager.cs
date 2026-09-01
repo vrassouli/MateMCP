@@ -9,6 +9,12 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 {
     private static readonly TimeSpan IdleLifetime = TimeSpan.FromMinutes(10);
     private readonly ConcurrentDictionary<string, ShellSession> _sessions = new(StringComparer.Ordinal);
+    private readonly Timer _cleanupTimer;
+
+    public InteractiveShellSessionManager()
+    {
+        _cleanupTimer = new Timer(_ => CleanupExpired(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
 
     public async Task<ShellSessionSnapshot> StartAsync(string command, string workingDirectory, CancellationToken ct)
     {
@@ -115,6 +121,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        _cleanupTimer.Dispose();
         foreach (var pair in _sessions)
             if (_sessions.TryRemove(pair.Key, out var session)) session.Dispose();
         return ValueTask.CompletedTask;
@@ -128,6 +135,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         private readonly StringBuilder _output = new();
         private readonly List<string> _redactions = [];
         private readonly CancellationTokenSource _readerCts = new();
+        private string _redactionTail = string.Empty;
         private int _trimmedChars;
         private bool _disposed;
         private bool _exited;
@@ -145,6 +153,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             {
                 lock (_sync)
                 {
+                    FlushRedactionTail();
                     _exited = true;
                     _exitCode = e.ExitCode;
                 }
@@ -211,23 +220,54 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
                     var count = await _connection.ReaderStream.ReadAsync(buffer, _readerCts.Token);
                     if (count <= 0) break;
                     var text = Encoding.UTF8.GetString(buffer, 0, count);
-                    lock (_sync)
-                    {
-                        foreach (var secret in _redactions)
-                            text = text.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
-                        _output.Append(text);
-                        if (_output.Length > MaxOutputChars)
-                        {
-                            var remove = _output.Length - MaxOutputChars;
-                            _output.Remove(0, remove);
-                            _trimmedChars += remove;
-                        }
-                    }
+                    lock (_sync) AppendRedacted(text);
                     Touch();
                 }
             }
             catch (OperationCanceledException) when (_readerCts.IsCancellationRequested) { }
             catch (ObjectDisposedException) { }
+            finally
+            {
+                lock (_sync) FlushRedactionTail();
+            }
+        }
+
+        private void AppendRedacted(string text)
+        {
+            if (_redactions.Count == 0)
+            {
+                AppendOutput(text);
+                return;
+            }
+
+            var combined = _redactionTail + text;
+            foreach (var secret in _redactions)
+                combined = combined.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
+
+            var maxSecretLength = _redactions.Max(x => x.Length);
+            var keep = Math.Min(Math.Max(0, maxSecretLength - 1), combined.Length);
+            var emitLength = combined.Length - keep;
+            if (emitLength > 0) AppendOutput(combined[..emitLength]);
+            _redactionTail = keep > 0 ? combined[^keep..] : string.Empty;
+        }
+
+        private void FlushRedactionTail()
+        {
+            if (_redactionTail.Length == 0) return;
+            var text = _redactionTail;
+            foreach (var secret in _redactions)
+                text = text.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
+            _redactionTail = string.Empty;
+            AppendOutput(text);
+        }
+
+        private void AppendOutput(string text)
+        {
+            _output.Append(text);
+            if (_output.Length <= MaxOutputChars) return;
+            var remove = _output.Length - MaxOutputChars;
+            _output.Remove(0, remove);
+            _trimmedChars += remove;
         }
 
         public void Dispose()
@@ -236,6 +276,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             _disposed = true;
             _readerCts.Cancel();
             try { if (!_exited) _connection.Kill(); } catch { }
+            lock (_sync) FlushRedactionTail();
             _connection.Dispose();
             _readerCts.Dispose();
         }
