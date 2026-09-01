@@ -8,6 +8,10 @@ on:
       - 'src/MateMCP.Agent/Program.cs'
       - 'src/MateMCP.Agent/Audit/**'
       - 'src/MateMCP.Agent/Desktop/**'
+      - 'scripts/install-companion-macos.sh'
+      - 'scripts/uninstall-companion-macos.sh'
+      - 'scripts/install-companion-windows.ps1'
+      - 'scripts/uninstall-companion-windows.ps1'
       - 'MateMCP.Agent.Companion.slnx'
       - '.github/workflows/companion-build.yml'
   pull_request:
@@ -16,6 +20,10 @@ on:
       - 'src/MateMCP.Agent/Program.cs'
       - 'src/MateMCP.Agent/Audit/**'
       - 'src/MateMCP.Agent/Desktop/**'
+      - 'scripts/install-companion-macos.sh'
+      - 'scripts/uninstall-companion-macos.sh'
+      - 'scripts/install-companion-windows.ps1'
+      - 'scripts/uninstall-companion-windows.ps1'
       - 'MateMCP.Agent.Companion.slnx'
       - '.github/workflows/companion-build.yml'
   workflow_dispatch:
@@ -44,9 +52,21 @@ jobs:
       - name: Install .NET MAUI workload
         run: dotnet workload install maui
       - name: Restore Companion
-        run: dotnet restore MateMCP.Agent.Companion.slnx
+        run: dotnet restore src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -r maccatalyst-arm64
       - name: Build Mac Catalyst Companion
-        run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-maccatalyst --no-restore
+        run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-maccatalyst -r maccatalyst-arm64 --no-restore
+      - name: Publish Mac Catalyst Companion
+        run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-maccatalyst -r maccatalyst-arm64 --self-contained true --no-restore -o package/payload
+      - name: Build installable macOS archive
+        run: |
+          cp scripts/install-companion-macos.sh package/install-companion-macos.sh
+          cp scripts/uninstall-companion-macos.sh package/uninstall-companion-macos.sh
+          chmod +x package/install-companion-macos.sh package/uninstall-companion-macos.sh
+          tar -czf MateMCP-Agent-Companion-macos-arm64.tar.gz -C package .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MateMCP-Agent-Companion-macos-arm64
+          path: MateMCP-Agent-Companion-macos-arm64.tar.gz
 
   build-windows:
     runs-on: windows-2025
@@ -58,6 +78,18 @@ jobs:
       - name: Install .NET MAUI workload
         run: dotnet workload install maui
       - name: Restore Companion
-        run: dotnet restore MateMCP.Agent.Companion.slnx
+        run: dotnet restore src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -r win-x64
       - name: Build Windows Companion
-        run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 --no-restore
+        run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore
+      - name: Publish Windows Companion
+        run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --self-contained true -p:WindowsPackageType=None --no-restore -o package/payload
+      - name: Build installable Windows archive
+        shell: pwsh
+        run: |
+          Copy-Item scripts/install-companion-windows.ps1 package/install-companion-windows.ps1
+          Copy-Item scripts/uninstall-companion-windows.ps1 package/uninstall-companion-windows.ps1
+          Compress-Archive -Path package/* -DestinationPath MateMCP-Agent-Companion-win-x64.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MateMCP-Agent-Companion-win-x64
+          path: MateMCP-Agent-Companion-win-x64.zip
