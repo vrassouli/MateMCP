@@ -15,7 +15,7 @@ namespace MateMCP.Agent.Tools;
 public sealed class InteractiveShellTools(
     ProjectRegistry projects,
     AuditLog audit,
-    ApprovalService approvals,
+    IApprovalService approvals,
     IOptions<MateOptions> options,
     InteractiveShellSessionManager sessions,
     ICredentialStore secrets)
@@ -83,9 +83,6 @@ public sealed class InteractiveShellTools(
         var info = available.FirstOrDefault(x => string.Equals(x.Name, credential, StringComparison.OrdinalIgnoreCase));
         if (info is null) throw new McpException($"Named credential '{credential}' does not exist.");
 
-        // Persistent/session approval for a credential is intentionally scoped to the exact command.
-        // This prevents an "always allow" decision for one SSH target from becoming a general-purpose
-        // capability to inject the same secret into an unrelated shell command.
         var commandFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))).ToLowerInvariant()[..16];
         var approvalTarget = $"{info.Name}@cmd:{commandFingerprint}";
         var decision = await approvals.RequestAsync("secret.use", approvalTarget, $"Use credential {info.Name} in shell session {sessionId[..Math.Min(8, sessionId.Length)]}: {Trim(command)}", cancellationToken);
@@ -109,12 +106,7 @@ public sealed class InteractiveShellTools(
             return new { sessionId, credential = info.Name, injected = true, submit };
         }
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
-        finally
-        {
-            // Managed strings cannot be reliably zeroed. The value is never returned, logged, put in
-            // command arguments, or sent through Relay/API; byte buffers are zeroed by the session manager.
-            value = null;
-        }
+        finally { value = null; }
     }
 
     [McpServerTool(Name = "shell_session_close"), Description("Terminates and removes an interactive shell session.")]
