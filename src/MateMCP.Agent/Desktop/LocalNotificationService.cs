@@ -5,7 +5,7 @@ namespace MateMCP.Agent.Desktop;
 /// <summary>
 /// Passive fallback notification owned by the background Agent.
 /// The Companion application provides actionable Approve/Deny buttons. This service intentionally
-/// never launches a browser; if the Companion is not running the user can open it manually.
+/// never launches a browser and stays silent while the Companion process is running.
 /// </summary>
 public sealed class LocalNotificationService(ILogger<LocalNotificationService> logger)
 {
@@ -13,8 +13,11 @@ public sealed class LocalNotificationService(ILogger<LocalNotificationService> l
     {
         try
         {
+            if (IsCompanionRunning())
+                return;
+
             var title = "MateMCP approval required";
-            var message = $"{approval.Capability}: {approval.Target}. Open MateMCP Agent to review.";
+            var message = $"{approval.Capability}: {approval.Target}. Open MateMCP Agent Companion to review.";
 
             if (OperatingSystem.IsMacOS())
             {
@@ -32,6 +35,24 @@ public sealed class LocalNotificationService(ILogger<LocalNotificationService> l
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Could not show local approval notification.");
+        }
+    }
+
+    private static bool IsCompanionRunning()
+    {
+        try
+        {
+            var processes = System.Diagnostics.Process.GetProcessesByName("MateMCP.Agent.Companion");
+            try { return processes.Length > 0; }
+            finally
+            {
+                foreach (var process in processes)
+                    process.Dispose();
+            }
+        }
+        catch
+        {
+            return false;
         }
     }
 
