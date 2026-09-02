@@ -72,7 +72,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         ThrowIfDisposed();
         CleanupExpired();
         return _sessions.Values
-            .Select(session => session.Snapshot(0, touch: false))
+            .Select(session => session.Snapshot(0))
             .OrderByDescending(snapshot => snapshot.LastTouched)
             .ToArray();
     }
@@ -117,7 +117,6 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
             throw new KeyNotFoundException($"Interactive shell session '{sessionId}' was not found or has expired.");
-        session.Touch();
         return session;
     }
 
@@ -242,11 +241,10 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         public void Touch() => LastTouched = DateTimeOffset.UtcNow;
         public void StartReader() => _ = Task.Run(ReadLoopAsync);
 
-        public ShellSessionSnapshot Snapshot(int absoluteOffset, bool touch = true)
+        public ShellSessionSnapshot Snapshot(int absoluteOffset)
         {
             lock (_sync)
             {
-                if (touch) Touch();
                 var truncated = absoluteOffset < _trimmedChars;
                 var start = Math.Clamp(absoluteOffset - _trimmedChars, 0, _output.Length);
                 var chunk = _output.ToString(start, _output.Length - start);
