@@ -2,50 +2,46 @@
 
 <div class="panel">
     <strong>Agent privileges</strong>
-    @if (!OperatingSystem.IsWindows())
+    <div class="row">
+        <span class="muted">Configured mode</span>
+        <div>@ConfiguredMode</div>
+    </div>
+    <div class="row">
+        <span class="muted">Running process</span>
+        <div>@ActualModeText</div>
+    </div>
+    <div class="row">
+        <span class="muted">Security</span>
+        @if (OperatingSystem.IsWindows())
+        {
+            <div class="muted">Elevated mode uses the current user's highest Windows token through Task Scheduler rather than LocalSystem, preserving the user's profile and Credential Manager identity.</div>
+        }
+        else
+        {
+            <div class="muted">Elevated mode runs the Agent as a root LaunchDaemon while keeping MateMCP configuration in your profile and delegating Keychain operations back into your signed-in user session.</div>
+        }
+    </div>
+    <div class="actions">
+        @if (Busy)
+        {
+            <span class="muted">@Message</span>
+        }
+        else if (ConfiguredMode == AgentExecutionMode.Normal)
+        {
+            <Button Text="Run elevated" OnClick="() => ChangeModeAsync(AgentExecutionMode.Elevated)" />
+        }
+        else
+        {
+            <Button Text="Run as normal user" OnClick="() => ChangeModeAsync(AgentExecutionMode.Normal)" />
+        }
+    </div>
+    @if (!Busy && !string.IsNullOrWhiteSpace(Message))
     {
-        <div class="row">
-            <span class="muted">Execution mode</span>
-            <div>Normal user</div>
-            <div class="muted">Elevated mode on macOS is intentionally not enabled until a privileged helper design can preserve the user Keychain and profile safely.</div>
-        </div>
+        <div class="muted" style="margin-top:8px">@Message</div>
     }
-    else
+    @if (!string.IsNullOrWhiteSpace(Error))
     {
-        <div class="row">
-            <span class="muted">Configured mode</span>
-            <div>@ConfiguredMode</div>
-        </div>
-        <div class="row">
-            <span class="muted">Running process</span>
-            <div>@ActualModeText</div>
-        </div>
-        <div class="row">
-            <span class="muted">Security</span>
-            <div class="muted">Elevated mode runs the Agent with the current user's highest token through Task Scheduler. It does not switch the Agent to LocalSystem, so the user's profile and Credential Manager identity remain consistent.</div>
-        </div>
-        <div class="actions">
-            @if (Busy)
-            {
-                <span class="muted">@Message</span>
-            }
-            else if (ConfiguredMode == AgentExecutionMode.Normal)
-            {
-                <Button Text="Run elevated" OnClick="() => ChangeModeAsync(AgentExecutionMode.Elevated)" />
-            }
-            else
-            {
-                <Button Text="Run as normal user" OnClick="() => ChangeModeAsync(AgentExecutionMode.Normal)" />
-            }
-        </div>
-        @if (!Busy && !string.IsNullOrWhiteSpace(Message))
-        {
-            <div class="muted" style="margin-top:8px">@Message</div>
-        }
-        @if (!string.IsNullOrWhiteSpace(Error))
-        {
-            <div class="error">@Error</div>
-        }
+        <div class="error">@Error</div>
     }
 </div>
 
