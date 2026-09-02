@@ -75,8 +75,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
         };
         var category = UNNotificationCategory.FromIdentifier("matemcp.approval", actions, [], UNNotificationCategoryOptions.None);
         center.SetNotificationCategories(new NSSet<UNNotificationCategory>(category));
-        await center.RequestAuthorizationAsync(UNAuthorizationOptions.Alert | UNAuthorizationOptions.Sound);
-        IsAvailable = true;
+        IsAvailable = await center.RequestAuthorizationAsync(UNAuthorizationOptions.Alert | UNAuthorizationOptions.Sound);
 #else
         await Task.CompletedTask;
         IsAvailable = false;
