@@ -19,6 +19,27 @@ public sealed class AgentApiClient : IDisposable
     public async Task<AgentStatus?> GetStatusAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<AgentStatus>("status", Json, ct);
 
+    public async Task<DeviceManagementStatus?> GetDevicesAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<DeviceManagementStatus>("devices", Json, ct);
+
+    public async Task EnableEnrollmentAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsync("devices/enrollment/enable", null, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task SignOutCurrentDeviceAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync("devices/current", ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task RevokeDeviceAsync(string deviceId, CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync($"devices/{Uri.EscapeDataString(deviceId)}", ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task<DesktopBackgroundUpdateStatus?> GetDesktopUpdateStatusAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<DesktopBackgroundUpdateStatus>("desktop-update", Json, ct);
 
@@ -99,9 +120,12 @@ public sealed class AgentApiClient : IDisposable
 public sealed record AgentStatus(string Service, string Endpoint, string Management, string Configuration, IReadOnlyList<string> Projects,
     bool ShellApproval, int InteractiveSessions, RelayStatus Relay, string Credentials);
 
+public sealed record DeviceManagementStatus(bool Enrolled, bool EnrollmentSuppressed, string? CurrentDeviceId, IReadOnlyList<ManagedDevice> Devices);
+public sealed record ManagedDevice(string Id, string Name, string Platform, string Status, DateTimeOffset CreatedAt, DateTimeOffset? LastSeenAt, string McpUrl, bool IsCurrent);
+
 public sealed record DesktopBackgroundUpdateStatus(bool AutoUpdateEnabled, string State, string Message,
     DateTimeOffset? LastChangedAt, long InstalledAssetId, string? LastFailure);
-public sealed record RelayStatus(bool Enabled, string? Url, string? DeviceId);
+public sealed record RelayStatus(bool Enabled, string? Url, string? DeviceId, bool EnrollmentSuppressed = false);
 public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Capability, string Target, string Summary);
 public sealed record UserSecretInfo(string Name, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int Kind, IReadOnlyList<string>? AllowedTools);
 public sealed record ShellSessionSnapshot(string SessionId, int ProcessId, string Output, int NextOffset, bool OutputTruncated, bool Exited,
