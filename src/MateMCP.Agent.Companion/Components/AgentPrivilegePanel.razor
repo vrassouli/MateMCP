@@ -1,0 +1,101 @@
+@inject AgentProcessController AgentProcess
+
+<div class="panel">
+    <strong>Agent privileges</strong>
+    @if (!OperatingSystem.IsWindows())
+    {
+        <div class="row">
+            <span class="muted">Execution mode</span>
+            <div>Normal user</div>
+            <div class="muted">Elevated mode on macOS is intentionally not enabled until a privileged helper design can preserve the user Keychain and profile safely.</div>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <span class="muted">Configured mode</span>
+            <div>@ConfiguredMode</div>
+        </div>
+        <div class="row">
+            <span class="muted">Running process</span>
+            <div>@ActualModeText</div>
+        </div>
+        <div class="row">
+            <span class="muted">Security</span>
+            <div class="muted">Elevated mode runs the Agent with the current user's highest token through Task Scheduler. It does not switch the Agent to LocalSystem, so the user's profile and Credential Manager identity remain consistent.</div>
+        </div>
+        <div class="actions">
+            @if (Busy)
+            {
+                <span class="muted">@Message</span>
+            }
+            else if (ConfiguredMode == AgentExecutionMode.Normal)
+            {
+                <Button Text="Run elevated" OnClick="() => ChangeModeAsync(AgentExecutionMode.Elevated)" />
+            }
+            else
+            {
+                <Button Text="Run as normal user" OnClick="() => ChangeModeAsync(AgentExecutionMode.Normal)" />
+            }
+        </div>
+        @if (!Busy && !string.IsNullOrWhiteSpace(Message))
+        {
+            <div class="muted" style="margin-top:8px">@Message</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="error">@Error</div>
+        }
+    }
+</div>
+
+@code {
+    private AgentExecutionMode ConfiguredMode { get; set; }
+    private bool? ActualElevated { get; set; }
+    private bool Busy { get; set; }
+    private string? Message { get; set; }
+    private string? Error { get; set; }
+
+    private string ActualModeText => !AgentProcess.IsRunning()
+        ? "Agent stopped"
+        : ActualElevated switch
+        {
+            true => "Elevated",
+            false => "Normal user",
+            null => "Unknown"
+        };
+
+    protected override void OnInitialized() => Refresh();
+
+    private void Refresh()
+    {
+        ConfiguredMode = AgentProcess.GetConfiguredMode();
+        ActualElevated = AgentProcess.IsActuallyElevated();
+    }
+
+    private async Task ChangeModeAsync(AgentExecutionMode mode)
+    {
+        Busy = true;
+        Error = null;
+        Message = mode == AgentExecutionMode.Elevated
+            ? "Requesting Administrator authorization and switching Agent to elevated mode…"
+            : "Requesting Administrator authorization and switching Agent to normal mode…";
+        StateHasChanged();
+        try
+        {
+            await AgentProcess.SetConfiguredModeAsync(mode);
+            Refresh();
+            Message = $"Agent is now configured for {ConfiguredMode} mode.";
+        }
+        catch (Exception ex)
+        {
+            Error = ex.Message;
+            Message = null;
+            Refresh();
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+}
