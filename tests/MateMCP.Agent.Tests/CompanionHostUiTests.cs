@@ -7,10 +7,13 @@ public sealed class CompanionHostUiTests
     {
         var root = FindRepositoryRoot();
         var api = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
 
         Assert.Contains("response.StatusCode == HttpStatusCode.NotFound", api, StringComparison.Ordinal);
         Assert.Contains("return null;", api, StringComparison.Ordinal);
         Assert.Contains("response.EnsureSuccessStatusCode();", api, StringComparison.Ordinal);
+        Assert.Contains("ReconcileSelectedShell();", main, StringComparison.Ordinal);
+        Assert.Contains("if (snapshot is null) ClearSelectedShell();", main, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -114,6 +117,7 @@ public sealed class CompanionHostUiTests
         var background = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Desktop", "BackgroundDesktopUpdateService.cs"));
         var program = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Program.cs"));
         var api = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
         var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdatePanel.razor"));
 
         Assert.Contains(": BackgroundService", background, StringComparison.Ordinal);

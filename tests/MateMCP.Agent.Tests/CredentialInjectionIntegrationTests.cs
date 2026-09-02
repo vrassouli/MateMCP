@@ -20,7 +20,7 @@ public sealed class CredentialInjectionIntegrationTests
     {
         var auditPath = NewAuditPath();
         await using var sessions = CreateManager();
-        var store = new TrackingCredentialStore(CredentialName, ValidSecret);
+        var store = new TrackingCredentialStore(CredentialName, ValidSecret, [UserSecretInfo.ShellSessionSendSecretTool]);
         var tools = CreateTools(sessions, store, new FakeApprovalService(ApprovalDecision.AllowOnce), auditPath);
 
         var started = await StartCredentialPromptAsync(sessions);
@@ -38,6 +38,29 @@ public sealed class CredentialInjectionIntegrationTests
         Assert.Contains("AUTHENTICATED", completed.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(ValidSecret, completed.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(ValidSecret, responseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(ValidSecret, auditText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Credential_tool_policy_rejects_write_only_credential_before_approval_or_resolution()
+    {
+        var auditPath = NewAuditPath();
+        await using var sessions = CreateManager();
+        var store = new TrackingCredentialStore(CredentialName, ValidSecret, ["shell_session_write"]);
+        var approvals = new FakeApprovalService(ApprovalDecision.AllowOnce);
+        var tools = CreateTools(sessions, store, approvals, auditPath);
+        var started = await StartCredentialPromptAsync(sessions);
+        _ = await WaitForAsync(sessions, started.SessionId, 0,
+            snapshot => snapshot.Output.Contains("Password:", StringComparison.Ordinal));
+
+        var exception = await Assert.ThrowsAsync<McpException>(
+            () => tools.SendSecret(started.SessionId, CredentialName, true));
+        var auditText = await ReadAuditAsync(auditPath);
+
+        Assert.Contains("not authorized", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, approvals.Calls);
+        Assert.Equal(0, store.ResolveCalls);
+        Assert.Contains("denied:tool-policy", auditText, StringComparison.Ordinal);
         Assert.DoesNotContain(ValidSecret, auditText, StringComparison.Ordinal);
     }
 
@@ -298,11 +321,11 @@ public sealed class CredentialInjectionIntegrationTests
         private readonly UserSecretInfo[] _items;
         private readonly string? _value;
 
-        public TrackingCredentialStore(string? name = null, string? value = null)
+        public TrackingCredentialStore(string? name = null, string? value = null, IReadOnlyList<string>? allowedTools = null)
         {
             _value = value;
             _items = name is null ? [] :
-                [new UserSecretInfo(name, "integration test credential", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, CredentialKind.Password)];
+                [new UserSecretInfo(name, "integration test credential", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, CredentialKind.Password, allowedTools)];
         }
 
         public int ListCalls { get; private set; }
