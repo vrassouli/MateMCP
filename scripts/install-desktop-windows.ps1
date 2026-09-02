@@ -1,7 +1,7 @@
 param(
     [switch]$NoStart,
-    [ValidateSet('Normal','Elevated')]
-    [string]$AgentMode = 'Normal'
+    [ValidateSet('','Normal','Elevated')]
+    [string]$AgentMode = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,9 +10,15 @@ $AgentPayload = Join-Path $PSScriptRoot 'agent-payload'
 $CompanionPayload = Join-Path $PSScriptRoot 'companion-payload'
 $AgentInstaller = Join-Path $PSScriptRoot 'install-windows.ps1'
 $CompanionInstaller = Join-Path $PSScriptRoot 'install-companion-windows.ps1'
+$ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
 
 if (-not (Test-Path $AgentInstaller)) { throw "Agent installer not found: $AgentInstaller" }
 if (-not (Test-Path $CompanionInstaller)) { throw "Companion installer not found: $CompanionInstaller" }
+
+if ([string]::IsNullOrWhiteSpace($AgentMode)) {
+    $persistedMode = if (Test-Path $ModeFile) { (Get-Content $ModeFile -Raw).Trim() } else { '' }
+    $AgentMode = if ($persistedMode -in @('Normal','Elevated')) { $persistedMode } else { 'Normal' }
+}
 
 if ($AgentMode -eq 'Elevated') {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
