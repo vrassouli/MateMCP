@@ -18,6 +18,23 @@ public sealed class CompanionHostUiTests
     }
 
     [Fact]
+    public void Windows_approval_notifications_have_an_unpackaged_native_toast_fallback()
+    {
+        var root = FindRepositoryRoot();
+        var project = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "MateMCP.Agent.Companion.csproj"));
+        var notifier = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "NativeApprovalNotifier.cs"));
+
+        Assert.Contains("Microsoft.Toolkit.Uwp.Notifications", project, StringComparison.Ordinal);
+        Assert.Contains("AppNotificationManager.IsSupported()", notifier, StringComparison.Ordinal);
+        Assert.Contains("ToastNotificationManagerCompat.OnActivated", notifier, StringComparison.Ordinal);
+        Assert.Contains("new ToastContentBuilder()", notifier, StringComparison.Ordinal);
+        Assert.Contains("Approve for session", notifier, StringComparison.Ordinal);
+        Assert.Contains("Always allow", notifier, StringComparison.Ordinal);
+        Assert.Contains("ToastArguments.Parse", notifier, StringComparison.Ordinal);
+        Assert.Contains("DecideFromNotificationAsync", notifier, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Desktop_updater_downloads_before_exit_and_surfaces_progress_for_both_platforms()
     {
         var root = FindRepositoryRoot();
