@@ -61,14 +61,19 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
-    public void Mac_secret_metadata_uses_stable_application_support_path_and_migrates_legacy_index()
+    public void Mac_secret_metadata_uses_stable_user_application_support_and_elevated_agent_delegates_keychain()
     {
         var store = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent", "Security", "UserSecretStore.cs"));
 
         Assert.Contains("Library", store, StringComparison.Ordinal);
         Assert.Contains("Application Support", store, StringComparison.Ordinal);
+        Assert.Contains("MATEMCP_MAC_USER_HOME", store, StringComparison.Ordinal);
         Assert.Contains("File.Copy(applicationDataPath, stablePath, overwrite: false)", store, StringComparison.Ordinal);
-        Assert.Contains("The actual secret values remain in Keychain", store, StringComparison.Ordinal);
+        Assert.Contains("MATEMCP_MAC_USER_NAME", store, StringComparison.Ordinal);
+        Assert.Contains("MATEMCP_MAC_USER_UID", store, StringComparison.Ordinal);
+        Assert.Contains("/bin/launchctl", store, StringComparison.Ordinal);
+        Assert.Contains("asuser", store, StringComparison.Ordinal);
+        Assert.Contains("/usr/bin/security", store, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
