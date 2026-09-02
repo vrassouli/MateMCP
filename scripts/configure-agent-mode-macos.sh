@@ -26,6 +26,7 @@ mkdir -p "$CONFIG_ROOT" "$USER_LAUNCH_DIR"
 
 protect_elevated_state() {
   [[ "$EUID" -eq 0 ]] || { echo "Elevated mode requires Administrator authorization." >&2; exit 3; }
+  echo "WARNING: Elevated mode gives MateMCP shell/filesystem tools root-level access. Existing approval and credential policies still apply." >&2
   # A root Agent must never execute or consume state that a normal user process
   # can rewrite. Protect both the executable tree and persistent Agent state.
   chown -R root:wheel "$AGENT_ROOT" "$CONFIG_ROOT"
@@ -35,6 +36,7 @@ protect_elevated_state() {
   find "$AGENT_ROOT" -type f -name '*.sh' -exec chmod 755 {} +
   find "$CONFIG_ROOT" -type d -exec chmod 755 {} +
   find "$CONFIG_ROOT" -type f -exec chmod 600 {} +
+  find "$CONFIG_ROOT" -type f -name '*.sh' -exec chmod 755 {} +
 }
 
 restore_normal_state() {
@@ -46,6 +48,7 @@ restore_normal_state() {
   find "$AGENT_ROOT" -type f -name '*.sh' -exec chmod 755 {} +
   find "$CONFIG_ROOT" -type d -exec chmod 700 {} +
   find "$CONFIG_ROOT" -type f -exec chmod 600 {} +
+  find "$CONFIG_ROOT" -type f -name '*.sh' -exec chmod 700 {} +
 }
 
 write_user_plist() {
