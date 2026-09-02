@@ -12,8 +12,10 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, ApprovalService approvals, IOptions<MateOptions> options, AgentActivityGate activity)
+public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, ApprovalService approvals, IOptions<MateOptions> options, AgentActivityGate? activity = null)
 {
+    private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
+
     [McpServerTool(Name = "shell_exec"), Description("Executes a shell command. When a project is specified, the command runs in that configured project directory and obeys its shell policy; otherwise it runs in the Agent user's home directory. Shell execution may require explicit local approval.")]
     public async Task<object> Exec(string command, string? project = null, int timeoutSeconds = 60, CancellationToken cancellationToken = default)
     {
@@ -62,7 +64,7 @@ public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, Approva
 
     private IDisposable EnterActivity()
     {
-        if (!activity.TryEnter(out var lease) || lease is null)
+        if (!_activity.TryEnter(out var lease) || lease is null)
             throw new McpException("MateMCP Agent is preparing a verified Desktop update. Retry the shell command after the Agent restarts.");
         return lease;
     }
