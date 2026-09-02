@@ -30,7 +30,8 @@ public static class ConfigurationBootstrap
                     Enabled = true,
                     Url = "https://relay.matemcp.com",
                     ControlPlaneUrl = "https://api.matemcp.com",
-                    DeviceId = (string?)null
+                    DeviceId = (string?)null,
+                    EnrollmentSuppressed = false
                 },
                 Projects = Array.Empty<object>()
             }
