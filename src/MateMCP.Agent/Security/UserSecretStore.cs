@@ -14,10 +14,7 @@ public sealed class UserSecretStore : ICredentialStore
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _indexPath;
 
-    public UserSecretStore() : this(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "MateMCP",
-        "secrets.json"))
+    public UserSecretStore() : this(GetDefaultIndexPath())
     {
     }
 
@@ -28,6 +25,47 @@ public sealed class UserSecretStore : ICredentialStore
             ?? throw new ArgumentException("Secret index path must include a directory.", nameof(indexPath));
         Directory.CreateDirectory(directory);
         _indexPath = Path.Combine(directory, Path.GetFileName(indexPath));
+    }
+
+    private static string GetDefaultIndexPath()
+    {
+        var applicationDataPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "MateMCP",
+            "secrets.json");
+
+        if (!OperatingSystem.IsMacOS()) return applicationDataPath;
+
+        // Keep secret metadata in a stable, installer-independent macOS user-data location.
+        // Older builds used Environment.SpecialFolder.ApplicationData, whose mapping changed
+        // across packaging/runtime combinations. The actual secret values remain in Keychain;
+        // migrating this index prevents an upgrade from making those values appear deleted.
+        var stablePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library",
+            "Application Support",
+            "MateMCP",
+            "secrets.json");
+
+        if (string.Equals(Path.GetFullPath(stablePath), Path.GetFullPath(applicationDataPath), StringComparison.Ordinal))
+            return stablePath;
+
+        try
+        {
+            if (!File.Exists(stablePath) && File.Exists(applicationDataPath))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(stablePath)!);
+                File.Copy(applicationDataPath, stablePath, overwrite: false);
+                ConfigurationBootstrap.TryRestrictPermissions(stablePath);
+            }
+        }
+        catch (IOException)
+        {
+            // A concurrent process may have completed migration. Prefer the stable copy if present.
+            if (!File.Exists(stablePath)) throw;
+        }
+
+        return stablePath;
     }
 
     public async Task<IReadOnlyList<UserSecretInfo>> ListAsync(CancellationToken ct)
