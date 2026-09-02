@@ -236,9 +236,37 @@
         else if (Section == "audit")
         {
             <div class="panel">
+                <div class="toolbar audit-toolbar">
+                    <div>
+                        <strong>Activity for @AuditDate.ToString("yyyy-MM-dd")</strong>
+                        <div class="muted">The Agent reads only this date range from the newest end of the audit log.</div>
+                    </div>
+                    <div class="actions">
+                        <Button Text="Previous day" OnClick="PreviousAuditDayAsync" />
+                        <input type="date" value="@AuditDate.ToString("yyyy-MM-dd")" @onchange="AuditDateChangedAsync" />
+                        <Button Text="Next day" OnClick="NextAuditDayAsync" />
+                        <Button Text="Today" OnClick="TodayAuditAsync" />
+                    </div>
+                </div>
+                <div class="actions" style="margin-top:12px">
+                    @if (!ConfirmAuditCleanup)
+                    {
+                        <Button Text="Clean up older activity" OnClick="() => ConfirmAuditCleanup = true" />
+                    }
+                    else
+                    {
+                        <span class="muted">Permanently delete activity before @AuditDate.ToString("yyyy-MM-dd")?</span>
+                        <Button Text="Confirm cleanup" OnClick="CleanupAuditAsync" />
+                        <Button Text="Cancel" OnClick="() => ConfirmAuditCleanup = false" />
+                    }
+                    @if (!string.IsNullOrWhiteSpace(AuditMessage))
+                    {
+                        <span class="muted">@AuditMessage</span>
+                    }
+                </div>
                 @if (Audit.Count == 0)
                 {
-                    <div class="muted">No activity recorded yet.</div>
+                    <div class="muted" style="margin-top:12px">No activity recorded for this date.</div>
                 }
                 @foreach (var item in Audit)
                 {
@@ -278,6 +306,9 @@
     private string SecretValue { get; set; } = string.Empty;
     private string SecretAllowedTools { get; set; } = "shell_session_send_secret";
     private bool DeviceUrlCopied { get; set; }
+    private DateOnly AuditDate { get; set; } = DateOnly.FromDateTime(DateTime.Now);
+    private bool ConfirmAuditCleanup { get; set; }
+    private string? AuditMessage { get; set; }
 
     private int ActiveShellCount => ShellSessions.Count(x => !x.Exited);
     private string AgentStateLabel => AgentRunning ? (Status is null ? "Starting…" : "Online") : "Stopped";
@@ -320,7 +351,7 @@
             Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
             ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
             ReconcileSelectedShell();
-            Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
+            await LoadAuditAsync();
             DeviceUrlCopied = false;
             Error = null;
         }
@@ -445,7 +476,7 @@
     {
         await Api.DecideApprovalAsync(id, decision, _disposeCts.Token);
         Approvals = await Api.GetApprovalsAsync(_disposeCts.Token);
-        Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
+        await LoadAuditAsync();
     }
 
     private async Task SelectShellAsync(string id)
@@ -487,13 +518,70 @@
         await Api.SaveSecretAsync(SecretName.Trim(), SecretValue, string.IsNullOrWhiteSpace(SecretDescription) ? null : SecretDescription.Trim(), allowed, _disposeCts.Token);
         SecretValue = string.Empty;
         Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
-        Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
+        await LoadAuditAsync();
     }
 
     private async Task DeleteSecretAsync(string name)
     {
         await Api.DeleteSecretAsync(name, _disposeCts.Token);
         Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
+    }
+
+    private (DateTimeOffset From, DateTimeOffset To) GetAuditRange()
+    {
+        var local = AuditDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        var from = new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+        return (from, from.AddDays(1));
+    }
+
+    private async Task LoadAuditAsync()
+    {
+        var (from, to) = GetAuditRange();
+        Audit = await Api.GetAuditAsync(500, from, to, _disposeCts.Token);
+    }
+
+    private async Task PreviousAuditDayAsync()
+    {
+        AuditDate = AuditDate.AddDays(-1);
+        ConfirmAuditCleanup = false;
+        AuditMessage = null;
+        await LoadAuditAsync();
+    }
+
+    private async Task NextAuditDayAsync()
+    {
+        AuditDate = AuditDate.AddDays(1);
+        ConfirmAuditCleanup = false;
+        AuditMessage = null;
+        await LoadAuditAsync();
+    }
+
+    private async Task TodayAuditAsync()
+    {
+        AuditDate = DateOnly.FromDateTime(DateTime.Now);
+        ConfirmAuditCleanup = false;
+        AuditMessage = null;
+        await LoadAuditAsync();
+    }
+
+    private async Task AuditDateChangedAsync(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var value))
+        {
+            AuditDate = value;
+            ConfirmAuditCleanup = false;
+            AuditMessage = null;
+            await LoadAuditAsync();
+        }
+    }
+
+    private async Task CleanupAuditAsync()
+    {
+        var (before, _) = GetAuditRange();
+        var deleted = await Api.CleanupAuditAsync(before, _disposeCts.Token);
+        ConfirmAuditCleanup = false;
+        AuditMessage = $"Deleted {deleted} older audit entr{(deleted == 1 ? "y" : "ies")}.";
+        await LoadAuditAsync();
     }
 
     public async ValueTask DisposeAsync()
