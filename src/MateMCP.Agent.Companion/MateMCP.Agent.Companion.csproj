@@ -30,4 +30,11 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
     <PackageReference Include="Bluent.UI" Version="2.0.0" />
   </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+    <!-- AppNotificationManager can be unavailable in self-contained unpackaged builds because
+         Windows App SDK app notifications depend on the Singleton package. Keep a native
+         Win32 toast fallback for the installed Desktop package. -->
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+  </ItemGroup>
 </Project>
