@@ -11,20 +11,43 @@
             <div class="muted">Latest package: @updatedAt.LocalDateTime</div>
         }
     </div>
+    @if (!string.IsNullOrWhiteSpace(UpdateStatus?.LastFailure))
+    {
+        <div class="error">@UpdateStatus.LastFailure</div>
+    }
     <div class="row update-toggle-row">
         <label class="update-toggle">
-            <input type="checkbox" checked="@AutoUpdateEnabled" @onchange="SetAutoUpdate" />
+            <input type="checkbox" checked="@AutoUpdateEnabled" @onchange="SetAutoUpdateAsync" disabled="@Updating" />
             <span>Automatically install new Desktop builds while Companion is running</span>
         </label>
-        <div class="muted">Auto Update is opt-in. Agent and Companion are upgraded together using the official MateMCP bootstrap installer.</div>
+        <div class="muted">Auto Update is opt-in. Agent and Companion are upgraded together using the official MateMCP Desktop package.</div>
     </div>
-    <div class="actions">
-        <Button Text="Check for updates" OnClick="CheckNowAsync" />
-        @if (UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
-        {
-            <Button Text="Update now" OnClick="() => BeginUpdate(assetId)" />
-        }
-    </div>
+    @if (Updating)
+    {
+        <div class="row update-progress-row" aria-live="polite">
+            @if (UpdateProgress?.Percentage is { } percentage)
+            {
+                <progress class="update-progress-bar" max="100" value="@percentage"></progress>
+                <div class="muted">@UpdateProgress.Message @percentage%</div>
+            }
+            else
+            {
+                <progress class="update-progress-bar" max="100"></progress>
+                <div class="muted">@(UpdateProgress?.Message ?? "Preparing update...")</div>
+            }
+            <div class="muted">Companion will stay open while the package downloads and will close only when installation is ready to start.</div>
+        </div>
+    }
+    else
+    {
+        <div class="actions">
+            <Button Text="Check for updates" OnClick="CheckNowAsync" />
+            @if (UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
+            {
+                <Button Text="Update now" OnClick="() => BeginUpdateAsync(assetId)" />
+            }
+        </div>
+    }
     @if (!string.IsNullOrWhiteSpace(Error))
     {
         <div class="error">@Error</div>
@@ -35,13 +58,17 @@
     private readonly CancellationTokenSource _cts = new();
     private Task? _worker;
     private DesktopUpdateStatus? UpdateStatus { get; set; }
+    private DesktopUpdateProgress? UpdateProgress { get; set; }
     private string? Error { get; set; }
     private bool Checking { get; set; }
+    private bool Updating { get; set; }
     private bool AutoUpdateEnabled { get; set; }
 
-    private string StatusText => Checking
-        ? "Checking..."
-        : UpdateStatus?.Message ?? "Checking for updates in the background...";
+    private string StatusText => Updating
+        ? UpdateProgress?.Message ?? "Preparing update..."
+        : Checking
+            ? "Checking..."
+            : UpdateStatus?.Message ?? "Checking for updates in the background...";
 
     protected override void OnInitialized()
     {
@@ -51,14 +78,14 @@
 
     private async Task CheckNowAsync()
     {
-        if (Checking) return;
+        if (Checking || Updating) return;
         Checking = true;
         Error = null;
         try
         {
             UpdateStatus = await Updates.CheckAsync(_cts.Token);
             if (AutoUpdateEnabled && UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
-                BeginUpdate(assetId);
+                await BeginUpdateAsync(assetId);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception ex)
@@ -71,18 +98,43 @@
         }
     }
 
-    private void SetAutoUpdate(ChangeEventArgs args)
+    private async Task SetAutoUpdateAsync(ChangeEventArgs args)
     {
         AutoUpdateEnabled = args.Value is bool value && value;
         Updates.AutoUpdateEnabled = AutoUpdateEnabled;
         if (AutoUpdateEnabled && UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
-            BeginUpdate(assetId);
+            await BeginUpdateAsync(assetId);
     }
 
-    private void BeginUpdate(long assetId)
+    private async Task BeginUpdateAsync(long assetId)
     {
+        if (Updating) return;
+        Updating = true;
+        UpdateProgress = new DesktopUpdateProgress("Preparing", "Preparing update...", 0, null);
         Error = null;
-        Updates.BeginUpdate(assetId);
+        StateHasChanged();
+
+        var progress = new Progress<DesktopUpdateProgress>(value =>
+        {
+            UpdateProgress = value;
+            _ = InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await Updates.BeginUpdateAsync(assetId, progress, _cts.Token);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Update failed before installation started: {ex.Message}. Companion is still running; check your network and try again.";
+        }
+        finally
+        {
+            Updating = false;
+            UpdateProgress = null;
+            StateHasChanged();
+        }
     }
 
     private async Task RunUpdateLoopAsync(CancellationToken ct)
