@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace MateMCP.Agent.Configuration;
@@ -9,7 +8,6 @@ public static class ConfigurationBootstrap
     {
         var directory = GetUserDataDirectory();
         Directory.CreateDirectory(directory);
-        TryRestoreDelegatedMacOwnership(directory);
 
         var path = Path.Combine(directory, "appsettings.json");
         if (File.Exists(path)) return path;
@@ -61,23 +59,10 @@ public static class ConfigurationBootstrap
         try
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            TryRestoreDelegatedMacOwnership(path);
         }
         catch
         {
             // Best effort. Sensitive values are not expected in this file.
         }
     }
-
-    public static void TryRestoreDelegatedMacOwnership(string path)
-    {
-        if (!OperatingSystem.IsMacOS()) return;
-        var uidText = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_UID");
-        if (!uint.TryParse(uidText, out var uid)) return;
-        try { _ = Chown(path, uid, uint.MaxValue); }
-        catch { }
-    }
-
-    [DllImport("libc", EntryPoint = "chown", SetLastError = true)]
-    private static extern int Chown(string path, uint owner, uint group);
 }
