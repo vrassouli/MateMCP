@@ -14,6 +14,8 @@ MateMCP gives an AI client controlled, project-scoped access to a user's compute
 
 There are no Agent tokens to copy and no shared admin account in the normal user flow. Each user can own multiple independently revocable Agents. OAuth tokens are accepted only when their user, Agent, resource, and scopes all match.
 
+> **After an Agent upgrade that adds or changes MCP tools:** ChatGPT may keep the previously approved tool snapshot instead of discovering the new actions automatically. See [ChatGPT MCP tool refresh after Agent updates](docs/chatgpt-tool-refresh.md) to compare the live Agent toolset with ChatGPT and refresh/recreate the app actions when needed.
+
 ## Install / upgrade on macOS
 
 For Apple Silicon Macs, this single command downloads the latest stable MateMCP Desktop package, extracts it, upgrades any existing Agent installation, installs the native Companion, starts the Agent, opens Companion for the interactive install, and cleans up the temporary files:

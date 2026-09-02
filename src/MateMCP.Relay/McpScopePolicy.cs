@@ -6,6 +6,8 @@ public static class McpScopePolicy
     {
         "filesystem_write" => "mcp:write",
         "shell_exec" => "mcp:shell",
+        "ssh_session_start" => "mcp:shell",
+        "ssh_session_authenticate" => "mcp:shell",
         "shell_session_start" => "mcp:shell",
         "shell_session_read" => "mcp:shell",
         "shell_session_write" => "mcp:shell",

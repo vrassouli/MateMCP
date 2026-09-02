@@ -18,6 +18,8 @@ public sealed class SshTools(
     IApprovalService approvals,
     IOptions<MateOptions> options,
     InteractiveShellSessionManager sessions,
+    ICredentialStore secrets,
+    CredentialInjectionRateLimiter injectionRateLimiter,
     AgentActivityGate? activity = null)
 {
     private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
@@ -59,7 +61,7 @@ public sealed class SshTools(
 
         try
         {
-            var result = await sessions.StartAsync(command, workingDirectory, cancellationToken);
+            var result = await sessions.StartAsync(command, workingDirectory, cancellationToken, ShellSessionKind.Ssh);
             await audit.WriteAsync("shell.ssh.start", $"{scope}:{destination}", $"started:{result.SessionId}", cancellationToken);
             return result;
         }
@@ -68,6 +70,36 @@ public sealed class SshTools(
             await audit.WriteAsync("shell.ssh.start", $"{scope}:{destination}", $"failed:{ex.GetType().Name}", CancellationToken.None);
             throw new McpException($"Could not start interactive SSH session: {ex.Message}");
         }
+    }
+
+    [McpServerTool(
+        Name = "ssh_session_authenticate",
+        Title = "Authenticate SSH session",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = true)]
+    [Description("Authenticates an SSH session created by ssh_session_start using a locally stored named credential. The secret value stays on the Agent and is never returned to the AI. Set submit=true to press Enter after the secret.")]
+    public async Task<object> Authenticate(
+        [Description("Session id returned by ssh_session_start.")] string sessionId,
+        [Description("Name of a locally stored credential. The credential value is never sent to the AI.")] string credential,
+        [Description("Whether to press Enter after injecting the credential.")] bool submit = true,
+        CancellationToken cancellationToken = default)
+    {
+        ShellSessionKind kind;
+        try { kind = sessions.GetKind(sessionId); }
+        catch (KeyNotFoundException ex) { throw new McpException(ex.Message); }
+
+        if (kind != ShellSessionKind.Ssh)
+        {
+            await audit.WriteCredentialUsageAsync(credential, UserSecretInfo.SshSessionAuthenticateTool,
+                $"session:{sessionId[..Math.Min(8, sessionId.Length)]}", "denied:ssh-session-required", cancellationToken);
+            throw new McpException("SSH authentication is only allowed for sessions created by ssh_session_start.");
+        }
+
+        return await ShellSecretInjector.InjectAsync(sessionId, credential, submit, UserSecretInfo.SshSessionAuthenticateTool,
+            sessions, secrets, injectionRateLimiter, approvals, audit, cancellationToken,
+            UserSecretInfo.ShellSessionSendSecretTool);
     }
 
     private IDisposable EnterActivity()

@@ -6,6 +6,8 @@ public sealed class McpScopePolicyTests
 {
     [Theory]
     [InlineData("shell_exec")]
+    [InlineData("ssh_session_start")]
+    [InlineData("ssh_session_authenticate")]
     [InlineData("shell_session_start")]
     [InlineData("shell_session_read")]
     [InlineData("shell_session_write")]
