@@ -9,21 +9,21 @@ namespace MateMCP.Agent.Desktop;
 public sealed class CompanionNotificationPresence
 {
     public static readonly TimeSpan HeartbeatLifetime = TimeSpan.FromSeconds(6);
-    private long _lastReadyUnixMilliseconds;
+    private long _lastReadyUtcTicks;
 
     public void MarkReady() => MarkReady(DateTimeOffset.UtcNow);
 
     public void MarkReady(DateTimeOffset now)
-        => Interlocked.Exchange(ref _lastReadyUnixMilliseconds, now.ToUnixTimeMilliseconds());
+        => Interlocked.Exchange(ref _lastReadyUtcTicks, now.UtcTicks);
 
     public bool IsReady => IsReadyAt(DateTimeOffset.UtcNow);
 
     public bool IsReadyAt(DateTimeOffset now)
     {
-        var value = Volatile.Read(ref _lastReadyUnixMilliseconds);
+        var value = Volatile.Read(ref _lastReadyUtcTicks);
         if (value <= 0) return false;
 
-        var lastReady = DateTimeOffset.FromUnixTimeMilliseconds(value);
+        var lastReady = new DateTimeOffset(value, TimeSpan.Zero);
         var age = now - lastReady;
         return age >= TimeSpan.Zero && age <= HeartbeatLifetime;
     }
