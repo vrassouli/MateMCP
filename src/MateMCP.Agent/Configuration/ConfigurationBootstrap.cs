@@ -65,4 +65,12 @@ public static class ConfigurationBootstrap
             // Best effort. Sensitive values are not expected in this file.
         }
     }
+
+    public static void TryRestoreDelegatedMacOwnership(string path)
+    {
+        // Ownership is intentionally managed by configure-agent-mode-macos.sh:
+        // root-owned while elevated, restored to the user when returning to Normal.
+        // Keep this compatibility hook so secret-index migration does not override
+        // the stronger mode-level ownership policy.
+    }
 }
