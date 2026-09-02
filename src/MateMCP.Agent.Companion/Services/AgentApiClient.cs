@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -63,7 +64,13 @@ public sealed class AgentApiClient : IDisposable
         => await _http.GetFromJsonAsync<List<ShellSessionSnapshot>>("shell/sessions", Json, ct) ?? [];
 
     public async Task<ShellSessionSnapshot?> ReadShellSessionAsync(string id, int offset, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<ShellSessionSnapshot>($"shell/sessions/{Uri.EscapeDataString(id)}?offset={Math.Max(0, offset)}", Json, ct);
+    {
+        using var response = await _http.GetAsync(
+            $"shell/sessions/{Uri.EscapeDataString(id)}?offset={Math.Max(0, offset)}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ShellSessionSnapshot>(Json, ct);
+    }
 
     public async Task SendShellInputAsync(string id, string text, bool submit = true, CancellationToken ct = default)
     {
