@@ -117,7 +117,6 @@ public sealed class CompanionHostUiTests
         var background = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Desktop", "BackgroundDesktopUpdateService.cs"));
         var program = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Program.cs"));
         var api = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
-        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
         var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdatePanel.razor"));
 
         Assert.Contains(": BackgroundService", background, StringComparison.Ordinal);
