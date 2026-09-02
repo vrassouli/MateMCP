@@ -34,6 +34,43 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("new MutationObserver", index, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Companion_devices_keeps_local_identity_visible_when_control_plane_is_unavailable()
+    {
+        var panel = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "DevicesPanel.razor"));
+        var service = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent", "Relay", "DeviceManagementService.cs"));
+
+        Assert.Contains("Status.UpstreamError", panel, StringComparison.Ordinal);
+        Assert.Contains("Local device identity", panel, StringComparison.Ordinal);
+        Assert.Contains("if (!response.IsSuccessStatusCode)", service, StringComparison.Ordinal);
+        Assert.Contains("new DeviceManagementStatus(true", service, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Companion_activity_defaults_to_a_date_range_and_requires_cleanup_confirmation()
+    {
+        var main = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var client = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+
+        Assert.Contains("DateOnly.FromDateTime(DateTime.Now)", main, StringComparison.Ordinal);
+        Assert.Contains("type=\"date\"", main, StringComparison.Ordinal);
+        Assert.Contains("ConfirmAuditCleanup", main, StringComparison.Ordinal);
+        Assert.Contains("Api.CleanupAuditAsync", main, StringComparison.Ordinal);
+        Assert.Contains("&from=", client, StringComparison.Ordinal);
+        Assert.Contains("&to=", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mac_secret_metadata_uses_stable_application_support_path_and_migrates_legacy_index()
+    {
+        var store = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent", "Security", "UserSecretStore.cs"));
+
+        Assert.Contains("Library", store, StringComparison.Ordinal);
+        Assert.Contains("Application Support", store, StringComparison.Ordinal);
+        Assert.Contains("File.Copy(applicationDataPath, stablePath, overwrite: false)", store, StringComparison.Ordinal);
+        Assert.Contains("The actual secret values remain in Keychain", store, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
