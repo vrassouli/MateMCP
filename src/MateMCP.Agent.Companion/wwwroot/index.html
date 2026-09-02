@@ -18,6 +18,56 @@
             } else {
                 media.addListener(applySystemTheme);
             }
+
+            // Mac Catalyst WebView keyboard focus can fail to advance between HTML controls.
+            // Keep normal browser semantics for text editing, but explicitly implement Tab and
+            // Shift+Tab focus traversal so Companion forms are keyboard-usable on both platforms.
+            document.addEventListener('keydown', event => {
+                if (event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+
+                const selector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+                const focusable = Array.from(document.querySelectorAll(selector)).filter(element => {
+                    const style = window.getComputedStyle(element);
+                    return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
+                });
+                if (focusable.length === 0) return;
+
+                const current = focusable.indexOf(document.activeElement);
+                const next = event.shiftKey
+                    ? (current <= 0 ? focusable.length - 1 : current - 1)
+                    : (current < 0 || current === focusable.length - 1 ? 0 : current + 1);
+                event.preventDefault();
+                focusable[next].focus();
+            }, true);
+
+            // Terminal-style follow mode. Output keeps the viewport pinned to the latest line
+            // until the user intentionally scrolls upward; returning near the bottom resumes it.
+            const observedTerminals = new WeakSet();
+            const attachTerminalFollow = terminal => {
+                if (observedTerminals.has(terminal)) return;
+                observedTerminals.add(terminal);
+                let follow = true;
+                const nearBottom = () => terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight <= 24;
+                terminal.addEventListener('scroll', () => { follow = nearBottom(); }, { passive: true });
+                const observer = new MutationObserver(() => {
+                    if (!follow) return;
+                    requestAnimationFrame(() => { terminal.scrollTop = terminal.scrollHeight; });
+                });
+                observer.observe(terminal, { childList: true, characterData: true, subtree: true });
+                requestAnimationFrame(() => { terminal.scrollTop = terminal.scrollHeight; });
+            };
+
+            const attachAvailableTerminals = root => {
+                if (root instanceof Element && root.matches('.terminal')) attachTerminalFollow(root);
+                root.querySelectorAll?.('.terminal').forEach(attachTerminalFollow);
+            };
+            document.addEventListener('DOMContentLoaded', () => {
+                attachAvailableTerminals(document);
+                new MutationObserver(mutations => {
+                    for (const mutation of mutations)
+                        mutation.addedNodes.forEach(node => { if (node instanceof Element) attachAvailableTerminals(node); });
+                }).observe(document.body, { childList: true, subtree: true });
+            });
         })();
     </script>
     <link href="_content/Bluent.UI/bluent.ui.theme.default.min.css" rel="stylesheet" />

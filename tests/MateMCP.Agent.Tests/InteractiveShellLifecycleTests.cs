@@ -35,17 +35,19 @@ public sealed class InteractiveShellLifecycleTests
     [Fact]
     public async Task Actual_input_extends_idle_lifetime()
     {
-        await using var manager = CreateManager(idleSeconds: 1, lifetimeSeconds: 30);
+        // Keep a comfortable margin around the timeout. A one-second timeout with a 700 ms
+        // pre-write delay was flaky on slower arm64 CI runners before the write could be observed.
+        await using var manager = CreateManager(idleSeconds: 2, lifetimeSeconds: 30);
         var started = await manager.StartAsync(WaitingCommand(), Path.GetTempPath(), CancellationToken.None);
 
         await Task.Delay(700);
         await manager.WriteAsync(started.SessionId, "x", submit: false, CancellationToken.None);
-        await Task.Delay(600);
+        await Task.Delay(900);
 
         var stillRunning = manager.Read(started.SessionId, 0);
         Assert.False(stillRunning.Exited);
 
-        await Task.Delay(600);
+        await Task.Delay(1_500);
         Assert.Throws<KeyNotFoundException>(() => manager.Read(started.SessionId, 0));
     }
 

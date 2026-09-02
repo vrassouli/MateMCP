@@ -149,10 +149,18 @@ app.MapGet("/credential-audit", async (HttpContext context, AuditLog audit, int?
     if (!IsLoopback(context)) return Results.NotFound();
     return Results.Ok(await audit.ReadCredentialUsageAsync(limit ?? 200, ct));
 });
-app.MapGet("/audit", async (HttpContext context, AuditLog audit, int? limit, CancellationToken ct) =>
+app.MapGet("/audit", async (HttpContext context, AuditLog audit, int? limit, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
-    return Results.Ok(await audit.ReadAsync(limit ?? 200, ct));
+    try { return Results.Ok(await audit.ReadAsync(limit ?? 200, from, to, ct)); }
+    catch (ArgumentException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
+});
+app.MapDelete("/audit", async (HttpContext context, AuditLog audit, DateTimeOffset? before, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    if (before is null) return Results.BadRequest(new { error = "The before cutoff is required." });
+    var deleted = await audit.DeleteBeforeAsync(before.Value, ct);
+    return Results.Ok(new { deleted });
 });
 
 app.MapGet("/shell/sessions", (HttpContext context, InteractiveShellSessionManager sessions) =>

@@ -17,6 +17,15 @@
 }
 else
 {
+    @if (!string.IsNullOrWhiteSpace(Status.UpstreamError))
+    {
+        <div class="panel">
+            <strong>Device service temporarily unavailable</strong>
+            <div class="muted" style="margin-top:8px">@Status.UpstreamError</div>
+            <div class="muted" style="margin-top:8px">Local device identity is still shown below. Retry after the MateMCP API/control-plane deployment is healthy.</div>
+        </div>
+    }
+
     <div class="panel">
         <strong>This device</strong>
         @if (CurrentDevice is not null)
@@ -47,8 +56,17 @@ else
         else if (!string.IsNullOrWhiteSpace(Status.CurrentDeviceId))
         {
             <div class="row">
-                <strong>Disconnected device identity</strong>
-                <div class="muted">@Status.CurrentDeviceId can no longer authenticate with MateMCP.</div>
+                <strong>@(string.IsNullOrWhiteSpace(Status.UpstreamError) ? "Disconnected device identity" : "Local device identity")</strong>
+                <div class="muted">
+                    @if (string.IsNullOrWhiteSpace(Status.UpstreamError))
+                    {
+                        <text>@Status.CurrentDeviceId can no longer authenticate with MateMCP.</text>
+                    }
+                    else
+                    {
+                        <text>@Status.CurrentDeviceId is enrolled locally; remote device details could not be refreshed.</text>
+                    }
+                </div>
             </div>
             <div class="actions">
                 @if (!ConfirmCurrentRemoval)
@@ -84,7 +102,7 @@ else
             <strong>Other devices</strong>
             @if (OtherDevices.Count == 0)
             {
-                <div class="muted" style="margin-top:10px">No other active devices are linked to this account.</div>
+                <div class="muted" style="margin-top:10px">@(string.IsNullOrWhiteSpace(Status.UpstreamError) ? "No other active devices are linked to this account." : "Other devices could not be refreshed while the device service is unavailable.")</div>
             }
             else
             {

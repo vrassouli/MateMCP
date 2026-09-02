@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -111,8 +112,23 @@ public sealed class AgentApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task<IReadOnlyList<AuditEntry>> GetAuditAsync(int limit = 200, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<AuditEntry>>($"audit?limit={Math.Clamp(limit, 1, 1000)}", Json, ct) ?? [];
+    public async Task<IReadOnlyList<AuditEntry>> GetAuditAsync(int limit = 200, DateTimeOffset? from = null,
+        DateTimeOffset? to = null, CancellationToken ct = default)
+    {
+        var query = $"audit?limit={Math.Clamp(limit, 1, 1000)}";
+        if (from is not null) query += "&from=" + Uri.EscapeDataString(from.Value.ToString("o", CultureInfo.InvariantCulture));
+        if (to is not null) query += "&to=" + Uri.EscapeDataString(to.Value.ToString("o", CultureInfo.InvariantCulture));
+        return await _http.GetFromJsonAsync<List<AuditEntry>>(query, Json, ct) ?? [];
+    }
+
+    public async Task<int> CleanupAuditAsync(DateTimeOffset before, CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync(
+            "audit?before=" + Uri.EscapeDataString(before.ToString("o", CultureInfo.InvariantCulture)), ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<AuditCleanupResult>(Json, ct);
+        return result?.Deleted ?? 0;
+    }
 
     public void Dispose() => _http.Dispose();
 }
@@ -120,7 +136,8 @@ public sealed class AgentApiClient : IDisposable
 public sealed record AgentStatus(string Service, string Endpoint, string Management, string Configuration, IReadOnlyList<string> Projects,
     bool ShellApproval, int InteractiveSessions, RelayStatus Relay, string Credentials);
 
-public sealed record DeviceManagementStatus(bool Enrolled, bool EnrollmentSuppressed, string? CurrentDeviceId, IReadOnlyList<ManagedDevice> Devices);
+public sealed record DeviceManagementStatus(bool Enrolled, bool EnrollmentSuppressed, string? CurrentDeviceId,
+    IReadOnlyList<ManagedDevice> Devices, string? UpstreamError = null);
 public sealed record ManagedDevice(string Id, string Name, string Platform, string Status, DateTimeOffset CreatedAt, DateTimeOffset? LastSeenAt, string McpUrl, bool IsCurrent);
 
 public sealed record DesktopBackgroundUpdateStatus(bool AutoUpdateEnabled, string State, string Message,
@@ -131,3 +148,4 @@ public sealed record UserSecretInfo(string Name, string? Description, DateTimeOf
 public sealed record ShellSessionSnapshot(string SessionId, int ProcessId, string Output, int NextOffset, bool OutputTruncated, bool Exited,
     int? ExitCode, string WorkingDirectory, DateTimeOffset CreatedAt, DateTimeOffset LastTouched);
 public sealed record AuditEntry(DateTimeOffset Timestamp, string Capability, string Target, string Result, string? Credential, string? Tool);
+public sealed record AuditCleanupResult(int Deleted);

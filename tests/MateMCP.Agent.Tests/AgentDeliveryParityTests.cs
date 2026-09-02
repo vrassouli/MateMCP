@@ -32,6 +32,19 @@ public sealed class AgentDeliveryParityTests
         Assert.DoesNotContain("Start-Process -FilePath $Exe", windows, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Windows_agent_upgrade_preserves_companion_until_companion_installer_replaces_it()
+    {
+        var root = FindRepositoryRoot();
+        var windows = File.ReadAllText(Path.Combine(root, "scripts", "install-windows.ps1"));
+        var desktop = File.ReadAllText(Path.Combine(root, "scripts", "install-desktop-windows.ps1"));
+
+        Assert.Contains("'Companion'", windows, StringComparison.Ordinal);
+        Assert.Contains("$PreserveNames", windows, StringComparison.Ordinal);
+        Assert.Contains("& $AgentInstaller -Source $AgentPayload -NoStart -AgentOnly", desktop, StringComparison.Ordinal);
+        Assert.Contains("& $CompanionInstaller -Source $CompanionPayload -NoStart", desktop, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
