@@ -21,6 +21,12 @@ public sealed class ApprovalNotificationWatcher(AgentApiClient api, NativeApprov
         {
             try
             {
+                // Tell the Agent to suppress its macOS fallback only while this notifier is
+                // actually initialized, available, and actively polling. The heartbeat expires
+                // quickly if Companion starts slowly, crashes, loses permission, or Agent restarts.
+                if (notifier.IsAvailable)
+                    await api.MarkApprovalNotificationsReadyAsync(ct);
+
                 var approvals = await api.GetApprovalsAsync(ct);
                 var active = approvals.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
                 _notified.RemoveWhere(id => !active.Contains(id));
