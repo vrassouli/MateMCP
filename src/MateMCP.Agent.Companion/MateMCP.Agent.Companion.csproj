@@ -10,7 +10,7 @@
     <EnableDefaultCssItems>false</EnableDefaultCssItems>
     <Nullable>enable</Nullable>
     <MauiXamlInflator>SourceGen</MauiXamlInflator>
-    <ApplicationTitle>MateMCP Agent</ApplicationTitle>
+    <ApplicationTitle>MateMCP Companion</ApplicationTitle>
     <ApplicationId>com.matemcp.agent.companion</ApplicationId>
     <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>

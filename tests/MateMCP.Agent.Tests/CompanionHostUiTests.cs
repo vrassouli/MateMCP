@@ -13,8 +13,45 @@ public sealed class CompanionHostUiTests
         Assert.Contains("type=\"button\" class=\"reload\"", index, StringComparison.Ordinal);
         Assert.Contains("window.location.reload()", index, StringComparison.Ordinal);
         Assert.DoesNotContain("href=\".\" class=\"reload\"", index, StringComparison.Ordinal);
-        Assert.Contains("#blazor-error-ui { display: none;", css, StringComparison.Ordinal);
+        Assert.Contains("#blazor-error-ui {", css, StringComparison.Ordinal);
+        Assert.Contains("display: none;", css, StringComparison.Ordinal);
         Assert.Contains("#blazor-error-ui .blazor-error-content", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Companion_shell_tracks_system_theme_uses_consistent_title_and_independent_scrolling()
+    {
+        var root = FindRepositoryRoot();
+        var companionRoot = Path.Combine(root, "src", "MateMCP.Agent.Companion");
+        var index = File.ReadAllText(Path.Combine(companionRoot, "wwwroot", "index.html"));
+        var css = File.ReadAllText(Path.Combine(companionRoot, "wwwroot", "css", "app.css"));
+        var main = File.ReadAllText(Path.Combine(companionRoot, "Components", "Main.razor"));
+        var imports = File.ReadAllText(Path.Combine(companionRoot, "Components", "_Imports.razor"));
+        var app = File.ReadAllText(Path.Combine(companionRoot, "App.xaml.cs"));
+        var project = File.ReadAllText(Path.Combine(companionRoot, "MateMCP.Agent.Companion.csproj"));
+
+        Assert.Contains("data-bui-theme=\"light\"", index, StringComparison.Ordinal);
+        Assert.Contains("prefers-color-scheme: dark", index, StringComparison.Ordinal);
+        Assert.Contains("media.addEventListener('change', applySystemTheme)", index, StringComparison.Ordinal);
+        Assert.Contains("<title>MateMCP Companion</title>", index, StringComparison.Ordinal);
+        Assert.Contains("<ApplicationTitle>MateMCP Companion</ApplicationTitle>", project, StringComparison.Ordinal);
+        Assert.Contains("Title = \"MateMCP Companion\"", app, StringComparison.Ordinal);
+
+        Assert.Contains("MateMCP Companion", main, StringComparison.Ordinal);
+        Assert.Contains("Local Agent management</div>", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Local Agent management · Bluent UI", main, StringComparison.Ordinal);
+        Assert.Contains("@using Bluent.UI.Icons", imports, StringComparison.Ordinal);
+        Assert.Contains("FluentIcons.Home", main, StringComparison.Ordinal);
+        Assert.Contains("FluentIcons.ArrowSyncCircle", main, StringComparison.Ordinal);
+
+        Assert.Contains("#app {", css, StringComparison.Ordinal);
+        Assert.Contains("height: 100vh;", css, StringComparison.Ordinal);
+        Assert.Contains(".sidebar {", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto;", css, StringComparison.Ordinal);
+        Assert.Contains(".content {", css, StringComparison.Ordinal);
+        Assert.Contains("overflow: auto;", css, StringComparison.Ordinal);
+        Assert.Contains("var(--colorNeutralBackground1", css, StringComparison.Ordinal);
+        Assert.Contains("var(--colorStatusSuccessForeground1", css, StringComparison.Ordinal);
     }
 
     [Fact]
