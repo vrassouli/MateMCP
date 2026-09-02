@@ -11,7 +11,7 @@
             <div class="muted">Latest package: @updatedAt.LocalDateTime</div>
         }
     </div>
-    @if (!string.IsNullOrWhiteSpace(UpdateStatus?.LastFailure))
+    @if (!Updating && !string.IsNullOrWhiteSpace(UpdateStatus?.LastFailure))
     {
         <div class="error">@UpdateStatus.LastFailure</div>
     }
@@ -84,8 +84,12 @@
         try
         {
             UpdateStatus = await Updates.CheckAsync(_cts.Token);
-            if (AutoUpdateEnabled && UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
+            if (AutoUpdateEnabled &&
+                UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId } &&
+                string.IsNullOrWhiteSpace(UpdateStatus.LastFailure))
+            {
                 await BeginUpdateAsync(assetId);
+            }
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception ex)
@@ -111,6 +115,8 @@
         if (Updating) return;
         Updating = true;
         UpdateProgress = new DesktopUpdateProgress("Preparing", "Preparing update...", 0, null);
+        if (UpdateStatus is not null)
+            UpdateStatus = UpdateStatus with { LastFailure = null };
         Error = null;
         StateHasChanged();
 
