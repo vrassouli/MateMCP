@@ -9,6 +9,8 @@ on:
       - 'src/MateMCP.Agent/**'
       - 'scripts/bootstrap-macos.sh'
       - 'scripts/bootstrap-windows.ps1'
+      - 'scripts/configure-agent-mode-macos.sh'
+      - 'scripts/configure-agent-mode-windows.ps1'
       - 'scripts/install-macos.sh'
       - 'scripts/uninstall-macos.sh'
       - 'scripts/install-windows.ps1'
@@ -30,6 +32,8 @@ on:
       - 'src/MateMCP.Agent/**'
       - 'scripts/bootstrap-macos.sh'
       - 'scripts/bootstrap-windows.ps1'
+      - 'scripts/configure-agent-mode-macos.sh'
+      - 'scripts/configure-agent-mode-windows.ps1'
       - 'scripts/install-macos.sh'
       - 'scripts/uninstall-macos.sh'
       - 'scripts/install-windows.ps1'
@@ -66,8 +70,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Verify bootstrap syntax
-        run: bash -n scripts/bootstrap-macos.sh
+      - name: Verify shell script syntax
+        run: bash -n scripts/bootstrap-macos.sh scripts/configure-agent-mode-macos.sh scripts/install-macos.sh scripts/install-desktop-macos.sh scripts/uninstall-macos.sh
       - name: Verify Xcode
         run: xcodebuild -version
       - name: Install .NET MAUI workload
@@ -93,6 +97,7 @@ jobs:
         run: |
           test -x package/agent-payload/MateMCP.Agent
           find package/companion-payload -maxdepth 1 -type d -name '*.app' | grep -q .
+          cp scripts/configure-agent-mode-macos.sh package/configure-agent-mode-macos.sh
           cp scripts/install-macos.sh package/install-macos.sh
           cp scripts/uninstall-macos.sh package/uninstall-macos.sh
           cp scripts/install-companion-macos.sh package/install-companion-macos.sh
@@ -104,8 +109,10 @@ jobs:
         run: |
           package/install-desktop-macos.sh --no-start
           test -x "$HOME/.local/share/matemcp/MateMCP.Agent"
+          test -x "$HOME/.local/share/matemcp/configure-agent-mode-macos.sh"
           test -d "$HOME/Applications/MateMCP Agent Companion.app"
           test -f "$HOME/Library/LaunchAgents/com.matemcp.agent.plist"
+          test "$(tr -d '[:space:]' < "$HOME/Library/Application Support/MateMCP/agent-run-mode.txt")" = "Normal"
           test ! -e "$HOME/Library/LaunchAgents/com.matemcp.agent.companion.plist"
           "$HOME/Library/Application Support/MateMCP/uninstall-desktop-macos.sh"
           test ! -e "$HOME/.local/share/matemcp/MateMCP.Agent"
@@ -124,9 +131,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Verify bootstrap syntax
+      - name: Verify PowerShell syntax
         shell: pwsh
-        run: '[void][scriptblock]::Create((Get-Content scripts/bootstrap-windows.ps1 -Raw))'
+        run: |
+          [void][scriptblock]::Create((Get-Content scripts/bootstrap-windows.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content scripts/configure-agent-mode-windows.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content scripts/install-windows.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content scripts/install-desktop-windows.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content scripts/uninstall-windows.ps1 -Raw))
       - name: Install .NET MAUI workload
         run: dotnet workload install maui
       - name: Restore Companion
@@ -142,6 +154,7 @@ jobs:
         run: |
           if (-not (Test-Path package/agent-payload/MateMCP.Agent.exe)) { throw 'Agent publish output missing.' }
           if (-not (Test-Path package/companion-payload/MateMCP.Agent.Companion.exe)) { throw 'Companion publish output missing.' }
+          Copy-Item scripts/configure-agent-mode-windows.ps1 package/configure-agent-mode-windows.ps1
           Copy-Item scripts/install-windows.ps1 package/install-windows.ps1
           Copy-Item scripts/uninstall-windows.ps1 package/uninstall-windows.ps1
           Copy-Item scripts/install-companion-windows.ps1 package/install-companion-windows.ps1
@@ -156,9 +169,11 @@ jobs:
           $startup = [Environment]::GetFolderPath('Startup')
           $programs = [Environment]::GetFolderPath('Programs')
           if (-not (Test-Path (Join-Path $root 'MateMCP.Agent.exe'))) { throw 'Installed Agent missing.' }
+          if (-not (Test-Path (Join-Path $root 'configure-agent-mode-windows.ps1'))) { throw 'Agent mode configurator missing.' }
           if (-not (Test-Path (Join-Path $root 'Companion\MateMCP.Agent.Companion.exe'))) { throw 'Installed Companion missing.' }
           if (-not (Test-Path (Join-Path $root 'start-agent-hidden.vbs'))) { throw 'Hidden Agent launcher missing.' }
           if (-not (Test-Path (Join-Path $startup 'MateMCP Agent.lnk'))) { throw 'Background Agent startup shortcut missing.' }
+          if ((Get-Content (Join-Path $env:APPDATA 'MateMCP\agent-run-mode.txt') -Raw).Trim() -ne 'Normal') { throw 'Default Agent mode was not persisted.' }
           if (Test-Path (Join-Path $startup 'MateMCP Agent Companion.lnk')) { throw 'Companion must not auto-start at sign-in.' }
           if (-not (Test-Path (Join-Path $programs 'MateMCP Agent Companion.lnk'))) { throw 'Companion Start Menu shortcut missing.' }
           & (Join-Path $root 'uninstall-desktop-windows.ps1')
