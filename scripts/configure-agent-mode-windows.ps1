@@ -26,6 +26,7 @@ try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction 
 Remove-Item $StartupShortcut -Force -ErrorAction SilentlyContinue
 
 if ($Mode -eq 'Elevated') {
+    Write-Warning 'Elevated mode gives MateMCP shell/filesystem tools Administrator-level access. Existing approval and credential policies still apply.'
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
