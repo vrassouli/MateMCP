@@ -5,4 +5,5 @@
   <Project Path="tests/MateMCP.Agent.Tests/MateMCP.Agent.Tests.csproj" />
   <Project Path="tests/MateMCP.Agent.CredentialPrompt/MateMCP.Agent.CredentialPrompt.csproj" />
   <Project Path="tests/MateMCP.Relay.Tests/MateMCP.Relay.Tests.csproj" />
+  <Project Path="tests/MateMCP.Api.Tests/MateMCP.Api.Tests.csproj" />
 </Solution>
