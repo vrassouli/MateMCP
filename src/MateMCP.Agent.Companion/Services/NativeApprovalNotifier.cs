@@ -11,6 +11,7 @@ namespace MateMCP.Agent.Companion.Services;
 
 public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
 {
+    private bool _prepared;
     private bool _initialized;
     public bool IsAvailable { get; private set; }
 
@@ -22,9 +23,39 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
     private MacNotificationDelegate? _macDelegate;
 #endif
 
+    /// <summary>
+    /// Performs platform notification registration that must happen during application launch.
+    /// On macOS, actionable notification delegates should be installed before launch finishes;
+    /// authorization can still complete asynchronously afterwards.
+    /// </summary>
+    public void Prepare()
+    {
+        if (_prepared) return;
+
+#if MACCATALYST
+        var center = UNUserNotificationCenter.Current;
+        _macDelegate = new MacNotificationDelegate(DecideFromNotificationAsync);
+        center.Delegate = _macDelegate;
+
+        var actions = new[]
+        {
+            UNNotificationAction.FromIdentifier("allow", "Approve", UNNotificationActionOptions.None),
+            UNNotificationAction.FromIdentifier("allow-session", "Approve for session", UNNotificationActionOptions.None),
+            UNNotificationAction.FromIdentifier("allow-always", "Always allow", UNNotificationActionOptions.None),
+            UNNotificationAction.FromIdentifier("deny", "Deny", UNNotificationActionOptions.Destructive)
+        };
+        var category = UNNotificationCategory.FromIdentifier("matemcp.approval", actions, [], UNNotificationCategoryOptions.None);
+        center.SetNotificationCategories(new NSSet<UNNotificationCategory>(category));
+#endif
+
+        _prepared = true;
+    }
+
     public async Task InitializeAsync()
     {
         if (_initialized) return;
+
+        Prepare();
 
 #if WINDOWS
         // Prefer the Windows App SDK notification path when its runtime support is
@@ -62,20 +93,8 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
         _useCompatToasts = true;
         IsAvailable = true;
 #elif MACCATALYST
-        var center = UNUserNotificationCenter.Current;
-        _macDelegate = new MacNotificationDelegate(DecideFromNotificationAsync);
-        center.Delegate = _macDelegate;
-
-        var actions = new[]
-        {
-            UNNotificationAction.FromIdentifier("allow", "Approve", UNNotificationActionOptions.None),
-            UNNotificationAction.FromIdentifier("allow-session", "Approve for session", UNNotificationActionOptions.None),
-            UNNotificationAction.FromIdentifier("allow-always", "Always allow", UNNotificationActionOptions.None),
-            UNNotificationAction.FromIdentifier("deny", "Deny", UNNotificationActionOptions.Destructive)
-        };
-        var category = UNNotificationCategory.FromIdentifier("matemcp.approval", actions, [], UNNotificationCategoryOptions.None);
-        center.SetNotificationCategories(new NSSet<UNNotificationCategory>(category));
-        var authorization = await center.RequestAuthorizationAsync(UNAuthorizationOptions.Alert | UNAuthorizationOptions.Sound);
+        var authorization = await UNUserNotificationCenter.Current.RequestAuthorizationAsync(
+            UNAuthorizationOptions.Alert | UNAuthorizationOptions.Sound);
         IsAvailable = authorization.Item1;
 #else
         await Task.CompletedTask;

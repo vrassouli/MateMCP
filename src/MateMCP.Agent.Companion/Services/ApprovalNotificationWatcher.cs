@@ -8,6 +8,10 @@ public sealed class ApprovalNotificationWatcher(AgentApiClient api, NativeApprov
 
     public void Start()
     {
+        // Register platform notification delegates/categories immediately on the app launch
+        // thread before starting the background polling loop. On macOS, delaying this work
+        // inside Task.Run can miss the launch window required for actionable notifications.
+        notifier.Prepare();
         _worker ??= Task.Run(() => RunAsync(_cts.Token));
     }
 
