@@ -20,15 +20,17 @@ public sealed class AgentDeliveryParityTests
         var root = FindRepositoryRoot();
         var mac = File.ReadAllText(Path.Combine(root, "scripts", "install-macos.sh"));
         var windows = File.ReadAllText(Path.Combine(root, "scripts", "install-windows.ps1"));
+        var windowsMode = File.ReadAllText(Path.Combine(root, "scripts", "configure-agent-mode-windows.ps1"));
 
         Assert.Contains("launchctl bootstrap", mac, StringComparison.Ordinal);
         Assert.Contains("launchctl kickstart", mac, StringComparison.Ordinal);
 
-        Assert.Contains("start-agent-hidden.vbs", windows, StringComparison.Ordinal);
-        Assert.Contains("CreateShortcut($StartupShortcut)", windows, StringComparison.Ordinal);
-        Assert.Contains("$shortcut.TargetPath = $WScript", windows, StringComparison.Ordinal);
-        Assert.Contains("$shortcut.Arguments = \"`\"$HiddenLauncher`\"\"", windows, StringComparison.Ordinal);
-        Assert.Contains("Start-Process -FilePath $WScript", windows, StringComparison.Ordinal);
+        Assert.Contains("configure-agent-mode-windows.ps1", windows, StringComparison.Ordinal);
+        Assert.Contains("& $ConfigureMode -Mode $AgentMode -NoStart", windows, StringComparison.Ordinal);
+        Assert.Contains("& $ConfigureMode -Mode $AgentMode", windows, StringComparison.Ordinal);
+        Assert.Contains("CreateShortcut($StartupShortcut)", windowsMode, StringComparison.Ordinal);
+        Assert.Contains("New-ScheduledTaskPrincipal", windowsMode, StringComparison.Ordinal);
+        Assert.Contains("-RunLevel Highest", windowsMode, StringComparison.Ordinal);
         Assert.DoesNotContain("Start-Process -FilePath $Exe", windows, StringComparison.Ordinal);
     }
 
@@ -41,7 +43,7 @@ public sealed class AgentDeliveryParityTests
 
         Assert.Contains("'Companion'", windows, StringComparison.Ordinal);
         Assert.Contains("$PreserveNames", windows, StringComparison.Ordinal);
-        Assert.Contains("& $AgentInstaller -Source $AgentPayload -NoStart -AgentOnly", desktop, StringComparison.Ordinal);
+        Assert.Contains("& $AgentInstaller -Source $AgentPayload -NoStart -AgentOnly -AgentMode $AgentMode", desktop, StringComparison.Ordinal);
         Assert.Contains("& $CompanionInstaller -Source $CompanionPayload -NoStart", desktop, StringComparison.Ordinal);
     }
 
