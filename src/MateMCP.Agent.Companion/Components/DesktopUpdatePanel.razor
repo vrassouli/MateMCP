@@ -1,5 +1,6 @@
 @implements IAsyncDisposable
 @inject DesktopUpdateService Updates
+@inject AgentApiClient Agent
 
 <div class="panel">
     <strong>Desktop updates</strong>
@@ -11,16 +12,31 @@
             <div class="muted">Latest package: @updatedAt.LocalDateTime</div>
         }
     </div>
+    @if (BackgroundUpdate is not null)
+    {
+        <div class="row">
+            <span class="muted">Background updater</span>
+            <div>@BackgroundUpdate.Message</div>
+            @if (BackgroundUpdate.LastChangedAt is { } lastChanged)
+            {
+                <div class="muted">Last activity: @lastChanged.LocalDateTime</div>
+            }
+        </div>
+    }
     @if (!Updating && !string.IsNullOrWhiteSpace(UpdateStatus?.LastFailure))
     {
         <div class="error">@UpdateStatus.LastFailure</div>
     }
+    @if (!Updating && !string.IsNullOrWhiteSpace(BackgroundUpdate?.LastFailure))
+    {
+        <div class="error">@BackgroundUpdate.LastFailure</div>
+    }
     <div class="row update-toggle-row">
         <label class="update-toggle">
             <input type="checkbox" checked="@AutoUpdateEnabled" @onchange="SetAutoUpdateAsync" disabled="@Updating" />
-            <span>Automatically install new Desktop builds while Companion is running</span>
+            <span>Automatically install new Desktop builds in the background</span>
         </label>
-        <div class="muted">Auto Update is opt-in. Agent and Companion are upgraded together using the official MateMCP Desktop package.</div>
+        <div class="muted">Auto Update is opt-in. The Agent checks and verifies official MateMCP Desktop packages even while Companion is closed, and defers installation while shell work or approvals are active.</div>
     </div>
     @if (Updating)
     {
@@ -35,7 +51,7 @@
                 <progress class="update-progress-bar" max="100"></progress>
                 <div class="muted">@(UpdateProgress?.Message ?? "Preparing update...")</div>
             }
-            <div class="muted">Companion will stay open while the package downloads and will close only when installation is ready to start.</div>
+            <div class="muted">Companion will stay open while a manual package downloads and will close only when installation is ready to start.</div>
         </div>
     }
     else
@@ -58,6 +74,7 @@
     private readonly CancellationTokenSource _cts = new();
     private Task? _worker;
     private DesktopUpdateStatus? UpdateStatus { get; set; }
+    private DesktopBackgroundUpdateStatus? BackgroundUpdate { get; set; }
     private DesktopUpdateProgress? UpdateProgress { get; set; }
     private string? Error { get; set; }
     private bool Checking { get; set; }
@@ -68,11 +85,20 @@
         ? UpdateProgress?.Message ?? "Preparing update..."
         : Checking
             ? "Checking..."
-            : UpdateStatus?.Message ?? "Checking for updates in the background...";
+            : UpdateStatus?.Message ?? "Ready to check for updates.";
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        AutoUpdateEnabled = Updates.AutoUpdateEnabled;
+        try
+        {
+            BackgroundUpdate = await Agent.GetDesktopUpdateStatusAsync(_cts.Token);
+            AutoUpdateEnabled = BackgroundUpdate?.AutoUpdateEnabled ?? false;
+        }
+        catch (Exception ex)
+        {
+            Error = $"Could not read background updater status: {ex.Message}";
+        }
+
         _worker = RunUpdateLoopAsync(_cts.Token);
     }
 
@@ -84,12 +110,8 @@
         try
         {
             UpdateStatus = await Updates.CheckAsync(_cts.Token);
-            if (AutoUpdateEnabled &&
-                UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId } &&
-                string.IsNullOrWhiteSpace(UpdateStatus.LastFailure))
-            {
-                await BeginUpdateAsync(assetId);
-            }
+            BackgroundUpdate = await Agent.GetDesktopUpdateStatusAsync(_cts.Token);
+            AutoUpdateEnabled = BackgroundUpdate?.AutoUpdateEnabled ?? AutoUpdateEnabled;
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception ex)
@@ -104,10 +126,20 @@
 
     private async Task SetAutoUpdateAsync(ChangeEventArgs args)
     {
-        AutoUpdateEnabled = args.Value is bool value && value;
-        Updates.AutoUpdateEnabled = AutoUpdateEnabled;
-        if (AutoUpdateEnabled && UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
-            await BeginUpdateAsync(assetId);
+        var requested = args.Value is bool value && value;
+        var previous = AutoUpdateEnabled;
+        AutoUpdateEnabled = requested;
+        Error = null;
+        try
+        {
+            BackgroundUpdate = await Agent.SetDesktopAutoUpdateAsync(requested, _cts.Token);
+            AutoUpdateEnabled = BackgroundUpdate?.AutoUpdateEnabled ?? requested;
+        }
+        catch (Exception ex)
+        {
+            AutoUpdateEnabled = previous;
+            Error = $"Could not change Auto Update: {ex.Message}";
+        }
     }
 
     private async Task BeginUpdateAsync(long assetId)
