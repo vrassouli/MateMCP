@@ -1,0 +1,267 @@
+@implements IAsyncDisposable
+@inject AgentApiClient Api
+@inject AgentProcessController AgentProcess
+
+@if (!string.IsNullOrWhiteSpace(Error))
+{
+    <div class="error">@Error</div>
+}
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="panel"><div class="muted">@Message</div></div>
+}
+
+@if (Status is null)
+{
+    <div class="panel"><div class="muted">Loading device information…</div></div>
+}
+else
+{
+    <div class="panel">
+        <strong>This device</strong>
+        @if (CurrentDevice is not null)
+        {
+            <div class="row">
+                <strong>@CurrentDevice.Name</strong>
+                <div>@CurrentDevice.Platform</div>
+                <div class="muted">@CurrentDevice.Status · @CurrentDevice.Id</div>
+                <div><a class="link" href="@CurrentDevice.McpUrl" target="_blank" rel="noopener noreferrer">@CurrentDevice.McpUrl</a></div>
+                @if (CurrentDevice.LastSeenAt is not null)
+                {
+                    <div class="muted">Last seen @CurrentDevice.LastSeenAt.Value.LocalDateTime</div>
+                }
+            </div>
+            <div class="actions">
+                @if (!ConfirmCurrentRemoval)
+                {
+                    <Button Text="Sign out / Remove this device" OnClick="() => ConfirmCurrentRemoval = true" />
+                }
+                else
+                {
+                    <span class="muted">This revokes the device and removes its local relay identity.</span>
+                    <Button Text="Confirm remove" OnClick="RemoveCurrentAsync" />
+                    <Button Text="Cancel" OnClick="() => ConfirmCurrentRemoval = false" />
+                }
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(Status.CurrentDeviceId))
+        {
+            <div class="row">
+                <strong>Disconnected device identity</strong>
+                <div class="muted">@Status.CurrentDeviceId can no longer authenticate with MateMCP.</div>
+            </div>
+            <div class="actions">
+                @if (!ConfirmCurrentRemoval)
+                {
+                    <Button Text="Remove local identity" OnClick="() => ConfirmCurrentRemoval = true" />
+                }
+                else
+                {
+                    <Button Text="Confirm remove" OnClick="RemoveCurrentAsync" />
+                    <Button Text="Cancel" OnClick="() => ConfirmCurrentRemoval = false" />
+                }
+            </div>
+        }
+        else
+        {
+            <div class="row">
+                <strong>Not signed in</strong>
+                <div class="muted">This Agent is not currently linked to a MateMCP account.</div>
+            </div>
+            <div class="actions">
+                <Button Text="Sign in / Add this device" OnClick="BeginEnrollmentAsync" />
+            </div>
+            @if (Status.EnrollmentSuppressed)
+            {
+                <div class="muted" style="margin-top:8px">Automatic enrollment is disabled because this device was explicitly signed out.</div>
+            }
+        }
+    </div>
+
+    @if (Status.Enrolled)
+    {
+        <div class="panel">
+            <strong>Other devices</strong>
+            @if (OtherDevices.Count == 0)
+            {
+                <div class="muted" style="margin-top:10px">No other active devices are linked to this account.</div>
+            }
+            else
+            {
+                <div class="list">
+                    @foreach (var device in OtherDevices)
+                    {
+                        <div class="row" @key="device.Id">
+                            <strong>@device.Name</strong>
+                            <div>@device.Platform</div>
+                            <div class="muted">@device.Status · @device.Id</div>
+                            <div><a class="link" href="@device.McpUrl" target="_blank" rel="noopener noreferrer">@device.McpUrl</a></div>
+                            @if (device.LastSeenAt is not null)
+                            {
+                                <div class="muted">Last seen @device.LastSeenAt.Value.LocalDateTime</div>
+                            }
+                            <div class="actions">
+                                @if (ConfirmRevokeId == device.Id)
+                                {
+                                    <span class="muted">Revoke this device?</span>
+                                    <Button Text="Confirm revoke" OnClick="() => RevokeOtherAsync(device.Id)" />
+                                    <Button Text="Cancel" OnClick="() => ConfirmRevokeId = null" />
+                                }
+                                else
+                                {
+                                    <Button Text="Remove / Revoke" OnClick="() => ConfirmRevokeId = device.Id" />
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private readonly CancellationTokenSource _disposeCts = new();
+    private Task? _pollTask;
+    private DeviceManagementStatus? Status { get; set; }
+    private string? Error { get; set; }
+    private string? Message { get; set; }
+    private bool Busy { get; set; }
+    private bool ConfirmCurrentRemoval { get; set; }
+    private string? ConfirmRevokeId { get; set; }
+
+    private ManagedDevice? CurrentDevice => Status?.Devices.FirstOrDefault(x => x.IsCurrent);
+    private IReadOnlyList<ManagedDevice> OtherDevices => Status?.Devices.Where(x => !x.IsCurrent).ToArray() ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _pollTask = PollAsync(_disposeCts.Token);
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (Busy || !AgentProcess.IsRunning()) return;
+        try
+        {
+            Status = await Api.GetDevicesAsync(_disposeCts.Token);
+            Error = null;
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Could not load device information: {ex.Message}";
+        }
+    }
+
+    private async Task BeginEnrollmentAsync()
+    {
+        if (Busy) return;
+        Busy = true;
+        Message = "Starting sign-in and device enrollment…";
+        Error = null;
+        try
+        {
+            await Api.EnableEnrollmentAsync(_disposeCts.Token);
+            await AgentProcess.RestartAsync(_disposeCts.Token);
+            await Task.Delay(700, _disposeCts.Token);
+            await RefreshAfterBusyAsync();
+            Message = "The Agent restarted and opened the MateMCP sign-in / Add device flow in your browser.";
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Could not start device enrollment: {ex.Message}";
+            Message = null;
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task RemoveCurrentAsync()
+    {
+        if (Busy) return;
+        Busy = true;
+        ConfirmCurrentRemoval = false;
+        Message = "Removing this device…";
+        Error = null;
+        try
+        {
+            await Api.SignOutCurrentDeviceAsync(_disposeCts.Token);
+            await AgentProcess.RestartAsync(_disposeCts.Token);
+            await Task.Delay(700, _disposeCts.Token);
+            await RefreshAfterBusyAsync();
+            Message = "This device was removed and signed out. It will stay signed out until you choose Sign in / Add this device.";
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Could not remove this device: {ex.Message}";
+            Message = null;
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task RevokeOtherAsync(string deviceId)
+    {
+        if (Busy) return;
+        Busy = true;
+        ConfirmRevokeId = null;
+        Error = null;
+        try
+        {
+            await Api.RevokeDeviceAsync(deviceId, _disposeCts.Token);
+            await RefreshAfterBusyAsync();
+            Message = "The selected device was revoked.";
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Could not revoke the selected device: {ex.Message}";
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task RefreshAfterBusyAsync()
+    {
+        try
+        {
+            Status = await Api.GetDevicesAsync(_disposeCts.Token);
+            Error = null;
+        }
+        catch (HttpRequestException)
+        {
+            await Task.Delay(800, _disposeCts.Token);
+            Status = await Api.GetDevicesAsync(_disposeCts.Token);
+        }
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+                await InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposeCts.Cancel();
+        if (_pollTask is not null)
+        {
+            try { await _pollTask; } catch (OperationCanceledException) { }
+        }
+        _disposeCts.Dispose();
+    }
+}
