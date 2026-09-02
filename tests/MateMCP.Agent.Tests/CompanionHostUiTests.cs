@@ -30,12 +30,16 @@ public sealed class CompanionHostUiTests
         Assert.Contains("DownloadAssetAsync", service, StringComparison.Ordinal);
         Assert.Contains("BuildMacInstallScript", service, StringComparison.Ordinal);
         Assert.Contains("BuildWindowsInstallScript", service, StringComparison.Ordinal);
+        Assert.Contains("install-desktop-macos.sh\" --no-start", service, StringComparison.Ordinal);
+        Assert.Contains("-File $Installer -NoStart", service, StringComparison.Ordinal);
+        Assert.Contains("MateMCP-Update", service, StringComparison.Ordinal);
         Assert.Contains("Environment.Exit(0)", service, StringComparison.Ordinal);
         Assert.DoesNotContain("WindowsBootstrap", service, StringComparison.Ordinal);
         Assert.DoesNotContain("MacBootstrap", service, StringComparison.Ordinal);
         Assert.Contains("<progress class=\"update-progress-bar\"", panel, StringComparison.Ordinal);
         Assert.Contains("Companion will stay open while the package downloads", panel, StringComparison.Ordinal);
         Assert.Contains("Update failed before installation started", panel, StringComparison.Ordinal);
+        Assert.Contains("string.IsNullOrWhiteSpace(UpdateStatus.LastFailure)", panel, StringComparison.Ordinal);
         Assert.Contains("update-progress-bar", css, StringComparison.Ordinal);
     }
 
