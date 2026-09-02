@@ -6,9 +6,7 @@ public static class ConfigurationBootstrap
 {
     public static string EnsureUserConfiguration()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "MateMCP");
+        var directory = GetUserDataDirectory();
         Directory.CreateDirectory(directory);
 
         var path = Path.Combine(directory, "appsettings.json");
@@ -41,6 +39,18 @@ public static class ConfigurationBootstrap
         File.WriteAllText(path, json + Environment.NewLine);
         TryRestrictPermissions(path);
         return path;
+    }
+
+    public static string GetUserDataDirectory()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            var delegatedHome = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_HOME");
+            if (!string.IsNullOrWhiteSpace(delegatedHome))
+                return Path.Combine(delegatedHome, "Library", "Application Support", "MateMCP");
+        }
+
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP");
     }
 
     public static void TryRestrictPermissions(string path)
