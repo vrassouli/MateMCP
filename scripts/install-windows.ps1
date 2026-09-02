@@ -33,7 +33,16 @@ if (-not (Test-Path (Join-Path $Source 'MateMCP.Agent.exe'))) { throw "MateMCP p
 
 New-Item -ItemType Directory -Force -Path $Target, $Bin | Out-Null
 Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-ChildItem $Target -Force | Where-Object { $_.Name -ne 'bin' } | Remove-Item -Recurse -Force
+
+# Agent and Companion intentionally share the MateMCP root. During an Agent-only
+# upgrade the Companion may still be running (for example after the user clicks
+# Update now). Never remove the Companion subtree from here: doing so can fail on
+# locked binaries and leave the Desktop installation half-removed. The Companion
+# installer owns replacement of that subtree and its shortcuts.
+$PreserveNames = @('bin', 'Companion', 'uninstall-desktop-windows.ps1')
+Get-ChildItem $Target -Force |
+    Where-Object { $PreserveNames -notcontains $_.Name } |
+    Remove-Item -Recurse -Force
 Copy-Item (Join-Path $Source '*') $Target -Recurse -Force
 
 @"
