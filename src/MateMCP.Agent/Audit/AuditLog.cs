@@ -56,32 +56,37 @@ public sealed class AuditLog
 
             try
             {
-                await using var source = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
-                using var reader = new StreamReader(source, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, 81920, leaveOpen: false);
-                await using var target = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-                await using var writer = new StreamWriter(target, new UTF8Encoding(false), 81920, leaveOpen: false);
-
-                while (await reader.ReadLineAsync(cancellationToken) is { } line)
+                // Keep all file handles in a nested scope so they are disposed before the atomic
+                // replacement. Windows will reject File.Move(overwrite) while either file is open.
                 {
-                    AuditEntry? entry;
-                    try { entry = JsonSerializer.Deserialize<AuditEntry>(line); }
-                    catch (JsonException)
+                    await using var source = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                    using var reader = new StreamReader(source, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, 81920, leaveOpen: false);
+                    await using var target = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+                    await using var writer = new StreamWriter(target, new UTF8Encoding(false), 81920, leaveOpen: false);
+
+                    while (await reader.ReadLineAsync(cancellationToken) is { } line)
                     {
-                        // Preserve malformed legacy lines rather than silently deleting them as part of cleanup.
+                        AuditEntry? entry;
+                        try { entry = JsonSerializer.Deserialize<AuditEntry>(line); }
+                        catch (JsonException)
+                        {
+                            // Preserve malformed legacy lines rather than silently deleting them as part of cleanup.
+                            await writer.WriteLineAsync(line.AsMemory(), cancellationToken);
+                            continue;
+                        }
+
+                        if (entry is not null && entry.Timestamp < cutoff)
+                        {
+                            deleted++;
+                            continue;
+                        }
+
                         await writer.WriteLineAsync(line.AsMemory(), cancellationToken);
-                        continue;
                     }
 
-                    if (entry is not null && entry.Timestamp < cutoff)
-                    {
-                        deleted++;
-                        continue;
-                    }
-
-                    await writer.WriteLineAsync(line.AsMemory(), cancellationToken);
+                    await writer.FlushAsync(cancellationToken);
                 }
 
-                await writer.FlushAsync(cancellationToken);
                 File.Move(temp, _path, overwrite: true);
                 return deleted;
             }
