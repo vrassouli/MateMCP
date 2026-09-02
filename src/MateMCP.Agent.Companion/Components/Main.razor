@@ -20,7 +20,7 @@
             </button>
             <button class="@(Section == "shell" ? "active" : null)" @onclick='() => Section = "shell"'>
                 <Icon Value="@FluentIcons.Code" />
-                <span>Shell</span>
+                <span>Shell@(ActiveShellCount > 0 ? $" ({ActiveShellCount})" : string.Empty)</span>
             </button>
             <button class="@(Section == "secrets" ? "active" : null)" @onclick='() => Section = "secrets"'>
                 <Icon Value="@FluentIcons.Settings" />
@@ -78,7 +78,7 @@
                     }
                 </div>
                 <div class="panel"><div class="muted">Pending approvals</div><div class="metric">@Approvals.Count</div></div>
-                <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ShellSessions.Count)</div></div>
+                <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ActiveShellCount)</div></div>
                 <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div></div>
             </div>
             <DesktopUpdatePanel />
@@ -279,6 +279,7 @@
     private string SecretAllowedTools { get; set; } = "shell_session_send_secret";
     private bool DeviceUrlCopied { get; set; }
 
+    private int ActiveShellCount => ShellSessions.Count(x => !x.Exited);
     private string AgentStateLabel => AgentRunning ? (Status is null ? "Starting…" : "Online") : "Stopped";
 
     private string? DeviceMcpUrl => Status?.Relay is { Enabled: true, Url: { Length: > 0 } relayUrl, DeviceId: { Length: > 0 } deviceId }
