@@ -2,11 +2,17 @@ param(
     [string]$Source = (Join-Path $PSScriptRoot 'payload'),
     [switch]$NoStart,
     [switch]$AgentOnly,
-    [ValidateSet('Normal','Elevated')]
-    [string]$AgentMode = 'Normal'
+    [ValidateSet('','Normal','Elevated')]
+    [string]$AgentMode = ''
 )
 
 $ErrorActionPreference = 'Stop'
+$ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
+
+if ([string]::IsNullOrWhiteSpace($AgentMode)) {
+    $persistedMode = if (Test-Path $ModeFile) { (Get-Content $ModeFile -Raw).Trim() } else { '' }
+    $AgentMode = if ($persistedMode -in @('Normal','Elevated')) { $persistedMode } else { 'Normal' }
+}
 
 # In a unified Desktop package, install-windows.ps1 is the obvious entry point a
 # user will choose. Delegate to the Desktop installer unless this script is being
