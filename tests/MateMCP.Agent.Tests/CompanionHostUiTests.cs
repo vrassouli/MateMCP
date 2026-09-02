@@ -37,10 +37,35 @@ public sealed class CompanionHostUiTests
         Assert.DoesNotContain("WindowsBootstrap", service, StringComparison.Ordinal);
         Assert.DoesNotContain("MacBootstrap", service, StringComparison.Ordinal);
         Assert.Contains("<progress class=\"update-progress-bar\"", panel, StringComparison.Ordinal);
-        Assert.Contains("Companion will stay open while the package downloads", panel, StringComparison.Ordinal);
+        Assert.Contains("manual package downloads", panel, StringComparison.Ordinal);
         Assert.Contains("Update failed before installation started", panel, StringComparison.Ordinal);
-        Assert.Contains("string.IsNullOrWhiteSpace(UpdateStatus.LastFailure)", panel, StringComparison.Ordinal);
         Assert.Contains("update-progress-bar", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Automatic_desktop_updates_are_owned_by_the_headless_agent_and_verify_release_digest()
+    {
+        var root = FindRepositoryRoot();
+        var background = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Desktop", "BackgroundDesktopUpdateService.cs"));
+        var program = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Program.cs"));
+        var api = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+        var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdatePanel.razor"));
+
+        Assert.Contains(": BackgroundService", background, StringComparison.Ordinal);
+        Assert.Contains("agent-latest", background, StringComparison.Ordinal);
+        Assert.Contains("JsonPropertyName(\"digest\")", background, StringComparison.Ordinal);
+        Assert.Contains("CryptographicOperations.FixedTimeEquals", background, StringComparison.Ordinal);
+        Assert.Contains("Automatic installation was aborted", background, StringComparison.Ordinal);
+        Assert.Contains("activity.TryBeginDrain()", background, StringComparison.Ordinal);
+        Assert.Contains("sessions.ActiveSessionCount", background, StringComparison.Ordinal);
+        Assert.Contains("approvals.GetPending().Count", background, StringComparison.Ordinal);
+        Assert.Contains("install-desktop-windows.ps1", background, StringComparison.Ordinal);
+        Assert.Contains("install-desktop-macos.sh", background, StringComparison.Ordinal);
+        Assert.Contains("AddHostedService<BackgroundDesktopUpdateService>", program, StringComparison.Ordinal);
+        Assert.Contains("/desktop-update/auto", program, StringComparison.Ordinal);
+        Assert.Contains("SetDesktopAutoUpdateAsync", api, StringComparison.Ordinal);
+        Assert.Contains("even while Companion is closed", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("Updates.AutoUpdateEnabled", panel, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
