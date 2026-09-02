@@ -15,7 +15,7 @@ public sealed class DesktopUpdateService : IDisposable
 
     private readonly HttpClient _http = new()
     {
-        Timeout = TimeSpan.FromMinutes(10)
+        Timeout = Timeout.InfiniteTimeSpan
     };
 
     public DesktopUpdateService()
@@ -37,7 +37,7 @@ public sealed class DesktopUpdateService : IDisposable
         if (assetName is null)
             return new DesktopUpdateStatus(false, false, null, null, "Automatic updates are not available for this architecture yet.", lastFailure);
 
-        var release = await _http.GetFromJsonAsync<GitHubRelease>(ReleaseApi, ct);
+        var release = await GetReleaseAsync(ct);
         var asset = release?.Assets.FirstOrDefault(a => string.Equals(a.Name, assetName, StringComparison.OrdinalIgnoreCase));
         if (asset is null)
             return new DesktopUpdateStatus(true, false, null, null, $"Release asset {assetName} is not available.", lastFailure);
@@ -73,7 +73,7 @@ public sealed class DesktopUpdateService : IDisposable
         var assetName = GetAssetName() ?? throw new PlatformNotSupportedException("MateMCP Desktop self-update is supported on Windows x64 and Apple Silicon macOS.");
         progress?.Report(new DesktopUpdateProgress("Preparing", "Preparing update...", 0, null));
 
-        var release = await _http.GetFromJsonAsync<GitHubRelease>(ReleaseApi, ct)
+        var release = await GetReleaseAsync(ct)
             ?? throw new InvalidOperationException("Could not read the MateMCP Desktop release metadata.");
         var asset = release.Assets.FirstOrDefault(a => a.Id == assetId && string.Equals(a.Name, assetName, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"Release asset {assetName} is no longer available. Check for updates again.");
@@ -97,33 +97,56 @@ public sealed class DesktopUpdateService : IDisposable
         Environment.Exit(0);
     }
 
+    private async Task<GitHubRelease?> GetReleaseAsync(CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            return await _http.GetFromJsonAsync<GitHubRelease>(ReleaseApi, timeout.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException("Update check timed out. Check your network connection and try again.");
+        }
+    }
+
     private async Task DownloadAssetAsync(
         GitHubAsset asset,
         string archivePath,
         IProgress<DesktopUpdateProgress>? progress,
         CancellationToken ct)
     {
-        using var response = await _http.GetAsync(asset.BrowserDownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
-
-        var totalBytes = response.Content.Headers.ContentLength ?? (asset.Size > 0 ? asset.Size : null);
-        await using var source = await response.Content.ReadAsStreamAsync(ct);
-        await using var target = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-
-        var buffer = new byte[81920];
-        long received = 0;
-        while (true)
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromMinutes(10));
+        try
         {
-            var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
-            if (read == 0) break;
-            await target.WriteAsync(buffer.AsMemory(0, read), ct);
-            received += read;
-            progress?.Report(new DesktopUpdateProgress("Downloading", "Downloading update...", received, totalBytes));
-        }
+            using var response = await _http.GetAsync(asset.BrowserDownloadUrl, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            response.EnsureSuccessStatusCode();
 
-        await target.FlushAsync(ct);
-        if (totalBytes is > 0 && received != totalBytes)
-            throw new IOException($"Update download was incomplete ({received} of {totalBytes} bytes received).");
+            var totalBytes = response.Content.Headers.ContentLength ?? (asset.Size > 0 ? asset.Size : null);
+            await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
+            await using var target = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+
+            var buffer = new byte[81920];
+            long received = 0;
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), timeout.Token);
+                if (read == 0) break;
+                await target.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
+                received += read;
+                progress?.Report(new DesktopUpdateProgress("Downloading", "Downloading update...", received, totalBytes));
+            }
+
+            await target.FlushAsync(timeout.Token);
+            if (totalBytes is > 0 && received != totalBytes)
+                throw new IOException($"Update download was incomplete ({received} of {totalBytes} bytes received).");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException("Update download timed out. Check your network connection and try again.");
+        }
     }
 
     private static void LaunchInstaller(string tempRoot, string archivePath, long assetId)
