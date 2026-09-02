@@ -32,6 +32,16 @@ if ($Mode -eq 'Elevated') {
         throw 'Changing MateMCP Agent to Elevated mode requires an Administrator-authorized PowerShell process.'
     }
 
+    # The elevated Agent consumes executable/configuration files from user-profile
+    # locations so Credential Manager and enrollment identity remain unchanged.
+    # Mark those trees High integrity before registering the task so a normal
+    # medium-integrity process cannot rewrite the executable or config and turn
+    # the elevated Agent into a privilege-escalation primitive.
+    & icacls.exe $AgentRoot /setintegritylevel '(OI)(CI)H' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not protect the MateMCP Agent installation with a High integrity label.' }
+    & icacls.exe $ConfigRoot /setintegritylevel '(OI)(CI)H' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not protect the MateMCP Agent configuration with a High integrity label.' }
+
     $userId = "$env:USERDOMAIN\$env:USERNAME"
     $action = New-ScheduledTaskAction -Execute $WScript -Argument "`"$HiddenLauncher`"" -WorkingDirectory $AgentRoot
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
@@ -40,6 +50,13 @@ if ($Mode -eq 'Elevated') {
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Force | Out-Null
 }
 else {
+    # Return protected trees to Medium integrity before normal-user execution.
+    # Mode changes run through UAC, so lowering the label is an explicit action.
+    & icacls.exe $AgentRoot /setintegritylevel '(OI)(CI)M' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restore normal integrity on the MateMCP Agent installation.' }
+    & icacls.exe $ConfigRoot /setintegritylevel '(OI)(CI)M' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restore normal integrity on the MateMCP Agent configuration.' }
+
     $shortcutShell = New-Object -ComObject WScript.Shell
     $shortcut = $shortcutShell.CreateShortcut($StartupShortcut)
     $shortcut.TargetPath = $WScript
