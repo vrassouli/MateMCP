@@ -9,10 +9,12 @@ MateMCP ships one Agent application for macOS and Windows. Supported Agent capab
 | Streamable HTTP MCP endpoint | Supported | Supported | Agent build and native package smoke test |
 | Loopback management UI and root redirect | Supported | Supported | Native package smoke test checks `/health`, `/`, and `/ui` |
 | Projects and approval management | Supported | Supported | Shared Agent routes and tests |
+| Native actionable approval notifications | Notification Center actions | Windows App SDK notifications when supported; unpackaged Win32 toast fallback otherwise | Companion build plus notification fallback regression coverage; real desktop field verification remains required after packaging changes |
 | Named secret management | macOS Keychain | Windows Credential Manager | Platform credential-store integration test |
 | Credential injection policy and audit | Supported | Supported | Shared Agent integration tests |
 | Install from stable release channel | `agent-latest` | `agent-latest` | Delivery parity regression test |
 | Desktop self-update handoff | Download progress before exit; local package install; failure recovery | Download progress before exit; local package install; failure recovery | Companion build/package jobs and updater UX regression test |
+| Headless opt-in Desktop auto-update | Agent-owned polling while Companion is closed; SHA-256 verification; active-work deferral | Agent-owned polling while Companion is closed; SHA-256 verification; active-work deferral | Agent tests plus cross-platform Companion package jobs |
 | Start after install | Per-user LaunchAgent | User process | Delivery parity regression test |
 | Start on sign-in | Per-user LaunchAgent | Per-user startup shortcut | Delivery parity regression test |
 
