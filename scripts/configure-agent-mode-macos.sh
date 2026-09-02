@@ -23,7 +23,30 @@ GUI_DOMAIN="gui/$USER_UID"
 
 [[ -x "$AGENT_EXE" ]] || { echo "MateMCP Agent not found: $AGENT_EXE" >&2; exit 1; }
 mkdir -p "$CONFIG_ROOT" "$USER_LAUNCH_DIR"
-chown "$USER_NAME" "$CONFIG_ROOT" "$USER_LAUNCH_DIR" 2>/dev/null || true
+
+protect_elevated_state() {
+  [[ "$EUID" -eq 0 ]] || { echo "Elevated mode requires Administrator authorization." >&2; exit 3; }
+  # A root Agent must never execute or consume state that a normal user process
+  # can rewrite. Protect both the executable tree and persistent Agent state.
+  chown -R root:wheel "$AGENT_ROOT" "$CONFIG_ROOT"
+  find "$AGENT_ROOT" -type d -exec chmod 755 {} +
+  find "$AGENT_ROOT" -type f -exec chmod 644 {} +
+  chmod 755 "$AGENT_EXE"
+  find "$AGENT_ROOT" -type f -name '*.sh' -exec chmod 755 {} +
+  find "$CONFIG_ROOT" -type d -exec chmod 755 {} +
+  find "$CONFIG_ROOT" -type f -exec chmod 600 {} +
+}
+
+restore_normal_state() {
+  [[ "$EUID" -eq 0 ]] || return 0
+  chown -R "$USER_NAME" "$AGENT_ROOT" "$CONFIG_ROOT"
+  find "$AGENT_ROOT" -type d -exec chmod 755 {} +
+  find "$AGENT_ROOT" -type f -exec chmod 644 {} +
+  chmod 755 "$AGENT_EXE"
+  find "$AGENT_ROOT" -type f -name '*.sh' -exec chmod 755 {} +
+  find "$CONFIG_ROOT" -type d -exec chmod 700 {} +
+  find "$CONFIG_ROOT" -type f -exec chmod 600 {} +
+}
 
 write_user_plist() {
   cat > "$USER_PLIST" <<PLIST
@@ -88,15 +111,25 @@ fi
 
 if [[ "$MODE" == "Elevated" ]]; then
   rm -f "$USER_PLIST"
+  protect_elevated_state
   write_daemon_plist
 else
-  if [[ "$EUID" -eq 0 ]]; then rm -f "$DAEMON_PLIST"; fi
+  if [[ "$EUID" -eq 0 ]]; then
+    rm -f "$DAEMON_PLIST"
+    restore_normal_state
+  fi
+  chown "$USER_NAME" "$USER_LAUNCH_DIR" 2>/dev/null || true
   write_user_plist
 fi
 
 printf '%s\n' "$MODE" > "$MODE_FILE"
-chown "$USER_NAME" "$MODE_FILE" 2>/dev/null || true
-chmod 600 "$MODE_FILE"
+if [[ "$MODE" == "Elevated" ]]; then
+  chown root:wheel "$MODE_FILE"
+  chmod 644 "$MODE_FILE"
+else
+  chown "$USER_NAME" "$MODE_FILE" 2>/dev/null || true
+  chmod 600 "$MODE_FILE"
+fi
 
 if [[ "$NO_START" != "--no-start" ]]; then
   if [[ "$MODE" == "Elevated" ]]; then
