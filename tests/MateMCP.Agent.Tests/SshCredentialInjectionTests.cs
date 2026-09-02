@@ -11,48 +11,55 @@ namespace MateMCP.Agent.Tests;
 public sealed class SshCredentialInjectionTests
 {
     [Fact]
-    public async Task Credential_is_injected_into_real_ssh_password_prompt()
+    public async Task Credential_is_injected_through_structured_ssh_session_start()
     {
         if (!OperatingSystem.IsLinux()) return;
         var host = Environment.GetEnvironmentVariable("MATEMCP_SSH_TEST_HOST");
         var user = Environment.GetEnvironmentVariable("MATEMCP_SSH_TEST_USER");
         var password = Environment.GetEnvironmentVariable("MATEMCP_SSH_TEST_PASSWORD");
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user) || string.IsNullOrEmpty(password)) return;
-        if (!IsSafeIdentifier(host) || !IsSafeIdentifier(user)) throw new InvalidOperationException("Unsafe SSH test host or user.");
         var port = int.TryParse(Environment.GetEnvironmentVariable("MATEMCP_SSH_TEST_PORT"), out var configuredPort)
             ? configuredPort : 22;
-        if (port is < 1 or > 65535) throw new InvalidOperationException("Invalid SSH test port.");
 
         var auditPath = NewAuditPath();
         var options = new MateOptions { RequireShellApproval = false };
         var wrappedOptions = Options.Create(options);
+        var registry = new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options));
+        var audit = new AuditLog(auditPath);
+        var approvals = new AllowApprovalService();
         await using var sessions = new InteractiveShellSessionManager(wrappedOptions);
         var store = new SshCredentialStore(password);
-        var tools = new InteractiveShellTools(
-            new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options)),
-            new AuditLog(auditPath), new AllowApprovalService(), wrappedOptions, sessions, store,
+        var shellTools = new InteractiveShellTools(
+            registry, audit, approvals, wrappedOptions, sessions, store,
             new CredentialInjectionRateLimiter(wrappedOptions));
-        var command = $"ssh -tt -p {port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null " +
-                      $"-o PreferredAuthentications=password -o PubkeyAuthentication=no {user}@{host} " +
-                      "\"printf 'SSH_AUTHENTICATED\\n'\"";
+        var sshTools = new SshTools(registry, audit, approvals, wrappedOptions, sessions);
 
-        var started = await sessions.StartAsync(command, Path.GetTempPath(), CancellationToken.None);
+        var started = Assert.IsType<ShellSessionSnapshot>(await sshTools.Start(host, user, port));
         var prompt = await WaitForAsync(sessions, started.SessionId, 0,
-            x => x.Output.Contains("password:", StringComparison.OrdinalIgnoreCase));
-        var response = await tools.SendSecret(started.SessionId, "ssh-integration", true);
+            x => x.Output.Contains("password:", StringComparison.OrdinalIgnoreCase) ||
+                 x.Output.Contains("continue connecting", StringComparison.OrdinalIgnoreCase));
+
+        if (!prompt.Output.Contains("password:", StringComparison.OrdinalIgnoreCase))
+        {
+            await shellTools.Write(started.SessionId, "yes", true);
+            prompt = await WaitForAsync(sessions, started.SessionId, prompt.NextOffset,
+                x => x.Output.Contains("password:", StringComparison.OrdinalIgnoreCase));
+        }
+
+        var response = await shellTools.SendSecret(started.SessionId, "ssh-integration", true);
+        await Task.Delay(300);
+        await shellTools.Write(started.SessionId, "printf 'SSH_AUTHENTICATED\\n'", true);
         var completed = await WaitForAsync(sessions, started.SessionId, prompt.NextOffset,
             x => x.Output.Contains("SSH_AUTHENTICATED", StringComparison.Ordinal));
-        var audit = await File.ReadAllTextAsync(auditPath);
+        var auditText = await File.ReadAllTextAsync(auditPath);
 
         Assert.Contains("SSH_AUTHENTICATED", completed.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(password, completed.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(password, JsonSerializer.Serialize(response), StringComparison.Ordinal);
-        Assert.DoesNotContain(password, audit, StringComparison.Ordinal);
+        Assert.DoesNotContain(password, auditText, StringComparison.Ordinal);
         Assert.Equal(1, store.ResolveCalls);
+        Assert.True(sessions.Close(started.SessionId));
     }
-
-    private static bool IsSafeIdentifier(string value) =>
-        value.Length <= 253 && value.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_');
 
     private static async Task<ShellSessionSnapshot> WaitForAsync(InteractiveShellSessionManager sessions, string id,
         int offset, Func<ShellSessionSnapshot, bool> predicate)
@@ -64,7 +71,7 @@ public sealed class SshCredentialInjectionTests
             await Task.Delay(100);
             latest = sessions.Read(id, offset);
         }
-        Assert.True(predicate(latest), $"Timed out waiting for SSH process. exited={latest.Exited}; exitCode={latest.ExitCode}");
+        Assert.True(predicate(latest), $"Timed out waiting for SSH process. exited={latest.Exited}; exitCode={latest.ExitCode}; output={latest.Output}");
         return latest;
     }
 
