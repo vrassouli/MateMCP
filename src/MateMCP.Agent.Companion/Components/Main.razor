@@ -10,6 +10,10 @@
                 <Icon Value="@FluentIcons.Home" />
                 <span>Dashboard</span>
             </button>
+            <button class="@(Section == "devices" ? "active" : null)" @onclick='() => Section = "devices"'>
+                <Icon Value="@FluentIcons.Settings" />
+                <span>Devices</span>
+            </button>
             <button class="@(Section == "approvals" ? "active" : null)" @onclick='() => Section = "approvals"'>
                 <Icon Value="@FluentIcons.Checkmark" />
                 <span>Approvals (@Approvals.Count)</span>
@@ -128,6 +132,10 @@
                     <div class="muted" style="margin-top:8px">The Companion remains available so you can start the Agent again without using a terminal.</div>
                 </div>
             }
+        }
+        else if (Section == "devices")
+        {
+            <DevicesPanel />
         }
         else if (Section == "approvals")
         {
@@ -279,6 +287,7 @@
 
     private string Title => Section switch
     {
+        "devices" => "Devices & Account",
         "approvals" => "Approval Center",
         "shell" => "Interactive Shell",
         "secrets" => "Secret Manager",

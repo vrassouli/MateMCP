@@ -21,6 +21,9 @@ public sealed class AgentCredentialStore
     public Task<string?> GetAsync(string agentId, CancellationToken ct)
         => GetSecretAsync(AgentAccountPrefix + agentId, ct);
 
+    public Task DeleteAsync(string agentId, CancellationToken ct)
+        => DeleteSecretAsync(AgentAccountPrefix + agentId, ct);
+
     public async Task<string> ResolveLocalAccessTokenAsync(string? configuredToken, string configurationPath, CancellationToken ct)
     {
         var environmentToken = Environment.GetEnvironmentVariable("MATEMCP_Mate__AccessToken");
@@ -87,6 +90,29 @@ public sealed class AgentCredentialStore
         return null;
     }
 
+    private static async Task DeleteSecretAsync(string account, CancellationToken ct)
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            using var process = NewSecurityProcess("delete-generic-password", "-s", Service, "-a", account);
+            process.Start();
+            await process.WaitForExitAsync(ct);
+            if (process.ExitCode == 0) return;
+
+            var error = (await process.StandardError.ReadToEndAsync(ct)).Trim();
+            if (error.Contains("could not be found", StringComparison.OrdinalIgnoreCase)) return;
+            throw new InvalidOperationException($"Could not delete a MateMCP credential from macOS Keychain: {error}");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            DeleteWindowsCredential(account);
+            return;
+        }
+
+        throw new PlatformNotSupportedException("Secure credential storage is currently implemented for macOS Keychain and Windows Credential Manager.");
+    }
+
     private static void SaveWindowsCredential(string account, string credential)
     {
         var target = $"{Service}/{account}";
@@ -139,6 +165,15 @@ public sealed class AgentCredentialStore
         }
     }
 
+    private static void DeleteWindowsCredential(string account)
+    {
+        var target = $"{Service}/{account}";
+        if (CredDelete(target, 1, 0)) return;
+        var error = Marshal.GetLastWin32Error();
+        if (error == 1168) return;
+        throw new InvalidOperationException($"Could not delete a MateMCP credential from Windows Credential Manager. Win32 error: {error}");
+    }
+
     private static void RemovePlaintextAccessToken(string path)
     {
         if (!File.Exists(path)) return;
@@ -188,6 +223,10 @@ public sealed class AgentCredentialStore
     [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CredRead(string target, uint type, uint reservedFlag, out IntPtr credentialPtr);
+
+    [DllImport("Advapi32.dll", EntryPoint = "CredDeleteW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CredDelete(string target, uint type, uint flags);
 
     [DllImport("Advapi32.dll", SetLastError = false)]
     private static extern void CredFree(IntPtr buffer);

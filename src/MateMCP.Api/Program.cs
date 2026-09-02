@@ -55,6 +55,7 @@ app.Use(async (context, next) =>
 app.UseAuthentication(); app.UseAuthorization(); await EnsureDatabaseAsync(app.Services, configuration);
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "ok", database = provider }));
 app.MapGet("/", (ClaimsPrincipal user) => user.Identity?.IsAuthenticated == true ? Results.Redirect("/dashboard") : Results.Redirect("/login"));
+DeviceManagementEndpoints.Map(app, relayUrl);
 
 app.MapGet("/register", (HttpContext context) =>
 {

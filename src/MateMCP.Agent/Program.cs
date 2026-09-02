@@ -32,6 +32,8 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 
 builder.Services.AddSingleton(credentialStore);
 builder.Services.AddSingleton(new LocalAccessCredential(localAccessToken));
+builder.Services.AddSingleton(new EnrollmentStateStore(userConfigPath));
+builder.Services.AddSingleton<DeviceManagementService>();
 builder.Services.AddSingleton<UserSecretStore>();
 builder.Services.AddSingleton<ICredentialStore>(sp => sp.GetRequiredService<UserSecretStore>());
 builder.Services.AddSingleton<InteractiveShellSessionManager>();
@@ -62,7 +64,48 @@ app.MapGet("/ui", (HttpContext context) => IsLoopback(context) ? Results.Content
 app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions, ProjectRegistry projects, InteractiveShellSessionManager sessions) =>
 {
     if (!IsLoopback(context)) return Results.NotFound(); var current = currentOptions.CurrentValue;
-    return Results.Ok(new { service = "MateMCP", endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp", management = $"http://127.0.0.1:{current.Port}/ui", configuration = userConfigPath, projects = projects.All.Select(p => p.Name).ToArray(), shellApproval = current.RequireShellApproval, interactiveSessions = sessions.ActiveSessionCount, relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId }, credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store" });
+    return Results.Ok(new { service = "MateMCP", endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp", management = $"http://127.0.0.1:{current.Port}/ui", configuration = userConfigPath, projects = projects.All.Select(p => p.Name).ToArray(), shellApproval = current.RequireShellApproval, interactiveSessions = sessions.ActiveSessionCount, relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId, current.Relay.EnrollmentSuppressed }, credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store" });
+});
+
+app.MapGet("/devices", async (HttpContext context, DeviceManagementService devices, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try { return Results.Ok(await devices.GetStatusAsync(ct)); }
+    catch (HttpRequestException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway); }
+});
+app.MapPost("/devices/enrollment/enable", (HttpContext context, DeviceManagementService devices) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try
+    {
+        devices.EnableEnrollment();
+        return Results.Ok(new { status = "enabled", restartRequired = true });
+    }
+    catch (InvalidOperationException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+});
+app.MapDelete("/devices/current", async (HttpContext context, DeviceManagementService devices, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try
+    {
+        await devices.SignOutCurrentAsync(ct);
+        return Results.Ok(new { status = "signed-out", restartRequired = true });
+    }
+    catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or PlatformNotSupportedException)
+    {
+        return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
+    }
+});
+app.MapDelete("/devices/{deviceId}", async (string deviceId, HttpContext context, DeviceManagementService devices, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try
+    {
+        await devices.RevokeOtherAsync(deviceId, ct);
+        return Results.Ok(new { status = "revoked" });
+    }
+    catch (InvalidOperationException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+    catch (HttpRequestException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway); }
 });
 
 app.MapGet("/desktop-update", async (HttpContext context, BackgroundDesktopUpdateService updates, CancellationToken ct) =>

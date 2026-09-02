@@ -1,19 +1,22 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Security;
 using Microsoft.Extensions.Options;
 
 namespace MateMCP.Agent.Relay;
 
-public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHttpClientFactory clients, AgentCredentialStore credentials, ILogger<EnrollmentService> logger) : BackgroundService
+public sealed class EnrollmentService(
+    IOptionsMonitor<MateOptions> options,
+    IHttpClientFactory clients,
+    AgentCredentialStore credentials,
+    EnrollmentStateStore state,
+    ILogger<EnrollmentService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         var current = options.CurrentValue;
-        if (!current.Relay.Enabled) return;
+        if (!current.Relay.Enabled || current.Relay.EnrollmentSuppressed) return;
 
         string? recoverAgentId = null;
         if (!string.IsNullOrWhiteSpace(current.Relay.DeviceId))
@@ -58,23 +61,12 @@ public sealed class EnrollmentService(IOptionsMonitor<MateOptions> options, IHtt
                 throw new InvalidOperationException($"MateMCP recovery returned a different Agent identity ({token.AgentId}) than the requested identity ({recoverAgentId}). Refusing to replace the existing MCP URL.");
 
             await credentials.SaveAsync(token.AgentId, token.Credential, ct);
-            SaveAgentId(token.AgentId);
+            state.MarkEnrolled(token.AgentId);
             logger.LogInformation(recoverAgentId is null ? "Agent enrolled. MCP URL: {McpUrl}" : "Agent credential recovered. MCP URL remains {McpUrl}", token.McpUrl);
             return;
         }
 
         throw new TimeoutException(recoverAgentId is null ? "MateMCP Agent enrollment expired." : "MateMCP Agent recovery expired.");
-    }
-
-    private static void SaveAgentId(string agentId)
-    {
-        var path = ConfigurationBootstrap.EnsureUserConfiguration();
-        var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
-        var relay = root["Mate"]!["Relay"]!.AsObject();
-        relay["DeviceId"] = agentId;
-        File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
     private static string GetPlatformDescription()
