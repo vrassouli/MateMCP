@@ -1,4 +1,5 @@
 #if WINDOWS
+using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 #elif MACCATALYST
@@ -15,6 +16,8 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
 
 #if WINDOWS
     private AppNotificationManager? _windowsManager;
+    private bool _useCompatToasts;
+    private bool _compatActivationRegistered;
 #elif MACCATALYST
     private MacNotificationDelegate? _macDelegate;
 #endif
@@ -24,19 +27,40 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
         if (_initialized) return;
 
 #if WINDOWS
-        // AppNotificationManager depends on the Windows App SDK Singleton package.
-        // Self-contained desktop deployments can legitimately report it unsupported.
-        if (!AppNotificationManager.IsSupported())
+        // Prefer the Windows App SDK notification path when its runtime support is
+        // actually present. Self-contained, unpackaged Desktop builds can lack the
+        // Windows App SDK Singleton package, so IsSupported() legitimately returns
+        // false on real installations even though the notification code compiles.
+        if (AppNotificationManager.IsSupported())
         {
-            _initialized = true;
-            IsAvailable = false;
-            return;
+            try
+            {
+                _windowsManager = AppNotificationManager.Default;
+                _windowsManager.NotificationInvoked += OnWindowsNotificationInvoked;
+                _windowsManager.Register();
+                IsAvailable = _windowsManager.Setting == AppNotificationSetting.Enabled;
+                _initialized = true;
+                return;
+            }
+            catch
+            {
+                if (_windowsManager is not null)
+                {
+                    _windowsManager.NotificationInvoked -= OnWindowsNotificationInvoked;
+                    try { _windowsManager.Unregister(); } catch { }
+                    _windowsManager = null;
+                }
+            }
         }
 
-        _windowsManager = AppNotificationManager.Default;
-        _windowsManager.NotificationInvoked += OnWindowsNotificationInvoked;
-        _windowsManager.Register();
-        IsAvailable = _windowsManager.Setting == AppNotificationSetting.Enabled;
+        // Microsoft.Toolkit.Uwp.Notifications provides native Windows toast support
+        // for unpackaged Win32/.NET desktop applications and does not require the
+        // Windows App SDK Singleton package. This keeps approval actions available
+        // in the self-contained MateMCP Desktop installation used in the field.
+        ToastNotificationManagerCompat.OnActivated += OnCompatNotificationActivated;
+        _compatActivationRegistered = true;
+        _useCompatToasts = true;
+        IsAvailable = true;
 #elif MACCATALYST
         var center = UNUserNotificationCenter.Current;
         _macDelegate = new MacNotificationDelegate(DecideFromNotificationAsync);
@@ -67,6 +91,32 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
         if (!IsAvailable) return;
 
 #if WINDOWS
+        if (_useCompatToasts)
+        {
+            new ToastContentBuilder()
+                .AddText("MateMCP approval required")
+                .AddText($"{approval.Capability}: {approval.Target}")
+                .AddText(approval.Summary)
+                .AddButton(new ToastButton()
+                    .SetContent("Approve")
+                    .AddArgument("approvalId", approval.Id)
+                    .AddArgument("decision", "allow"))
+                .AddButton(new ToastButton()
+                    .SetContent("Approve for session")
+                    .AddArgument("approvalId", approval.Id)
+                    .AddArgument("decision", "allow-session"))
+                .AddButton(new ToastButton()
+                    .SetContent("Always allow")
+                    .AddArgument("approvalId", approval.Id)
+                    .AddArgument("decision", "allow-always"))
+                .AddButton(new ToastButton()
+                    .SetContent("Deny")
+                    .AddArgument("approvalId", approval.Id)
+                    .AddArgument("decision", "deny"))
+                .Show();
+            return;
+        }
+
         var notification = new AppNotificationBuilder()
             .AddArgument("approvalId", approval.Id)
             .AddText("MateMCP approval required")
@@ -116,6 +166,14 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
             !args.Arguments.TryGetValue("decision", out var decision)) return;
         await DecideFromNotificationAsync(approvalId, decision);
     }
+
+    private async void OnCompatNotificationActivated(ToastNotificationActivatedEventArgsCompat args)
+    {
+        var parsed = ToastArguments.Parse(args.Argument);
+        if (!parsed.TryGetValue("approvalId", out var approvalId) ||
+            !parsed.TryGetValue("decision", out var decision)) return;
+        await DecideFromNotificationAsync(approvalId, decision);
+    }
 #elif MACCATALYST
     private sealed class MacNotificationDelegate(Func<string, string, Task> decide) : UNUserNotificationCenterDelegate
     {
@@ -142,6 +200,8 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
             _windowsManager.NotificationInvoked -= OnWindowsNotificationInvoked;
             try { _windowsManager.Unregister(); } catch { }
         }
+        if (_compatActivationRegistered)
+            ToastNotificationManagerCompat.OnActivated -= OnCompatNotificationActivated;
 #endif
     }
 }
