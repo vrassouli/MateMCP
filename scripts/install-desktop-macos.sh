@@ -26,13 +26,16 @@ COMPANION_APP="$HOME/Applications/MateMCP Agent Companion.app"
 if [[ -z "$AGENT_MODE" && -f "$MODE_FILE" ]]; then AGENT_MODE="$(tr -d '[:space:]' < "$MODE_FILE")"; fi
 [[ "$AGENT_MODE" == "Normal" || "$AGENT_MODE" == "Elevated" ]] || AGENT_MODE="Normal"
 
-# --agent-only prevents install-macos.sh from delegating back to this Desktop wrapper.
-"$AGENT_INSTALLER" "$AGENT_PAYLOAD" --no-start --agent-only "$AGENT_MODE"
+# Install user-facing Companion/support files before the Agent. Elevated Agent
+# configuration intentionally root-protects its executable and persistent state,
+# so it must be the final installation step that touches the shared support dir.
 "$COMPANION_INSTALLER" "$COMPANION_PAYLOAD" --no-start
-
 mkdir -p "$CONFIG"
 cp "$PACKAGE_DIR/uninstall-desktop-macos.sh" "$CONFIG/uninstall-desktop-macos.sh"
 chmod +x "$CONFIG/uninstall-desktop-macos.sh"
+
+# --agent-only prevents install-macos.sh from delegating back to this Desktop wrapper.
+"$AGENT_INSTALLER" "$AGENT_PAYLOAD" --no-start --agent-only "$AGENT_MODE"
 
 echo
 echo "MateMCP Desktop installed/upgraded."
