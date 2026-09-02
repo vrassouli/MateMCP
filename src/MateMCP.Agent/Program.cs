@@ -43,7 +43,11 @@ builder.Services.AddSingleton<CredentialInjectionRateLimiter>();
 builder.Services.AddSingleton<LocalNotificationService>();
 builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddSingleton<IApprovalService>(sp => sp.GetRequiredService<ApprovalService>());
+builder.Services.AddSingleton<AgentActivityGate>();
+builder.Services.AddSingleton<DesktopUpdateSettingsStore>();
+builder.Services.AddSingleton<BackgroundDesktopUpdateService>();
 builder.Services.AddHttpClient();
+builder.Services.AddHostedService<BackgroundDesktopUpdateService>(sp => sp.GetRequiredService<BackgroundDesktopUpdateService>());
 builder.Services.AddHostedService<EnrollmentService>();
 builder.Services.AddHostedService<RelayConnector>();
 builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("mcp", limiter => { limiter.PermitLimit = 120; limiter.Window = TimeSpan.FromMinutes(1); limiter.QueueLimit = 0; }));
@@ -58,6 +62,19 @@ app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOption
 {
     if (!IsLoopback(context)) return Results.NotFound(); var current = currentOptions.CurrentValue;
     return Results.Ok(new { service = "MateMCP", endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp", management = $"http://127.0.0.1:{current.Port}/ui", configuration = userConfigPath, projects = projects.All.Select(p => p.Name).ToArray(), shellApproval = current.RequireShellApproval, interactiveSessions = sessions.ActiveSessionCount, relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId }, credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store" });
+});
+
+app.MapGet("/desktop-update", async (HttpContext context, BackgroundDesktopUpdateService updates, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return Results.Ok(await updates.GetStatusAsync(ct));
+});
+app.MapPut("/desktop-update/auto", async (DesktopAutoUpdateUpdate update, HttpContext context, DesktopUpdateSettingsStore settings, BackgroundDesktopUpdateService updates, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    await settings.SetAutoUpdateEnabledAsync(update.Enabled, ct);
+    updates.RequestCheck();
+    return Results.Ok(await updates.GetStatusAsync(ct));
 });
 
 app.MapGet("/approvals", (HttpContext context, ApprovalService approvals) => IsLoopback(context) ? Results.Ok(approvals.GetPending()) : Results.NotFound());
@@ -171,3 +188,4 @@ static bool IsLoopback(HttpContext context) { var remote = context.Connection.Re
 public sealed record SecretUpdate(string Name, string Value, string? Description, CredentialKind Kind = CredentialKind.Password,
     IReadOnlyCollection<string>? AllowedTools = null);
 public sealed record ShellInput(string? Text, bool Submit = true);
+public sealed record DesktopAutoUpdateUpdate(bool Enabled);
