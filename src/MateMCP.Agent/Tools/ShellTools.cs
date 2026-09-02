@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
+using MateMCP.Agent.Desktop;
 using MateMCP.Agent.Projects;
 using MateMCP.Agent.Security;
 using Microsoft.Extensions.Options;
@@ -11,11 +12,12 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, ApprovalService approvals, IOptions<MateOptions> options)
+public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, ApprovalService approvals, IOptions<MateOptions> options, AgentActivityGate activity)
 {
     [McpServerTool(Name = "shell_exec"), Description("Executes a shell command. When a project is specified, the command runs in that configured project directory and obeys its shell policy; otherwise it runs in the Agent user's home directory. Shell execution may require explicit local approval.")]
     public async Task<object> Exec(string command, string? project = null, int timeoutSeconds = 60, CancellationToken cancellationToken = default)
     {
+        using var activityLease = EnterActivity();
         var hasProject = !string.IsNullOrWhiteSpace(project); var scope = "agent"; string workingDirectory;
         if (hasProject)
         {
@@ -56,6 +58,13 @@ public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, Approva
         var stdout = Limit(await stdoutTask); var stderr = Limit(await stderrTask);
         await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
         return new { exitCode = process.ExitCode, stdout, stderr, workingDirectory, project = hasProject ? project : null };
+    }
+
+    private IDisposable EnterActivity()
+    {
+        if (!activity.TryEnter(out var lease) || lease is null)
+            throw new McpException("MateMCP Agent is preparing a verified Desktop update. Retry the shell command after the Agent restarts.");
+        return lease;
     }
 
     private static string ResolveDefaultWorkingDirectory() { var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile); return !string.IsNullOrWhiteSpace(home) && Directory.Exists(home) ? home : Environment.CurrentDirectory; }
