@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
+using MateMCP.Agent.Desktop;
 using MateMCP.Agent.Projects;
 using MateMCP.Agent.Security;
 using Microsoft.Extensions.Options;
@@ -19,12 +20,14 @@ public sealed class InteractiveShellTools(
     IOptions<MateOptions> options,
     InteractiveShellSessionManager sessions,
     ICredentialStore secrets,
-    CredentialInjectionRateLimiter injectionRateLimiter)
+    CredentialInjectionRateLimiter injectionRateLimiter,
+    AgentActivityGate activity)
 {
     private const string SendSecretTool = UserSecretInfo.ShellSessionSendSecretTool;
     [McpServerTool(Name = "shell_session_start"), Description("Starts an interactive shell command in a real PTY/ConPTY and returns a session id plus initial terminal output. Use shell_session_read to observe later output and shell_session_write or shell_session_send_secret to respond to prompts.")]
     public async Task<object> Start(string command, string? project = null, CancellationToken cancellationToken = default)
     {
+        using var activityLease = EnterActivity();
         var (workingDirectory, scope) = ResolveWorkingDirectory(project);
         if (options.Value.RequireShellApproval)
         {
@@ -137,6 +140,13 @@ public sealed class InteractiveShellTools(
     {
         var list = await secrets.ListAsync(cancellationToken);
         return list.Select(x => new { x.Name, type = x.Kind.ToString(), x.Description, allowedTools = x.EffectiveAllowedTools }).ToArray();
+    }
+
+    private IDisposable EnterActivity()
+    {
+        if (!activity.TryEnter(out var lease) || lease is null)
+            throw new McpException("MateMCP Agent is preparing a verified Desktop update. Retry after the Agent restarts.");
+        return lease;
     }
 
     private (string WorkingDirectory, string Scope) ResolveWorkingDirectory(string? project)
