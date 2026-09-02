@@ -14,6 +14,7 @@ MateMCP ships one Agent application for macOS and Windows. Supported Agent capab
 | Credential injection policy and audit | Supported | Supported | Shared Agent integration tests |
 | Install from stable release channel | `agent-latest` | `agent-latest` | Delivery parity regression test |
 | Desktop self-update handoff | Download progress before exit; local package install; failure recovery | Download progress before exit; local package install; failure recovery | Companion build/package jobs and updater UX regression test |
+| Headless opt-in Desktop auto-update | Agent-owned polling while Companion is closed; SHA-256 verification; active-work deferral | Agent-owned polling while Companion is closed; SHA-256 verification; active-work deferral | Agent tests plus cross-platform Companion package jobs |
 | Start after install | Per-user LaunchAgent | User process | Delivery parity regression test |
 | Start on sign-in | Per-user LaunchAgent | Per-user startup shortcut | Delivery parity regression test |
 
