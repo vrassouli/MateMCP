@@ -24,8 +24,18 @@ public sealed class InteractiveShellTools(
     private const string SendSecretTool = UserSecretInfo.ShellSessionSendSecretTool;
     private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
 
-    [McpServerTool(Name = "shell_session_start"), Description("Starts an interactive shell command in a real PTY/ConPTY and returns a session id plus initial terminal output. Use shell_session_read to observe later output and shell_session_write or shell_session_send_secret to respond to prompts.")]
-    public async Task<object> Start(string command, string? project = null, CancellationToken cancellationToken = default)
+    [McpServerTool(
+        Name = "shell_session_start",
+        Title = "Start interactive shell session",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = true)]
+    [Description("Starts any shell/command-line command in a real PTY/ConPTY and returns a session id plus initial terminal output. Use this instead of shell_exec whenever the command may prompt, wait for terminal input, open an interactive program, or require a credential. Continue with shell_session_read, shell_session_write, shell_session_send_secret, and shell_session_close.")]
+    public async Task<object> Start(
+        [Description("Shell/command-line command to run. This is intentionally generic and may be any command supported by the local shell.")] string command,
+        [Description("Optional configured MateMCP project whose directory and shell policy should be used. Omit to run from the Agent user's home directory.")] string? project = null,
+        CancellationToken cancellationToken = default)
     {
         using var activityLease = EnterActivity();
         var (workingDirectory, scope) = ResolveWorkingDirectory(project);
@@ -57,15 +67,35 @@ public sealed class InteractiveShellTools(
         }
     }
 
-    [McpServerTool(Name = "shell_session_read"), Description("Reads terminal output produced by an interactive shell session since the supplied offset. Pass nextOffset from the previous response to receive only new output. outputTruncated indicates that older buffered output was discarded.")]
-    public object Read(string sessionId, int offset = 0)
+    [McpServerTool(
+        Name = "shell_session_read",
+        Title = "Read interactive shell output",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false)]
+    [Description("Reads terminal output produced by an interactive shell session since the supplied offset. Call this after starting a session and after each write or secret injection to observe prompts, progress, completion, or further input requests. Pass nextOffset from the previous response to receive only new output.")]
+    public object Read(
+        [Description("Session id returned by shell_session_start.")] string sessionId,
+        [Description("Absolute output offset. Use nextOffset from the previous response; use 0 for the first read.")] int offset = 0)
     {
         try { return sessions.Read(sessionId, offset); }
         catch (KeyNotFoundException ex) { throw new McpException(ex.Message); }
     }
 
-    [McpServerTool(Name = "shell_session_write"), Description("Writes ordinary non-secret text to an existing interactive shell session as terminal input. Set submit=true to press Enter after the text.")]
-    public async Task<object> Write(string sessionId, string text, bool submit = true, CancellationToken cancellationToken = default)
+    [McpServerTool(
+        Name = "shell_session_write",
+        Title = "Write interactive shell input",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = true)]
+    [Description("Writes ordinary non-secret text to an existing interactive shell session. Use it for confirmations, menu choices, commands, REPL input, and other visible terminal input. Never place a password/token/secret value in this tool; use shell_session_send_secret with a credential name instead.")]
+    public async Task<object> Write(
+        [Description("Session id returned by shell_session_start.")] string sessionId,
+        [Description("Ordinary non-secret terminal input.")] string text,
+        [Description("Whether to press Enter after the text.")] bool submit = true,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -77,20 +107,47 @@ public sealed class InteractiveShellTools(
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
     }
 
-    [McpServerTool(Name = "shell_session_send_secret"), Description("Injects a locally stored named credential into an existing interactive shell session without revealing the secret value to the AI. Use this only after observing terminal output and deciding that this exact running process is requesting that credential. Set submit=true to press Enter after the secret.")]
-    public Task<object> SendSecret(string sessionId, string credential, bool submit = true, CancellationToken cancellationToken = default)
+    [McpServerTool(
+        Name = "shell_session_send_secret",
+        Title = "Use stored secret in shell session",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = true)]
+    [Description("Injects a locally stored named credential into an existing interactive shell session without revealing the credential value to the AI. Use this only after shell_session_read shows that the exact running process is requesting that credential. Pass only the credential name/reference, never its secret value.")]
+    public Task<object> SendSecret(
+        [Description("Session id returned by shell_session_start.")] string sessionId,
+        [Description("Name/reference of a locally stored credential. The credential value remains inside MateMCP Agent.")] string credential,
+        [Description("Whether to press Enter after injecting the credential.")] bool submit = true,
+        CancellationToken cancellationToken = default)
         => ShellSecretInjector.InjectAsync(sessionId, credential, submit, SendSecretTool, sessions, secrets,
             injectionRateLimiter, approvals, audit, cancellationToken);
 
-    [McpServerTool(Name = "shell_session_close"), Description("Terminates and removes an interactive shell session.")]
-    public async Task<object> Close(string sessionId, CancellationToken cancellationToken = default)
+    [McpServerTool(
+        Name = "shell_session_close",
+        Title = "Close interactive shell session",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = true,
+        OpenWorld = false)]
+    [Description("Terminates and removes an interactive shell session. Use this when the command is complete or the session is no longer needed.")]
+    public async Task<object> Close(
+        [Description("Session id returned by shell_session_start.")] string sessionId,
+        CancellationToken cancellationToken = default)
     {
         var closed = sessions.Close(sessionId);
         await audit.WriteAsync("shell.session.close", sessionId, closed ? "closed" : "not-found", cancellationToken);
         return new { sessionId, closed };
     }
 
-    [McpServerTool(Name = "secret_list"), Description("Lists locally configured credential names, types, and descriptions. Secret values are never returned.")]
+    [McpServerTool(
+        Name = "secret_list",
+        Title = "List stored credential references",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false)]
+    [Description("Lists locally configured credential names, types, descriptions, and allowed tool metadata. Secret values are never returned.")]
     public async Task<object> ListSecrets(CancellationToken cancellationToken = default)
     {
         var list = await secrets.ListAsync(cancellationToken);

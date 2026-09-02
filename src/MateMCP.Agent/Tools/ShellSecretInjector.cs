@@ -18,8 +18,7 @@ internal static class ShellSecretInjector
         CredentialInjectionRateLimiter injectionRateLimiter,
         IApprovalService approvals,
         AuditLog audit,
-        CancellationToken cancellationToken,
-        params string[] compatibleAllowedTools)
+        CancellationToken cancellationToken)
     {
         string command;
         try { command = sessions.GetCommand(sessionId); }
@@ -30,8 +29,7 @@ internal static class ShellSecretInjector
         if (info is null) throw new McpException($"Named credential '{credential}' does not exist.");
 
         var commandFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))).ToLowerInvariant()[..16];
-        var authorized = info.IsAllowedForTool(toolName) || compatibleAllowedTools.Any(info.IsAllowedForTool);
-        if (!authorized)
+        if (!info.IsAllowedForTool(toolName))
         {
             await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}",
                 "denied:tool-policy", cancellationToken);
