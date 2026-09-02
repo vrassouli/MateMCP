@@ -18,8 +18,11 @@ if (-not $AgentOnly -and (Test-Path $DesktopUninstall) -and (Test-Path $Companio
 
 $Bin = Join-Path $Target 'bin'
 $StartupShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'MateMCP Agent.lnk'
+$TaskName = 'MateMCP Agent'
 
 Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } catch { }
+try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
 Remove-Item $StartupShortcut -Force -ErrorAction SilentlyContinue
 
 $currentUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
