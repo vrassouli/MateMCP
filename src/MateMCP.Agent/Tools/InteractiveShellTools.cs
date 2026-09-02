@@ -21,9 +21,11 @@ public sealed class InteractiveShellTools(
     InteractiveShellSessionManager sessions,
     ICredentialStore secrets,
     CredentialInjectionRateLimiter injectionRateLimiter,
-    AgentActivityGate activity)
+    AgentActivityGate? activity = null)
 {
     private const string SendSecretTool = UserSecretInfo.ShellSessionSendSecretTool;
+    private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
+
     [McpServerTool(Name = "shell_session_start"), Description("Starts an interactive shell command in a real PTY/ConPTY and returns a session id plus initial terminal output. Use shell_session_read to observe later output and shell_session_write or shell_session_send_secret to respond to prompts.")]
     public async Task<object> Start(string command, string? project = null, CancellationToken cancellationToken = default)
     {
@@ -144,7 +146,7 @@ public sealed class InteractiveShellTools(
 
     private IDisposable EnterActivity()
     {
-        if (!activity.TryEnter(out var lease) || lease is null)
+        if (!_activity.TryEnter(out var lease) || lease is null)
             throw new McpException("MateMCP Agent is preparing a verified Desktop update. Retry after the Agent restarts.");
         return lease;
     }
