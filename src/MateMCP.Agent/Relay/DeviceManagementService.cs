@@ -12,7 +12,8 @@ public sealed class DeviceManagementService(
     IOptionsMonitor<MateOptions> options,
     IHttpClientFactory clients,
     AgentCredentialStore credentials,
-    EnrollmentStateStore enrollmentState)
+    EnrollmentStateStore enrollmentState,
+    ILogger<DeviceManagementService> logger)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -28,13 +29,31 @@ public sealed class DeviceManagementService(
             return new DeviceManagementStatus(false, current.Relay.EnrollmentSuppressed, currentId, []);
 
         using var client = CreateClient(current, credential);
-        using var response = await client.GetAsync($"api/agents/{Uri.EscapeDataString(currentId)}/devices", ct);
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-            return new DeviceManagementStatus(false, current.Relay.EnrollmentSuppressed, currentId, []);
+        var requestPath = $"api/agents/{Uri.EscapeDataString(currentId)}/devices";
+        try
+        {
+            using var response = await client.GetAsync(requestPath, ct);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+                return new DeviceManagementStatus(false, current.Relay.EnrollmentSuppressed, currentId, [],
+                    "The control plane rejected this device credential. Remove this device and enroll it again.");
 
-        response.EnsureSuccessStatusCode();
-        var devices = await response.Content.ReadFromJsonAsync<List<ManagedDevice>>(Json, ct) ?? [];
-        return new DeviceManagementStatus(true, current.Relay.EnrollmentSuppressed, currentId, devices);
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = await ReadResponseDetailAsync(response, ct);
+                var message = $"Control-plane device lookup {requestPath} returned {(int)response.StatusCode} ({response.ReasonPhrase}){detail}.";
+                logger.LogWarning("{Message}", message);
+                return new DeviceManagementStatus(true, current.Relay.EnrollmentSuppressed, currentId, [], message);
+            }
+
+            var devices = await response.Content.ReadFromJsonAsync<List<ManagedDevice>>(Json, ct) ?? [];
+            return new DeviceManagementStatus(true, current.Relay.EnrollmentSuppressed, currentId, devices);
+        }
+        catch (HttpRequestException ex)
+        {
+            var message = $"Could not reach the MateMCP control plane for {requestPath}: {ex.Message}";
+            logger.LogWarning(ex, "Device management lookup failed for {RequestPath}.", requestPath);
+            return new DeviceManagementStatus(true, current.Relay.EnrollmentSuppressed, currentId, [], message);
+        }
     }
 
     public async Task SignOutCurrentAsync(CancellationToken ct)
@@ -96,13 +115,29 @@ public sealed class DeviceManagementService(
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", credential);
         return client;
     }
+
+    private static async Task<string> ReadResponseDetailAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var text = (await response.Content.ReadAsStringAsync(ct)).Trim();
+            if (text.Length == 0) return string.Empty;
+            if (text.Length > 300) text = text[..300];
+            return $": {text.Replace('\r', ' ').Replace('\n', ' ')}";
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
 }
 
 public sealed record DeviceManagementStatus(
     bool Enrolled,
     bool EnrollmentSuppressed,
     string? CurrentDeviceId,
-    IReadOnlyList<ManagedDevice> Devices);
+    IReadOnlyList<ManagedDevice> Devices,
+    string? UpstreamError = null);
 
 public sealed record ManagedDevice(
     string Id,
