@@ -4,13 +4,28 @@
 
 <div class="shell">
     <aside class="sidebar">
-        <div class="brand">MateMCP Agent</div>
-        <nav class="nav">
-            <button class="@(Section == "dashboard" ? "active" : null)" @onclick='() => Section = "dashboard"'>Dashboard</button>
-            <button class="@(Section == "approvals" ? "active" : null)" @onclick='() => Section = "approvals"'>Approvals (@Approvals.Count)</button>
-            <button class="@(Section == "shell" ? "active" : null)" @onclick='() => Section = "shell"'>Shell</button>
-            <button class="@(Section == "secrets" ? "active" : null)" @onclick='() => Section = "secrets"'>Secrets</button>
-            <button class="@(Section == "audit" ? "active" : null)" @onclick='() => Section = "audit"'>Activity</button>
+        <div class="brand">MateMCP Companion</div>
+        <nav class="nav" aria-label="Companion navigation">
+            <button class="@(Section == "dashboard" ? "active" : null)" @onclick='() => Section = "dashboard"'>
+                <Icon Value="@FluentIcons.Home" />
+                <span>Dashboard</span>
+            </button>
+            <button class="@(Section == "approvals" ? "active" : null)" @onclick='() => Section = "approvals"'>
+                <Icon Value="@FluentIcons.Checkmark" />
+                <span>Approvals (@Approvals.Count)</span>
+            </button>
+            <button class="@(Section == "shell" ? "active" : null)" @onclick='() => Section = "shell"'>
+                <Icon Value="@FluentIcons.Code" />
+                <span>Shell</span>
+            </button>
+            <button class="@(Section == "secrets" ? "active" : null)" @onclick='() => Section = "secrets"'>
+                <Icon Value="@FluentIcons.Settings" />
+                <span>Secrets</span>
+            </button>
+            <button class="@(Section == "audit" ? "active" : null)" @onclick='() => Section = "audit"'>
+                <Icon Value="@FluentIcons.Document" />
+                <span>Activity</span>
+            </button>
         </nav>
     </aside>
 
@@ -18,9 +33,9 @@
         <div class="toolbar">
             <div>
                 <h1>@Title</h1>
-                <div class="muted">Local Agent management · Bluent UI</div>
+                <div class="muted">Local Agent management</div>
             </div>
-            <Button Text="Refresh" OnClick="RefreshAllAsync" />
+            <Button Text="Refresh" Icon="@FluentIcons.ArrowSyncCircle" OnClick="RefreshAllAsync" />
         </div>
 
         @if (!string.IsNullOrWhiteSpace(Error))
@@ -33,7 +48,10 @@
             <div class="grid">
                 <div class="panel">
                     <div class="muted">Agent</div>
-                    <div class="metric">@AgentStateLabel</div>
+                    <div class="metric agent-status @(AgentRunning ? "online" : "stopped")">
+                        <span class="status-dot" aria-hidden="true"></span>
+                        <span>@AgentStateLabel</span>
+                    </div>
                     <div class="muted">Local background process</div>
                     <div class="actions">
                         @if (LifecycleBusy)
