@@ -12,14 +12,34 @@ public static class DeviceManagementEndpoints
             var actor = await AuthenticateAgent(context, agentId, db);
             if (actor is null) return Results.Unauthorized();
 
-            var devices = await db.Agents
-                .Where(x => x.OwnerId == actor.OwnerId && !x.IsRevoked)
-                .OrderBy(x => x.Name)
-                // SQLite cannot ORDER BY DateTimeOffset directly. UtcDateTime preserves
-                // the instant while translating the sort key to SQLite's supported
-                // DateTime representation, so ordering stays server-side and portable.
-                .ThenBy(x => x.CreatedAt.UtcDateTime)
-                .ToListAsync(context.RequestAborted);
+            List<AgentDevice> devices;
+            if (db.Database.IsSqlite())
+            {
+                // EF Core's SQLite provider rejects LINQ ORDER BY over DateTimeOffset,
+                // even though SQLite can order the stored ISO-8601 value correctly.
+                // Keep filtering and ordering in the database and bypass only the
+                // provider translation limitation. Agent CreatedAt values are written
+                // in UTC, so their persisted representation preserves chronology.
+                devices = await db.Agents
+                    .FromSqlInterpolated($"""
+                        SELECT *
+                        FROM "Agents"
+                        WHERE "OwnerId" = {actor.OwnerId} AND "IsRevoked" = 0
+                        ORDER BY "Name", "CreatedAt"
+                        """)
+                    .AsNoTracking()
+                    .ToListAsync(context.RequestAborted);
+            }
+            else
+            {
+                devices = await db.Agents
+                    .Where(x => x.OwnerId == actor.OwnerId && !x.IsRevoked)
+                    .OrderBy(x => x.Name)
+                    .ThenBy(x => x.CreatedAt)
+                    .AsNoTracking()
+                    .ToListAsync(context.RequestAborted);
+            }
+
             var onlineAfter = DateTimeOffset.UtcNow.AddMinutes(-2);
 
             return Results.Ok(devices.Select(x => new
