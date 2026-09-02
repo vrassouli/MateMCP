@@ -15,7 +15,10 @@ public static class DeviceManagementEndpoints
             var devices = await db.Agents
                 .Where(x => x.OwnerId == actor.OwnerId && !x.IsRevoked)
                 .OrderBy(x => x.Name)
-                .ThenBy(x => x.CreatedAt)
+                // SQLite cannot ORDER BY DateTimeOffset directly. UtcDateTime preserves
+                // the instant while translating the sort key to SQLite's supported
+                // DateTime representation, so ordering stays server-side and portable.
+                .ThenBy(x => x.CreatedAt.UtcDateTime)
                 .ToListAsync(context.RequestAborted);
             var onlineAfter = DateTimeOffset.UtcNow.AddMinutes(-2);
 
