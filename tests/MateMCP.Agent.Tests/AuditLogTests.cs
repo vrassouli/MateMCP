@@ -37,7 +37,7 @@ public sealed class AuditLogTests : IDisposable
             new AuditEntry(day.AddHours(12), "today-late", "c", "ok"),
             new AuditEntry(day.AddDays(1).AddMinutes(1), "tomorrow", "d", "ok")
         };
-        await File.WriteAllLinesAsync(path, entries.Select(JsonSerializer.Serialize));
+        await File.WriteAllLinesAsync(path, entries.Select(entry => JsonSerializer.Serialize(entry)));
         var audit = new AuditLog(path);
 
         var result = await audit.ReadAsync(20, day, day.AddDays(1));
@@ -60,7 +60,7 @@ public sealed class AuditLogTests : IDisposable
             new AuditEntry(cutoff, "keep-1", "c", "ok"),
             new AuditEntry(cutoff.AddDays(1), "keep-2", "d", "ok")
         };
-        await File.WriteAllLinesAsync(path, entries.Select(JsonSerializer.Serialize));
+        await File.WriteAllLinesAsync(path, entries.Select(entry => JsonSerializer.Serialize(entry)));
         var audit = new AuditLog(path);
 
         var deleted = await audit.DeleteBeforeAsync(cutoff);
