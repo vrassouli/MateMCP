@@ -7,16 +7,19 @@ namespace MateMCP.Agent.Desktop;
 /// The Companion can add richer actionable notifications when the platform/runtime supports them,
 /// but the Agent fallback must remain available so an approval is never silent.
 /// </summary>
-public sealed class LocalNotificationService(ILogger<LocalNotificationService> logger)
+public sealed class LocalNotificationService(
+    ILogger<LocalNotificationService> logger,
+    CompanionNotificationPresence companionNotifications)
 {
     public async Task NotifyApprovalAsync(int port, PendingApproval approval, CancellationToken ct)
     {
         try
         {
-            // On macOS the Companion notification path is reliable while the Companion is open,
-            // so avoid duplicates there. On Windows the current self-contained Companion can lack
-            // Windows App SDK Singleton notification support, so always keep the Agent fallback.
-            if (OperatingSystem.IsMacOS() && IsCompanionRunning())
+            // On macOS suppress the Agent fallback only after the Companion has explicitly
+            // confirmed that its native notifier is initialized and available. Process
+            // presence alone is not enough: during startup it created a race where the first
+            // approval could arrive before the Companion notification watcher was ready.
+            if (OperatingSystem.IsMacOS() && companionNotifications.IsReady)
                 return;
 
             var title = "MateMCP approval required";
@@ -38,24 +41,6 @@ public sealed class LocalNotificationService(ILogger<LocalNotificationService> l
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Could not show local approval notification.");
-        }
-    }
-
-    private static bool IsCompanionRunning()
-    {
-        try
-        {
-            var processes = System.Diagnostics.Process.GetProcessesByName("MateMCP.Agent.Companion");
-            try { return processes.Length > 0; }
-            finally
-            {
-                foreach (var process in processes)
-                    process.Dispose();
-            }
-        }
-        catch
-        {
-            return false;
         }
     }
 

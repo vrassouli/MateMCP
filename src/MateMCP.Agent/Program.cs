@@ -40,6 +40,7 @@ builder.Services.AddSingleton<ProjectConfigurationService>();
 builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<ApprovalPolicyStore>();
 builder.Services.AddSingleton<CredentialInjectionRateLimiter>();
+builder.Services.AddSingleton<CompanionNotificationPresence>();
 builder.Services.AddSingleton<LocalNotificationService>();
 builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddSingleton<IApprovalService>(sp => sp.GetRequiredService<ApprovalService>());
@@ -75,6 +76,13 @@ app.MapPut("/desktop-update/auto", async (DesktopAutoUpdateUpdate update, HttpCo
     await settings.SetAutoUpdateEnabledAsync(update.Enabled, ct);
     updates.RequestCheck();
     return Results.Ok(await updates.GetStatusAsync(ct));
+});
+
+app.MapPost("/companion/notifications/ready", (HttpContext context, CompanionNotificationPresence presence) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    presence.MarkReady();
+    return Results.Ok(new { status = "ready" });
 });
 
 app.MapGet("/approvals", (HttpContext context, ApprovalService approvals) => IsLoopback(context) ? Results.Ok(approvals.GetPending()) : Results.NotFound());
