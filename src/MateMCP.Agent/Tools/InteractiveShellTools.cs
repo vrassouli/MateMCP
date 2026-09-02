@@ -1,6 +1,4 @@
 using System.ComponentModel;
-using System.Security.Cryptography;
-using System.Text;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Desktop;
@@ -80,54 +78,9 @@ public sealed class InteractiveShellTools(
     }
 
     [McpServerTool(Name = "shell_session_send_secret"), Description("Injects a locally stored named credential into an existing interactive shell session without revealing the secret value to the AI. Use this only after observing terminal output and deciding that this exact running process is requesting that credential. Set submit=true to press Enter after the secret.")]
-    public async Task<object> SendSecret(string sessionId, string credential, bool submit = true, CancellationToken cancellationToken = default)
-    {
-        string command;
-        try { command = sessions.GetCommand(sessionId); }
-        catch (KeyNotFoundException ex) { throw new McpException(ex.Message); }
-
-        var available = await secrets.ListAsync(cancellationToken);
-        var info = available.FirstOrDefault(x => string.Equals(x.Name, credential, StringComparison.OrdinalIgnoreCase));
-        if (info is null) throw new McpException($"Named credential '{credential}' does not exist.");
-
-        var commandFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))).ToLowerInvariant()[..16];
-        if (!info.IsAllowedForTool(SendSecretTool))
-        {
-            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}",
-                "denied:tool-policy", cancellationToken);
-            throw new McpException($"Credential '{info.Name}' is not authorized for tool '{SendSecretTool}'.");
-        }
-        if (!injectionRateLimiter.TryAcquire(info.Name, out var retryAfter))
-        {
-            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}",
-                "denied:rate-limit", cancellationToken);
-            throw new McpException($"Credential injection rate limit exceeded. Retry after {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds.");
-        }
-
-        var approvalTarget = $"{info.Name}@cmd:{commandFingerprint}";
-        var decision = await approvals.RequestAsync("secret.use", approvalTarget, $"Use credential {info.Name} in shell session {sessionId[..Math.Min(8, sessionId.Length)]}: {Trim(command)}", cancellationToken);
-        if (decision == ApprovalDecision.Deny)
-        {
-            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}", "denied:approval", cancellationToken);
-            throw new McpException("Credential use denied by local user.");
-        }
-        if (decision == ApprovalDecision.Timeout)
-        {
-            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}", "denied:approval-timeout", cancellationToken);
-            throw new McpException("Credential use approval timed out.");
-        }
-
-        var value = await secrets.ResolveAsync(info.Name, cancellationToken);
-        if (value is null) throw new McpException($"Named credential '{info.Name}' could not be resolved from the local secure store.");
-        try
-        {
-            await sessions.WriteSecretAsync(sessionId, value, submit, cancellationToken);
-            await audit.WriteCredentialUsageAsync(info.Name, SendSecretTool, $"cmd:{commandFingerprint}", "injected", cancellationToken);
-            return new { sessionId, credential = info.Name, injected = true, submit };
-        }
-        catch (ArgumentException ex) { throw new McpException(ex.Message); }
-        finally { value = null; }
-    }
+    public Task<object> SendSecret(string sessionId, string credential, bool submit = true, CancellationToken cancellationToken = default)
+        => ShellSecretInjector.InjectAsync(sessionId, credential, submit, SendSecretTool, sessions, secrets,
+            injectionRateLimiter, approvals, audit, cancellationToken);
 
     [McpServerTool(Name = "shell_session_close"), Description("Terminates and removes an interactive shell session.")]
     public async Task<object> Close(string sessionId, CancellationToken cancellationToken = default)

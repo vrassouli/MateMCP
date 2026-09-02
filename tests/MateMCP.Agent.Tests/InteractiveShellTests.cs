@@ -163,6 +163,47 @@ public sealed class InteractiveShellTests
     }
 
     [Fact]
+    public async Task Ssh_authenticate_rejects_generic_session_before_secret_resolution()
+    {
+        await using var manager = CreateManager();
+        var started = await manager.StartAsync(WaitingCommand(), WorkingDirectory(), CancellationToken.None);
+        var approvals = new FakeApprovalService(ApprovalDecision.AllowOnce);
+        var store = new FakeCredentialStore("ssh-prod", "must-not-resolve");
+        var tools = CreateSshTools(manager, store, approvals, NewAuditPath());
+
+        var exception = await Assert.ThrowsAsync<McpException>(
+            () => tools.Authenticate(started.SessionId, "ssh-prod", true, CancellationToken.None));
+
+        Assert.Contains("only allowed for sessions created by ssh_session_start", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, approvals.Calls);
+        Assert.Equal(0, store.ResolveCalls);
+    }
+
+    [Fact]
+    public async Task Ssh_authenticate_accepts_legacy_generic_secret_tool_authorization()
+    {
+        const string secret = "ssh-specific-secret";
+        var auditPath = NewAuditPath();
+        await using var manager = CreateManager();
+        var started = await manager.StartAsync(PromptCommand(), WorkingDirectory(), CancellationToken.None, ShellSessionKind.Ssh);
+        var prompt = await WaitForAsync(manager, started.SessionId, 0, s => s.Output.Contains("Prompt:", StringComparison.Ordinal));
+        var approvals = new FakeApprovalService(ApprovalDecision.AllowOnce);
+        var store = new FakeCredentialStore("ssh-prod", secret, [UserSecretInfo.ShellSessionSendSecretTool]);
+        var tools = CreateSshTools(manager, store, approvals, auditPath);
+
+        var response = await tools.Authenticate(started.SessionId, "ssh-prod", true, CancellationToken.None);
+        var final = await WaitForAsync(manager, started.SessionId, prompt.NextOffset,
+            s => s.Exited && s.Output.Contains("[REDACTED]", StringComparison.Ordinal));
+        var entries = await new AuditLog(auditPath).ReadCredentialUsageAsync();
+
+        Assert.DoesNotContain(secret, JsonSerializer.Serialize(response), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, final.Output, StringComparison.Ordinal);
+        Assert.Equal(1, store.ResolveCalls);
+        Assert.Contains(entries, x => x.Credential == "ssh-prod" &&
+            x.Tool == UserSecretInfo.SshSessionAuthenticateTool && x.Result == "injected");
+    }
+
+    [Fact]
     public async Task Excessive_credential_attempts_are_rate_limited_and_audited()
     {
         var auditPath = NewAuditPath();
@@ -220,6 +261,20 @@ public sealed class InteractiveShellTests
         var registry = new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options));
         var optionWrapper = Options.Create(options);
         return new InteractiveShellTools(registry, new AuditLog(auditPath), approvals, optionWrapper, manager, credentials,
+            new CredentialInjectionRateLimiter(optionWrapper));
+    }
+
+    private static SshTools CreateSshTools(InteractiveShellSessionManager manager, ICredentialStore credentials,
+        IApprovalService approvals, string auditPath, int maxAttempts = 5)
+    {
+        var options = new MateOptions
+        {
+            RequireShellApproval = false,
+            InteractiveShell = new InteractiveShellOptions { SecretInjectionMaxAttempts = maxAttempts }
+        };
+        var registry = new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options));
+        var optionWrapper = Options.Create(options);
+        return new SshTools(registry, new AuditLog(auditPath), approvals, optionWrapper, manager, credentials,
             new CredentialInjectionRateLimiter(optionWrapper));
     }
 

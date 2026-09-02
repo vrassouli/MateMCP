@@ -32,7 +32,8 @@ public sealed class SshCredentialInjectionTests
         var shellTools = new InteractiveShellTools(
             registry, audit, approvals, wrappedOptions, sessions, store,
             new CredentialInjectionRateLimiter(wrappedOptions));
-        var sshTools = new SshTools(registry, audit, approvals, wrappedOptions, sessions);
+        var limiter = new CredentialInjectionRateLimiter(wrappedOptions);
+        var sshTools = new SshTools(registry, audit, approvals, wrappedOptions, sessions, store, limiter);
 
         var started = Assert.IsType<ShellSessionSnapshot>(await sshTools.Start(host, user, port));
         var prompt = await WaitForAsync(sessions, started.SessionId, 0,
@@ -46,7 +47,7 @@ public sealed class SshCredentialInjectionTests
                 x => x.Output.Contains("password:", StringComparison.OrdinalIgnoreCase));
         }
 
-        var response = await shellTools.SendSecret(started.SessionId, "ssh-integration", true);
+        var response = await sshTools.Authenticate(started.SessionId, "ssh-integration", true);
         await Task.Delay(300);
         await shellTools.Write(started.SessionId, "printf 'SSH_AUTHENTICATED\\n'", true);
         var completed = await WaitForAsync(sessions, started.SessionId, prompt.NextOffset,

@@ -17,6 +17,7 @@ public sealed record UserSecretInfo(
     IReadOnlyList<string>? AllowedTools = null)
 {
     public const string ShellSessionSendSecretTool = "shell_session_send_secret";
+    public const string SshSessionAuthenticateTool = "ssh_session_authenticate";
 
     public IReadOnlyList<string> EffectiveAllowedTools =>
         AllowedTools is null ? [ShellSessionSendSecretTool] : AllowedTools;

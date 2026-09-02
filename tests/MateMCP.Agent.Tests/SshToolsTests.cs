@@ -43,6 +43,26 @@ public sealed class SshToolsTests
     }
 
     [Fact]
+    public void Ssh_authenticate_is_a_narrow_non_destructive_open_world_tool()
+    {
+        var method = typeof(SshTools).GetMethod(nameof(SshTools.Authenticate));
+        Assert.NotNull(method);
+
+        var tool = method!.GetCustomAttribute<McpServerToolAttribute>();
+        Assert.NotNull(tool);
+        Assert.Equal("ssh_session_authenticate", tool!.Name);
+        Assert.False(tool.ReadOnly);
+        Assert.False(tool.Destructive);
+        Assert.False(tool.Idempotent);
+        Assert.True(tool.OpenWorld);
+
+        var parameterNames = method.GetParameters().Select(x => x.Name).ToArray();
+        Assert.Contains("sessionId", parameterNames);
+        Assert.Contains("credential", parameterNames);
+        Assert.DoesNotContain("secret", parameterNames);
+    }
+
+    [Fact]
     public void Ssh_start_is_a_narrow_non_destructive_open_world_tool()
     {
         var method = typeof(SshTools).GetMethod(nameof(SshTools.Start));
