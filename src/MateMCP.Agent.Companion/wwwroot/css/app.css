@@ -24,6 +24,8 @@ input, textarea, select { width: 100%; padding: 9px 10px; border: 1px solid rgba
 .update-toggle-row { display: grid; gap: 6px; }
 .update-toggle { display: flex; align-items: center; gap: 9px; cursor: pointer; }
 .update-toggle input { width: auto; margin: 0; padding: 0; }
+.update-progress-row { display: grid; gap: 7px; }
+.update-progress-bar { width: 100%; height: 10px; }
 .field { display: grid; gap: 6px; margin-bottom: 12px; }
 .terminal { background: #111; color: #ddd; padding: 14px; min-height: 320px; max-height: 60vh; overflow: auto; border-radius: 8px; white-space: pre-wrap; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .session-layout { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; gap: 14px; }
