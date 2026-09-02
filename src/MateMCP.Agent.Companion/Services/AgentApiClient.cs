@@ -32,6 +32,12 @@ public sealed class AgentApiClient : IDisposable
     public async Task<IReadOnlyList<PendingApproval>> GetApprovalsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<PendingApproval>>("approvals", Json, ct) ?? [];
 
+    public async Task MarkApprovalNotificationsReadyAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsync("companion/notifications/ready", null, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task DecideApprovalAsync(string id, string decision, CancellationToken ct = default)
     {
         using var response = await _http.PostAsync($"approvals/{Uri.EscapeDataString(id)}/{Uri.EscapeDataString(decision)}", null, ct);
