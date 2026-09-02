@@ -74,9 +74,7 @@ public sealed class BackgroundDesktopUpdateService(
                     WriteStatus("failed", $"Background update check failed: {ex.Message}");
                 }
 
-                var delay = Task.Delay(TimeSpan.FromMinutes(30), stoppingToken);
-                var wake = _wake.WaitAsync(stoppingToken);
-                await Task.WhenAny(delay, wake);
+                await _wake.WaitAsync(TimeSpan.FromMinutes(30), stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -293,15 +291,17 @@ try {
     if (-not (Test-Path $Installer)) { throw 'Downloaded package does not contain install-desktop-windows.ps1' }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -NoStart
     if ($LASTEXITCODE -ne 0) { throw "MateMCP Desktop installer exited with code $LASTEXITCODE" }
+    $Now = [DateTimeOffset]::UtcNow.ToString('o')
     [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
-    [IO.File]::WriteAllText($Status, "$(Get-Date -AsUTC -Format o)|updated|MateMCP Desktop was updated automatically in the background.")
+    [IO.File]::WriteAllText($Status, "$Now|updated|MateMCP Desktop was updated automatically in the background.")
     Remove-Item $Failure -Force -ErrorAction SilentlyContinue
     if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
 }
 catch {
     New-Item -ItemType Directory -Force -Path (Split-Path $Failure) | Out-Null
+    $Now = [DateTimeOffset]::UtcNow.ToString('o')
     [IO.File]::WriteAllText($Failure, "Background Desktop update installation failed: $($_.Exception.Message)")
-    [IO.File]::WriteAllText($Status, "$(Get-Date -AsUTC -Format o)|failed|Background Desktop update installation failed; the previous installation will be restarted if possible.")
+    [IO.File]::WriteAllText($Status, "$Now|failed|Background Desktop update installation failed; the previous installation will be restarted if possible.")
     if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
 }
 finally {
