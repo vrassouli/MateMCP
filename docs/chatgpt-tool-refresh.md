@@ -20,15 +20,16 @@ Its `mcpTools` section reports:
 
 If the live Agent lists a tool but the existing ChatGPT app does not expose it, the Agent installation is not missing that capability. Refresh or recreate the ChatGPT app action snapshot instead of reinstalling the Agent repeatedly.
 
-For the structured SSH credential flow, current Agent builds should expose at least:
+For interactive command-line work, MateMCP intentionally exposes a generic terminal workflow rather than protocol- or application-specific wrappers:
 
-- `ssh_session_start`
-- `ssh_session_authenticate`
+- `shell_session_start`
 - `shell_session_read`
 - `shell_session_write`
+- `shell_session_send_secret`
 - `shell_session_close`
+- `secret_list`
 
-The generalized `shell_session_send_secret` action remains available for non-SSH interactive prompts and backwards compatibility.
+`ssh`, `ftp`, database clients, package managers, REPLs, `sudo`, and other interactive command-line programs all use this same shell-session flow. `shell_exec` is the convenience tool for commands that are known to be non-interactive.
 
 ## Refresh the ChatGPT side
 
@@ -49,5 +50,7 @@ Afterward, start a new chat or reselect/@mention the refreshed app so the curren
 A stale snapshot means ChatGPT does not expose a tool that the live Agent reports in `mcpTools.names`.
 
 A host-side rejection means the tool exists in ChatGPT but a particular call is stopped before it reaches MateMCP. In that case there will be no corresponding Agent audit event for the attempted operation. If the request reaches MateMCP and MateMCP denies it, the Agent audit should record the specific approval, tool-policy, rate-limit, or other Agent-side decision.
+
+Do not add protocol-specific MateMCP tools merely to work around a host-side rejection. The Agent's terminal abstraction remains generic; host-side policy behavior should be diagnosed separately.
 
 Never copy local access tokens or secret values into ChatGPT while troubleshooting. Credential names and non-secret tool metadata are sufficient for this comparison.

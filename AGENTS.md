@@ -34,6 +34,15 @@ If verification is incomplete, leave the Issue open and state what remains.
 - Keep security-sensitive behavior explicit and auditable.
 - Do not expose credentials, tokens, secrets, or private keys in logs, commits, Issues, or tool output.
 
+## Generic shell architecture
+
+- MateMCP exposes one generic interactive terminal abstraction for command-line programs: `shell_session_start`, `shell_session_read`, `shell_session_write`, `shell_session_send_secret`, and `shell_session_close`.
+- Do not add protocol- or application-specific shell wrapper tools such as SSH-, FTP-, database-, package-manager-, or `sudo`-specific MCP actions merely because those programs are interactive.
+- `shell_exec` is the convenience path for commands known to be non-interactive. If a command may prompt, wait for input, open a REPL, or request a credential, use the generic shell-session flow instead.
+- Secret values are resolved only inside the Agent. AI clients pass a credential name/reference to `shell_session_send_secret` only after observing terminal output that shows the running process is requesting it.
+- A host/client policy rejection that occurs before MateMCP invocation is an external integration constraint. Diagnose it explicitly; do not distort the Agent tool architecture to work around it.
+- A protocol-specific shell tool is permitted only when a concrete platform limitation makes the generic PTY/ConPTY flow technically impossible, and that exception must be documented and explicitly justified.
+
 ## Branches and pull requests
 
 - Small, isolated fixes may be committed directly to `main` when repository practice permits it.

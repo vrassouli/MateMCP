@@ -16,8 +16,19 @@ public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, Approva
 {
     private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
 
-    [McpServerTool(Name = "shell_exec"), Description("Executes a shell command. When a project is specified, the command runs in that configured project directory and obeys its shell policy; otherwise it runs in the Agent user's home directory. Shell execution may require explicit local approval.")]
-    public async Task<object> Exec(string command, string? project = null, int timeoutSeconds = 60, CancellationToken cancellationToken = default)
+    [McpServerTool(
+        Name = "shell_exec",
+        Title = "Execute non-interactive shell command",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = true)]
+    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
+    public async Task<object> Exec(
+        [Description("Shell/command-line command to run non-interactively.")] string command,
+        [Description("Optional configured MateMCP project whose directory and shell policy should be used. Omit to run from the Agent user's home directory.")] string? project = null,
+        [Description("Maximum execution time in seconds, clamped to 1..600.")] int timeoutSeconds = 60,
+        CancellationToken cancellationToken = default)
     {
         using var activityLease = EnterActivity();
         var hasProject = !string.IsNullOrWhiteSpace(project); var scope = "agent"; string workingDirectory;

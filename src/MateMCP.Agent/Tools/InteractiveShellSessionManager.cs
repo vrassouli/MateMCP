@@ -7,12 +7,6 @@ using Porta.Pty;
 
 namespace MateMCP.Agent.Tools;
 
-public enum ShellSessionKind
-{
-    Generic,
-    Ssh
-}
-
 public sealed class InteractiveShellSessionManager : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, ShellSession> _sessions = new(StringComparer.Ordinal);
@@ -39,7 +33,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
 
     public int ActiveSessionCount => _sessions.Count;
 
-    public async Task<ShellSessionSnapshot> StartAsync(string command, string workingDirectory, CancellationToken ct, ShellSessionKind kind = ShellSessionKind.Generic)
+    public async Task<ShellSessionSnapshot> StartAsync(string command, string workingDirectory, CancellationToken ct)
     {
         ThrowIfDisposed();
         if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException("Command cannot be empty.", nameof(command));
@@ -56,7 +50,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             ThrowIfDisposed();
             var id = Guid.NewGuid().ToString("N");
             connection = await PtyProvider.SpawnAsync(CreateOptions(id, command, workingDirectory), ct);
-            var session = new ShellSession(id, command, workingDirectory, kind, connection, _settings.MaxOutputChars, _settings.MaxInputChars);
+            var session = new ShellSession(id, command, workingDirectory, connection, _settings.MaxOutputChars, _settings.MaxInputChars);
             if (!_sessions.TryAdd(id, session))
                 throw new InvalidOperationException("Could not register interactive shell session.");
 
@@ -78,7 +72,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         ThrowIfDisposed();
         CleanupExpired();
         return _sessions.Values
-            .Select(session => session.Snapshot(0))
+            .Select(session => session.Snapshot(0, touch: false))
             .OrderByDescending(snapshot => snapshot.LastTouched)
             .ToArray();
     }
@@ -119,16 +113,11 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         return Get(sessionId).Command;
     }
 
-    public ShellSessionKind GetKind(string sessionId)
-    {
-        ThrowIfDisposed();
-        return Get(sessionId).Kind;
-    }
-
     private ShellSession Get(string sessionId)
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
             throw new KeyNotFoundException($"Interactive shell session '{sessionId}' was not found or has expired.");
+        session.Touch();
         return session;
     }
 
@@ -222,12 +211,11 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         private bool _exited;
         private int? _exitCode;
 
-        public ShellSession(string id, string command, string workingDirectory, ShellSessionKind kind, IPtyConnection connection, int maxOutputChars, int maxInputChars)
+        public ShellSession(string id, string command, string workingDirectory, IPtyConnection connection, int maxOutputChars, int maxInputChars)
         {
             Id = id;
             Command = command;
             WorkingDirectory = workingDirectory;
-            Kind = kind;
             _connection = connection;
             _maxOutputChars = maxOutputChars;
             _maxInputChars = maxInputChars;
@@ -248,17 +236,17 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         public string Id { get; }
         public string Command { get; }
         public string WorkingDirectory { get; }
-        public ShellSessionKind Kind { get; }
         public DateTimeOffset CreatedAt { get; }
         public DateTimeOffset LastTouched { get; private set; }
 
         public void Touch() => LastTouched = DateTimeOffset.UtcNow;
         public void StartReader() => _ = Task.Run(ReadLoopAsync);
 
-        public ShellSessionSnapshot Snapshot(int absoluteOffset)
+        public ShellSessionSnapshot Snapshot(int absoluteOffset, bool touch = true)
         {
             lock (_sync)
             {
+                if (touch) Touch();
                 var truncated = absoluteOffset < _trimmedChars;
                 var start = Math.Clamp(absoluteOffset - _trimmedChars, 0, _output.Length);
                 var chunk = _output.ToString(start, _output.Length - start);

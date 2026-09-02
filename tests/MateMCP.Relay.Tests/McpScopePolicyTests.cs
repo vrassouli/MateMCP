@@ -6,14 +6,12 @@ public sealed class McpScopePolicyTests
 {
     [Theory]
     [InlineData("shell_exec")]
-    [InlineData("ssh_session_start")]
-    [InlineData("ssh_session_authenticate")]
     [InlineData("shell_session_start")]
     [InlineData("shell_session_read")]
     [InlineData("shell_session_write")]
     [InlineData("shell_session_send_secret")]
     [InlineData("shell_session_close")]
-    public void Shell_tools_require_shell_scope(string tool)
+    public void Generic_shell_tools_require_shell_scope(string tool)
     {
         Assert.Equal("mcp:shell", McpScopePolicy.RequiredScopeForTool(tool));
     }
@@ -25,12 +23,22 @@ public sealed class McpScopePolicyTests
     }
 
     [Theory]
+    [InlineData("filesystem_projects")]
+    [InlineData("filesystem_list")]
     [InlineData("filesystem_read")]
     [InlineData("secret_list")]
-    [InlineData("unknown_tool")]
-    [InlineData(null)]
-    public void Read_only_or_unknown_tools_default_to_read_scope(string? tool)
+    public void Known_read_tools_require_read_scope(string tool)
     {
         Assert.Equal("mcp:read", McpScopePolicy.RequiredScopeForTool(tool));
+    }
+
+    [Theory]
+    [InlineData("unknown_tool")]
+    [InlineData("ssh_session_start")]
+    [InlineData("ssh_session_authenticate")]
+    [InlineData(null)]
+    public void Unknown_or_removed_tools_fail_closed(string? tool)
+    {
+        Assert.Equal(McpScopePolicy.UnsupportedScope, McpScopePolicy.RequiredScopeForTool(tool));
     }
 }

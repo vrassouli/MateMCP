@@ -5,11 +5,23 @@ namespace MateMCP.Agent.Tests;
 public sealed class McpToolCatalogTests
 {
     [Fact]
-    public void Catalog_includes_structured_ssh_and_secret_tools()
+    public void Catalog_exposes_only_generic_shell_session_tools()
     {
-        Assert.Contains("ssh_session_start", McpToolCatalog.Names);
-        Assert.Contains("ssh_session_authenticate", McpToolCatalog.Names);
-        Assert.Contains("shell_session_send_secret", McpToolCatalog.Names);
+        var expectedShellTools = new[]
+        {
+            "shell_exec",
+            "shell_session_start",
+            "shell_session_read",
+            "shell_session_write",
+            "shell_session_send_secret",
+            "shell_session_close",
+            "secret_list"
+        };
+
+        foreach (var tool in expectedShellTools)
+            Assert.Contains(tool, McpToolCatalog.Names);
+
+        Assert.DoesNotContain(McpToolCatalog.Names, name => name.StartsWith("ssh_", StringComparison.Ordinal));
         Assert.Equal(McpToolCatalog.Names.Count, McpToolCatalog.Names.Distinct(StringComparer.Ordinal).Count());
         Assert.Matches("^[0-9a-f]{16}$", McpToolCatalog.Revision);
     }
