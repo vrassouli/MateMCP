@@ -188,8 +188,10 @@ public sealed class DesktopUpdateService : IDisposable
 
     private static string BuildMacInstallScript(string tempRoot, string archivePath, string markerPath, string failurePath, long assetId)
     {
-        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Logs", "MateMCP", "update.log");
-        var companionPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Applications", "MateMCP Agent Companion.app");
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var logPath = Path.Combine(home, "Library", "Logs", "MateMCP", "update.log");
+        var companionPath = Path.Combine(home, "Applications", "MateMCP Agent Companion.app");
+        var agentPlist = Path.Combine(home, "Library", "LaunchAgents", "com.matemcp.agent.plist");
         return $$"""
 #!/bin/sh
 set -u
@@ -200,21 +202,29 @@ MARKER={{ShellQuote(markerPath)}}
 FAILURE={{ShellQuote(failurePath)}}
 LOG={{ShellQuote(logPath)}}
 COMPANION={{ShellQuote(companionPath)}}
+AGENT_PLIST={{ShellQuote(agentPlist)}}
+LAUNCH_DOMAIN="gui/$(id -u)"
 sleep 2
 mkdir -p "$PACKAGE" "$(dirname "$MARKER")" "$(dirname "$LOG")"
 rm -f "$FAILURE"
 if tar -xzf "$ARCHIVE" -C "$PACKAGE" >>"$LOG" 2>&1 && \
    test -f "$PACKAGE/install-desktop-macos.sh" && \
    chmod +x "$PACKAGE/install-desktop-macos.sh" && \
-   "$PACKAGE/install-desktop-macos.sh" >>"$LOG" 2>&1; then
+   "$PACKAGE/install-desktop-macos.sh" --no-start >>"$LOG" 2>&1; then
     printf '%s' '{{assetId.ToString(CultureInfo.InvariantCulture)}}' > "$MARKER"
     rm -f "$FAILURE"
+    launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST" >>"$LOG" 2>&1 || true
+    launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent" >>"$LOG" 2>&1 || \
+        printf '%s\n' "Desktop updated, but the Agent could not be restarted automatically. See $LOG for details." > "$FAILURE"
+    open "$COMPANION" >>"$LOG" 2>&1 || true
     rm -rf "$TEMP_ROOT"
     exit 0
 else
     code=$?
     printf '%s\n' "Desktop update installation failed. See $LOG for details." > "$FAILURE"
-    open "$COMPANION" >/dev/null 2>&1 || true
+    launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST" >>"$LOG" 2>&1 || true
+    launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent" >>"$LOG" 2>&1 || true
+    open "$COMPANION" >>"$LOG" 2>&1 || true
     rm -rf "$TEMP_ROOT"
     exit "$code"
 fi
@@ -230,23 +240,33 @@ $Archive = {{PowerShellQuote(archivePath)}}
 $Package = Join-Path $TempRoot 'package'
 $Marker = {{PowerShellQuote(markerPath)}}
 $Failure = {{PowerShellQuote(failurePath)}}
-$Log = Join-Path $env:LOCALAPPDATA 'MateMCP\update.log'
-$Companion = Join-Path $env:LOCALAPPDATA 'MateMCP\Companion\MateMCP.Agent.Companion.exe'
+$LogRoot = Join-Path $env:LOCALAPPDATA 'MateMCP-Update'
+$Log = Join-Path $LogRoot 'update.log'
+$InstalledRoot = Join-Path $env:LOCALAPPDATA 'MateMCP'
+$Companion = Join-Path $InstalledRoot 'Companion\MateMCP.Agent.Companion.exe'
+$HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
+$WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
 Start-Sleep -Seconds 2
-New-Item -ItemType Directory -Force -Path $Package, (Split-Path $Marker), (Split-Path $Log) | Out-Null
+New-Item -ItemType Directory -Force -Path $Package, $LogRoot, (Split-Path $Marker) | Out-Null
 Remove-Item $Failure -Force -ErrorAction SilentlyContinue
 try {
     Expand-Archive -Path $Archive -DestinationPath $Package -Force
     $Installer = Join-Path $Package 'install-desktop-windows.ps1'
     if (-not (Test-Path $Installer)) { throw 'Downloaded package does not contain install-desktop-windows.ps1' }
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer *> $Log
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -NoStart *> $Log
     if ($LASTEXITCODE -ne 0) { throw "MateMCP Desktop installer exited with code $LASTEXITCODE" }
+    New-Item -ItemType Directory -Force -Path (Split-Path $Marker) | Out-Null
     [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
     Remove-Item $Failure -Force -ErrorAction SilentlyContinue
+    if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
+    Start-Sleep -Milliseconds 750
+    if (Test-Path $Companion) { Start-Process -FilePath $Companion -WorkingDirectory (Split-Path $Companion) }
 }
 catch {
+    New-Item -ItemType Directory -Force -Path (Split-Path $Failure) | Out-Null
     [IO.File]::WriteAllText($Failure, "Desktop update installation failed: $($_.Exception.Message). See $Log for details.")
-    if (Test-Path $Companion) { Start-Process -FilePath $Companion -WorkingDirectory (Split-Path $Companion) }
+    if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
+    if (Test-Path $Companion) { Start-Process -FilePath $Companion -WorkingDirectory (Split-Path $Companion) -ErrorAction SilentlyContinue }
 }
 finally {
     Remove-Item $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
