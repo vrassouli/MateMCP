@@ -18,6 +18,16 @@ public sealed class AgentApiClient : IDisposable
     public async Task<AgentStatus?> GetStatusAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<AgentStatus>("status", Json, ct);
 
+    public async Task<DesktopBackgroundUpdateStatus?> GetDesktopUpdateStatusAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<DesktopBackgroundUpdateStatus>("desktop-update", Json, ct);
+
+    public async Task<DesktopBackgroundUpdateStatus?> SetDesktopAutoUpdateAsync(bool enabled, CancellationToken ct = default)
+    {
+        using var response = await _http.PutAsJsonAsync("desktop-update/auto", new { Enabled = enabled }, Json, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<DesktopBackgroundUpdateStatus>(Json, ct);
+    }
+
     public async Task<IReadOnlyList<PendingApproval>> GetApprovalsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<PendingApproval>>("approvals", Json, ct) ?? [];
 
@@ -76,6 +86,8 @@ public sealed class AgentApiClient : IDisposable
 public sealed record AgentStatus(string Service, string Endpoint, string Management, string Configuration, IReadOnlyList<string> Projects,
     bool ShellApproval, int InteractiveSessions, RelayStatus Relay, string Credentials);
 
+public sealed record DesktopBackgroundUpdateStatus(bool AutoUpdateEnabled, string State, string Message,
+    DateTimeOffset? LastChangedAt, long InstalledAssetId, string? LastFailure);
 public sealed record RelayStatus(bool Enabled, string? Url, string? DeviceId);
 public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Capability, string Target, string Summary);
 public sealed record UserSecretInfo(string Name, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int Kind, IReadOnlyList<string>? AllowedTools);
