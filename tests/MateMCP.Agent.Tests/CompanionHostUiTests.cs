@@ -3,6 +3,20 @@ namespace MateMCP.Agent.Tests;
 public sealed class CompanionHostUiTests
 {
     [Fact]
+    public void Companion_treats_missing_shell_session_as_stale_reference()
+    {
+        var root = FindRepositoryRoot();
+        var api = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+
+        Assert.Contains("response.StatusCode == HttpStatusCode.NotFound", api, StringComparison.Ordinal);
+        Assert.Contains("return null;", api, StringComparison.Ordinal);
+        Assert.Contains("response.EnsureSuccessStatusCode();", api, StringComparison.Ordinal);
+        Assert.Contains("ReconcileSelectedShell();", main, StringComparison.Ordinal);
+        Assert.Contains("if (snapshot is null) ClearSelectedShell();", main, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Blazor_fatal_error_ui_is_styled_and_reload_does_not_use_anchor_navigation()
     {
         var root = FindRepositoryRoot();

@@ -309,6 +309,7 @@
             Approvals = await Api.GetApprovalsAsync(_disposeCts.Token);
             Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
             ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
+            ReconcileSelectedShell();
             Audit = await Api.GetAuditAsync(250, _disposeCts.Token);
             DeviceUrlCopied = false;
             Error = null;
@@ -336,10 +337,12 @@
             Status = await Api.GetStatusAsync(_disposeCts.Token);
             Approvals = await Api.GetApprovalsAsync(_disposeCts.Token);
             ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
+            ReconcileSelectedShell();
             if (SelectedSessionId is not null)
             {
                 var snapshot = await Api.ReadShellSessionAsync(SelectedSessionId, ShellOffset, _disposeCts.Token);
-                if (snapshot is not null)
+                if (snapshot is null) ClearSelectedShell();
+                else
                 {
                     if (snapshot.OutputTruncated) ShellOutput += "\n[older output truncated]\n";
                     ShellOutput += snapshot.Output;
@@ -363,6 +366,18 @@
         Secrets = [];
         ShellSessions = [];
         Audit = [];
+        ClearSelectedShell();
+    }
+
+    private void ReconcileSelectedShell()
+    {
+        if (SelectedSessionId is null) return;
+        if (ShellSessions.Any(x => string.Equals(x.SessionId, SelectedSessionId, StringComparison.Ordinal))) return;
+        ClearSelectedShell();
+    }
+
+    private void ClearSelectedShell()
+    {
         SelectedSessionId = null;
         ShellOffset = 0;
         ShellOutput = string.Empty;
@@ -451,9 +466,7 @@
     {
         if (SelectedSessionId is null) return;
         await Api.CloseShellSessionAsync(SelectedSessionId, _disposeCts.Token);
-        SelectedSessionId = null;
-        ShellOutput = string.Empty;
-        ShellOffset = 0;
+        ClearSelectedShell();
         ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
     }
 
