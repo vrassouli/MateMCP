@@ -1,6 +1,8 @@
 @implements IAsyncDisposable
 @inject DesktopUpdateService Updates
 @inject AgentApiClient Agent
+@inject AgentCompatibilityService Compatibility
+@inject AgentProcessController AgentProcess
 
 <div class="panel">
     <strong>Desktop updates</strong>
@@ -12,6 +14,21 @@
             <div class="muted">Latest package: @updatedAt.LocalDateTime</div>
         }
     </div>
+    @if (CompatibilityStatus is not null)
+    {
+        <div class="row">
+            <span class="muted">Companion / Agent compatibility</span>
+            <div>@CompatibilityStatus.Message</div>
+            <div class="muted">Companion @CompatibilityStatus.CompanionVersion@if (!string.IsNullOrWhiteSpace(CompatibilityStatus.CapabilityRevision)) { <text> · Agent capability revision @CompatibilityStatus.CapabilityRevision</text> }</div>
+            @if (!CompatibilityStatus.Compatible)
+            {
+                <div class="actions">
+                    <Button Text="Restart Agent" OnClick="RestartAgentAsync" />
+                    <Button Text="Check again" OnClick="CheckCompatibilityAsync" />
+                </div>
+            }
+        </div>
+    }
     @if (BackgroundUpdate is not null)
     {
         <div class="row">
@@ -51,7 +68,7 @@
                 <progress class="update-progress-bar" max="100"></progress>
                 <div class="muted">@(UpdateProgress?.Message ?? "Preparing update...")</div>
             }
-            <div class="muted">Companion will stay open while a manual package downloads and will close only when installation is ready to start.</div>
+            <div class="muted">Companion will stay open while a manual package downloads and will close only when installation is ready to start. The desktop package updates both Companion and the local Agent, restarts the Agent, and verifies compatibility when Companion relaunches.</div>
         </div>
     }
     else
@@ -77,20 +94,25 @@
     private Task? _worker;
     private DesktopUpdateStatus? UpdateStatus { get; set; }
     private DesktopBackgroundUpdateStatus? BackgroundUpdate { get; set; }
+    private AgentCompatibilityStatus? CompatibilityStatus { get; set; }
     private DesktopUpdateProgress? UpdateProgress { get; set; }
     private string? Error { get; set; }
     private bool Checking { get; set; }
     private bool Updating { get; set; }
+    private bool RestartingAgent { get; set; }
     private bool AutoUpdateEnabled { get; set; }
 
     private string StatusText => Updating
         ? UpdateProgress?.Message ?? "Preparing update..."
-        : Checking
-            ? "Checking..."
-            : UpdateStatus?.Message ?? "Ready to check for updates.";
+        : RestartingAgent
+            ? "Restarting Agent and verifying compatibility..."
+            : Checking
+                ? "Checking..."
+                : UpdateStatus?.Message ?? "Ready to check for updates.";
 
     protected override async Task OnInitializedAsync()
     {
+        await CheckCompatibilityAsync();
         try
         {
             BackgroundUpdate = await Agent.GetDesktopUpdateStatusAsync(_cts.Token);
@@ -104,6 +126,35 @@
         _worker = RunUpdateLoopAsync(_cts.Token);
     }
 
+    private async Task CheckCompatibilityAsync()
+    {
+        CompatibilityStatus = await Compatibility.CheckAsync(_cts.Token);
+    }
+
+    private async Task RestartAgentAsync()
+    {
+        if (RestartingAgent || Updating) return;
+        RestartingAgent = true;
+        Error = null;
+        try
+        {
+            await AgentProcess.RestartAsync(_cts.Token);
+            await Task.Delay(750, _cts.Token);
+            await CheckCompatibilityAsync();
+            if (CompatibilityStatus is { Compatible: false })
+                Error = "Agent restarted, but it is still incompatible with this Companion. Use Update now or repair/reinstall the current Desktop package.";
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Could not restart Agent: {ex.Message}";
+        }
+        finally
+        {
+            RestartingAgent = false;
+        }
+    }
+
     private async Task CheckNowAsync()
     {
         if (Checking || Updating) return;
@@ -114,6 +165,7 @@
             UpdateStatus = await Updates.CheckAsync(_cts.Token);
             BackgroundUpdate = await Agent.GetDesktopUpdateStatusAsync(_cts.Token);
             AutoUpdateEnabled = BackgroundUpdate?.AutoUpdateEnabled ?? AutoUpdateEnabled;
+            await CheckCompatibilityAsync();
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception ex)
@@ -148,7 +200,7 @@
     {
         if (Updating) return;
         Updating = true;
-        UpdateProgress = new DesktopUpdateProgress("Preparing", "Preparing update...", 0, null);
+        UpdateProgress = new DesktopUpdateProgress("Preparing", "Preparing coordinated Companion + Agent update...", 0, null);
         if (UpdateStatus is not null)
             UpdateStatus = UpdateStatus with { LastFailure = null };
         Error = null;
