@@ -113,6 +113,20 @@ public sealed class AgentApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<AgentLogBatch> GetAgentLogsAsync(long after = 0, int limit = 500, string? level = null, string? text = null, CancellationToken ct = default)
+    {
+        var query = $"logs?after={Math.Max(0, after)}&limit={Math.Clamp(limit, 1, 1000)}";
+        if (!string.IsNullOrWhiteSpace(level)) query += "&level=" + Uri.EscapeDataString(level);
+        if (!string.IsNullOrWhiteSpace(text)) query += "&text=" + Uri.EscapeDataString(text);
+        return await _http.GetFromJsonAsync<AgentLogBatch>(query, Json, ct) ?? new AgentLogBatch([], after);
+    }
+
+    public async Task ClearAgentLogsAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync("logs", ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task<IReadOnlyList<ShellSessionSnapshot>> GetShellSessionsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<ShellSessionSnapshot>>("shell/sessions", Json, ct) ?? [];
 
@@ -177,3 +191,6 @@ public sealed record AuditCleanupResult(int Deleted);
 
 public sealed record SkillMemoryItem(string Id, string Title, string Type, string Scope, string? Project, IReadOnlyList<string> Tags, string? Description, string Content, string Source, string UpdatedBy, bool Enabled, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record SkillMemoryEdit(string Title, string Type, string Scope, string? Project, IReadOnlyList<string>? Tags, string? Description, string Content, string Source = "user", bool Enabled = true);
+
+public sealed record AgentLogEntry(long Id, DateTimeOffset Timestamp, int Level, string Category, string Message);
+public sealed record AgentLogBatch(IReadOnlyList<AgentLogEntry> Entries, long Cursor);

@@ -322,3 +322,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     #blazor-error-ui { left: 12px; right: 12px; bottom: 12px; }
     #blazor-error-ui .blazor-error-content { align-items: flex-start; }
 }
+
+.log-toolbar { align-items: flex-start; }
+.log-filters { display: grid; grid-template-columns: minmax(140px, 220px) minmax(220px, 1fr) auto; gap: 12px; align-items: end; }
+.log-filters .field { margin-bottom: 0; }
+.log-filters .actions { margin-top: 0; }
+.log-terminal { min-height: 420px; max-height: 68vh; white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-entry { margin-bottom: 3px; }
+.log-time, .log-category { color: #aaa; }
+.log-level { display: inline-block; min-width: 86px; font-weight: 600; }
+.log-empty { color: #aaa; }
+@media (max-width: 760px) { .log-filters { grid-template-columns: 1fr; } }
