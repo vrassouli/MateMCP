@@ -20,6 +20,9 @@ public sealed class AgentApiClient : IDisposable
     public async Task<AgentStatus?> GetStatusAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<AgentStatus>("status", Json, ct);
 
+    public async Task<IReadOnlyList<CompanionProjectInfo>> GetProjectsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<CompanionProjectInfo>>("projects", Json, ct) ?? [];
+
     public async Task<DeviceManagementStatus?> GetDevicesAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<DeviceManagementStatus>("devices", Json, ct);
 
@@ -174,6 +177,7 @@ public sealed class AgentApiClient : IDisposable
 
 public sealed record AgentStatus(string Service, string Endpoint, string Management, string Configuration, IReadOnlyList<string> Projects,
     bool ShellApproval, int InteractiveSessions, RelayStatus Relay, string Credentials);
+public sealed record CompanionProjectInfo(string Id, string Name, string Root, bool Read, bool Write, bool Shell, bool Available);
 
 public sealed record DeviceManagementStatus(bool Enrolled, bool EnrollmentSuppressed, string? CurrentDeviceId,
     IReadOnlyList<ManagedDevice> Devices, string? UpstreamError = null);
