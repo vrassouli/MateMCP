@@ -18,20 +18,46 @@ if (options.InternalApiKey == "change-me")
 
 var publicBaseUrl = options.PublicBaseUrl.TrimEnd('/');
 var authorizationServerUrl = options.AuthorizationServerUrl.TrimEnd('/');
+var authorizationServerIssuer = OAuthDiscovery.NormalizeIssuer(options.AuthorizationServerUrl);
 var scopeValue = string.Join(' ', options.OAuthScopes);
 
 builder.Services.AddOpenIddict().AddValidation(validation =>
 {
-    validation.SetIssuer(new Uri(authorizationServerUrl + "/"));
+    validation.SetIssuer(new Uri(authorizationServerIssuer));
     validation.UseSystemNetHttp();
     validation.UseAspNetCore();
 });
 
 var app = builder.Build();
+var logger = app.Logger;
 app.UseWebSockets(new WebSocketOptions
 {
     KeepAliveInterval = TimeSpan.FromSeconds(20),
     KeepAliveTimeout = TimeSpan.FromSeconds(20)
+});
+
+app.Use(async (context, next) =>
+{
+    var correlationId = context.TraceIdentifier;
+    context.Response.Headers["X-MateMCP-Request-Id"] = correlationId;
+    var started = Stopwatch.GetTimestamp();
+    try
+    {
+        await next();
+    }
+    finally
+    {
+        if (context.Request.Path.StartsWithSegments("/mcp") || context.Request.Path.StartsWithSegments("/.well-known"))
+        {
+            logger.LogInformation(
+                "Remote MCP request {RequestId}: {Method} {Path} -> {StatusCode} in {ElapsedMs:F1} ms",
+                correlationId,
+                context.Request.Method,
+                context.Request.Path,
+                context.Response.StatusCode,
+                Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        }
+    }
 });
 
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Relay", status = "ok" }));
@@ -39,7 +65,7 @@ app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Relay", status =
 app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
 {
     resource = publicBaseUrl,
-    authorization_servers = new[] { authorizationServerUrl },
+    authorization_servers = new[] { authorizationServerIssuer },
     scopes_supported = options.OAuthScopes,
     bearer_methods_supported = new[] { "header" },
     resource_documentation = "https://github.com/vrassouli/MateMCP"
@@ -48,7 +74,7 @@ app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
 app.MapGet("/.well-known/oauth-protected-resource/mcp/{deviceId}", (string deviceId) => Results.Ok(new
 {
     resource = $"{publicBaseUrl}/mcp/{deviceId}",
-    authorization_servers = new[] { authorizationServerUrl },
+    authorization_servers = new[] { authorizationServerIssuer },
     scopes_supported = options.OAuthScopes,
     bearer_methods_supported = new[] { "header" }
 }));
@@ -95,16 +121,37 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
     }
 });
 
-app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
+app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
 {
     var principal = await AuthenticateOAuthAsync(context);
     var requiredResource = $"{publicBaseUrl}/mcp/{deviceId}";
     if (principal is null || principal.FindFirstValue("agent_id") != deviceId || !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
         !await AuthorizeAsync(clients, options, deviceId, principal, context.RequestAborted))
     {
-        context.Response.Headers.WWWAuthenticate = $"Bearer resource_metadata=\"{publicBaseUrl}/.well-known/oauth-protected-resource/mcp/{deviceId}\", scope=\"{scopeValue}\"";
+        var reason = principal is null
+            ? "missing_or_invalid_access_token"
+            : principal.FindFirstValue("agent_id") != deviceId
+                ? "token_agent_mismatch"
+                : !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal)
+                    ? "token_resource_mismatch"
+                    : "control_plane_authorization_failed";
+        logger.LogWarning(
+            "Remote MCP authentication failed {RequestId}: {Method} {Path}; reason={Reason}; device={DeviceId}",
+            context.TraceIdentifier,
+            context.Request.Method,
+            context.Request.Path,
+            reason,
+            deviceId);
+        context.Response.Headers.WWWAuthenticate = OAuthDiscovery.BearerChallenge(publicBaseUrl, deviceId, options.OAuthScopes);
         return Results.Unauthorized();
     }
+
+    if (HttpMethods.IsOptions(context.Request.Method))
+    {
+        context.Response.Headers.Allow = "GET, HEAD, POST, DELETE, PUT, PATCH, OPTIONS";
+        return Results.NoContent();
+    }
+
     if (!registry.TryGet(deviceId, out var agent)) return Results.NotFound(new { error = "device_offline" });
     if (context.Request.ContentLength > options.MaxBodyBytes) return Results.StatusCode(413);
 
@@ -123,13 +170,17 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "POST", "DELETE", "PUT", "PATCH"], asy
 
     RelayResponse response;
     try { response = await agent.SendAsync(request, TimeSpan.FromSeconds(options.RequestTimeoutSeconds), context.RequestAborted); }
-    catch (TimeoutException) { return Results.StatusCode(504); }
+    catch (TimeoutException)
+    {
+        logger.LogWarning("Remote MCP upstream timeout {RequestId}: device={DeviceId}", context.TraceIdentifier, deviceId);
+        return Results.StatusCode(504);
+    }
 
     context.Response.StatusCode = response.StatusCode;
     foreach (var h in response.Headers)
         if (!string.Equals(h.Key, "Transfer-Encoding", StringComparison.OrdinalIgnoreCase) && !string.Equals(h.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
             context.Response.Headers[h.Key] = h.Value;
-    if (response.BodyBase64 is not null)
+    if (response.BodyBase64 is not null && !HttpMethods.IsHead(context.Request.Method))
         await context.Response.Body.WriteAsync(Convert.FromBase64String(response.BodyBase64), context.RequestAborted);
     return Results.Empty;
 });
