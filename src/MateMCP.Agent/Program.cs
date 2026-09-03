@@ -40,7 +40,7 @@ builder.Services.AddSingleton<ICredentialStore>(sp => sp.GetRequiredService<User
 builder.Services.AddSingleton<InteractiveShellSessionManager>();
 builder.Services.AddSingleton<ProjectRegistry>();
 builder.Services.AddSingleton<ProjectConfigurationService>();
-builder.Services.AddSingleton<SkillMemoryStore>();
+builder.Services.AddSingleton(sp => new SkillMemoryStore(sp.GetRequiredService<ProjectRegistry>(), Path.Combine(Path.GetDirectoryName(userConfigPath)!, "skills-memory.json")));
 builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<ApprovalPolicyStore>();
 builder.Services.AddSingleton<CredentialInjectionRateLimiter>();
