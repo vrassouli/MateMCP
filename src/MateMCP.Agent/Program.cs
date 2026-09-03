@@ -2,6 +2,7 @@ using System.Net;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Desktop;
+using MateMCP.Agent.Diagnostics;
 using MateMCP.Agent.Memory;
 using MateMCP.Agent.Projects;
 using MateMCP.Agent.Relay;
@@ -13,6 +14,8 @@ using ModelContextProtocol.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 var userConfigPath = ConfigurationBootstrap.EnsureUserConfiguration();
+var agentLogStore = new AgentLogStore(Path.Combine(Path.GetDirectoryName(userConfigPath)!, "agent-logs.jsonl"));
+builder.Logging.AddProvider(new AgentLogProvider(agentLogStore));
 builder.Configuration.AddJsonFile(userConfigPath, optional: false, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables(prefix: "MATEMCP_");
 builder.Services.Configure<MateOptions>(builder.Configuration.GetSection(MateOptions.SectionName));
@@ -32,6 +35,7 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 });
 
 builder.Services.AddSingleton(credentialStore);
+builder.Services.AddSingleton(agentLogStore);
 builder.Services.AddSingleton(new LocalAccessCredential(localAccessToken));
 builder.Services.AddSingleton(new EnrollmentStateStore(userConfigPath));
 builder.Services.AddSingleton<DeviceManagementService>();
@@ -121,6 +125,27 @@ app.MapPut("/desktop-update/auto", async (DesktopAutoUpdateUpdate update, HttpCo
     await settings.SetAutoUpdateEnabledAsync(update.Enabled, ct);
     updates.RequestCheck();
     return Results.Ok(await updates.GetStatusAsync(ct));
+});
+
+app.MapGet("/logs", (HttpContext context, AgentLogStore logs, long? after, int? limit, string? level, string? text) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    LogLevel? minimumLevel = null;
+    if (!string.IsNullOrWhiteSpace(level))
+    {
+        if (!Enum.TryParse<LogLevel>(level, true, out var parsed) || parsed == LogLevel.None)
+            return Results.BadRequest(new { error = "Unknown log level." });
+        minimumLevel = parsed;
+    }
+    var entries = logs.Read(Math.Max(0, after ?? 0), limit ?? 500, minimumLevel, text);
+    return Results.Ok(new { entries, cursor = logs.LatestId });
+});
+app.MapDelete("/logs", async (HttpContext context, AgentLogStore logs, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    logs.Clear();
+    await audit.WriteAsync("diagnostics.logs", "agent", "cleared", ct);
+    return Results.Ok(new { status = "cleared" });
 });
 
 app.MapPost("/companion/notifications/ready", (HttpContext context, CompanionNotificationPresence presence) =>
