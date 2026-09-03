@@ -41,6 +41,7 @@ public sealed class ProjectConfigurationService
                 existingId = ProjectRegistry.LegacyId(node["Name"]!.GetValue<string>(), node["Root"]!.GetValue<string>());
             project = project with { Id = existingId };
             EnsureUnique(projects, project, existingName);
+            MigrateSkillMemoryProjectReferences(existingName, existingId);
             projects[projects.IndexOf(node)] = ToNode(project);
             Save(root);
         }
@@ -89,6 +90,35 @@ public sealed class ProjectConfigurationService
             if (!string.IsNullOrWhiteSpace(candidateRoot) && PathsEqual(candidateRoot, project.Root))
                 throw new InvalidOperationException($"Workspace '{project.Root}' is already registered as project '{candidateName}'.");
         }
+    }
+
+    private void MigrateSkillMemoryProjectReferences(string existingName, string stableId)
+    {
+        var path = Path.Combine(Path.GetDirectoryName(_configurationPath)!, "skills-memory.json");
+        if (!File.Exists(path)) return;
+
+        JsonArray? items;
+        try { items = JsonNode.Parse(File.ReadAllText(path)) as JsonArray; }
+        catch (JsonException) { return; }
+        if (items is null) return;
+
+        var changed = false;
+        foreach (var item in items.OfType<JsonObject>())
+        {
+            var propertyName = item.ContainsKey("project") ? "project" : item.ContainsKey("Project") ? "Project" : null;
+            if (propertyName is null) continue;
+            var value = item[propertyName]?.GetValue<string>();
+            if (!string.Equals(value, existingName, StringComparison.OrdinalIgnoreCase)) continue;
+            item[propertyName] = stableId;
+            changed = true;
+        }
+        if (!changed) return;
+
+        var temp = path + ".project-migration.tmp";
+        File.WriteAllText(temp, items.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        ConfigurationBootstrap.TryRestrictPermissions(temp);
+        File.Move(temp, path, true);
+        ConfigurationBootstrap.TryRestrictPermissions(path);
     }
 
     private static bool PathsEqual(string left, string right)
