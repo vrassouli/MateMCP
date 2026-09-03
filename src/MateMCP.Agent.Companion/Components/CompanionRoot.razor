@@ -1,0 +1,28 @@
+<Main />
+
+<button type="button"
+        title="Open Agent logs and diagnostics"
+        @onclick="() => ShowLogs = true"
+        style="position:fixed;right:18px;bottom:18px;z-index:9000;border:0;border-radius:999px;padding:10px 16px;box-shadow:0 4px 18px rgba(0,0,0,.22);cursor:pointer;font:inherit;">
+    Agent Logs
+</button>
+
+@if (ShowLogs)
+{
+    <div style="position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,.36);display:flex;align-items:stretch;justify-content:flex-end;" @onclick="() => ShowLogs = false">
+        <section style="width:min(920px,92vw);height:100%;background:var(--neutral-layer-1,#fff);box-shadow:-8px 0 28px rgba(0,0,0,.25);overflow:auto;padding:18px;" @onclick:stopPropagation="true">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+                <div>
+                    <h2 style="margin:0">Agent Logs &amp; Diagnostics</h2>
+                    <div class="muted">Recent structured Agent activity with live follow, filtering, and diagnostic copy.</div>
+                </div>
+                <Button Text="Close" OnClick="() => ShowLogs = false" />
+            </div>
+            <AgentLogsPanel />
+        </section>
+    </div>
+}
+
+@code {
+    private bool ShowLogs { get; set; }
+}
