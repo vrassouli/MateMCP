@@ -70,7 +70,22 @@ app.MapGet("/ui", (HttpContext context) => IsLoopback(context) ? Results.Content
 app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions, ProjectRegistry projects, InteractiveShellSessionManager sessions) =>
 {
     if (!IsLoopback(context)) return Results.NotFound(); var current = currentOptions.CurrentValue;
-    return Results.Ok(new { service = "MateMCP", endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp", management = $"http://127.0.0.1:{current.Port}/ui", configuration = userConfigPath, projects = projects.All.Select(p => p.Name).ToArray(), shellApproval = current.RequireShellApproval, interactiveSessions = sessions.ActiveSessionCount, mcpTools = new { count = McpToolCatalog.Names.Count, revision = McpToolCatalog.Revision, names = McpToolCatalog.Names }, relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId, current.Relay.EnrollmentSuppressed }, credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store" });
+    var agentVersion = typeof(ProjectRegistry).Assembly.GetName().Version?.ToString() ?? "unknown";
+    return Results.Ok(new
+    {
+        service = "MateMCP",
+        version = agentVersion,
+        endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp",
+        management = $"http://127.0.0.1:{current.Port}/ui",
+        managementApi = new { revision = 2, capabilities = new[] { "projects-stable-id", "skills-memory", "desktop-update", "agent-logs" } },
+        configuration = userConfigPath,
+        projects = projects.All.Select(p => p.Name).ToArray(),
+        shellApproval = current.RequireShellApproval,
+        interactiveSessions = sessions.ActiveSessionCount,
+        mcpTools = new { count = McpToolCatalog.Names.Count, revision = McpToolCatalog.Revision, names = McpToolCatalog.Names },
+        relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId, current.Relay.EnrollmentSuppressed },
+        credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store"
+    });
 });
 
 app.MapGet("/devices", async (HttpContext context, DeviceManagementService devices, CancellationToken ct) =>
@@ -125,6 +140,50 @@ app.MapPut("/desktop-update/auto", async (DesktopAutoUpdateUpdate update, HttpCo
     await settings.SetAutoUpdateEnabledAsync(update.Enabled, ct);
     updates.RequestCheck();
     return Results.Ok(await updates.GetStatusAsync(ct));
+});
+
+app.MapGet("/skills-memory", async (HttpContext context, SkillMemoryStore store, string? scope, string? project, string? type, string? text, bool? includeDisabled, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try { return Results.Ok(await store.SearchAsync(scope, project, type, text, includeDisabled ?? false, ct)); }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapGet("/skills-memory/{id}", async (string id, HttpContext context, SkillMemoryStore store, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try { return Results.Ok(await store.GetAsync(id, ct)); }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+});
+app.MapPost("/skills-memory", async (SkillMemoryUpdate update, HttpContext context, SkillMemoryStore store, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try
+    {
+        var item = await store.CreateAsync(update, ct);
+        await audit.WriteAsync("memory.create", item.Id, $"{item.Source}:{item.Scope}:{item.Project ?? "global"}", ct);
+        return Results.Created($"/skills-memory/{item.Id}", item);
+    }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapPut("/skills-memory/{id}", async (string id, SkillMemoryUpdate update, HttpContext context, SkillMemoryStore store, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try
+    {
+        var item = await store.UpdateAsync(id, update, ct);
+        await audit.WriteAsync("memory.update", item.Id, $"{item.Source}:{item.Scope}:{item.Project ?? "global"}", ct);
+        return Results.Ok(item);
+    }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapDelete("/skills-memory/{id}", async (string id, HttpContext context, SkillMemoryStore store, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    var removed = await store.DeleteAsync(id, ct);
+    if (!removed) return Results.NotFound();
+    await audit.WriteAsync("memory.delete", id, "user", ct);
+    return Results.Ok(new { status = "removed" });
 });
 
 app.MapGet("/logs", (HttpContext context, AgentLogStore logs, long? after, int? limit, string? level, string? text) =>
