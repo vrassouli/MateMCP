@@ -17,9 +17,7 @@ if (options.InternalApiKey == "change-me")
     throw new InvalidOperationException("Configure Relay:InternalApiKey.");
 
 var publicBaseUrl = options.PublicBaseUrl.TrimEnd('/');
-var authorizationServerUrl = options.AuthorizationServerUrl.TrimEnd('/');
 var authorizationServerIssuer = OAuthDiscovery.NormalizeIssuer(options.AuthorizationServerUrl);
-var scopeValue = string.Join(' ', options.OAuthScopes);
 
 builder.Services.AddOpenIddict().AddValidation(validation =>
 {
@@ -148,7 +146,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
 
     if (HttpMethods.IsOptions(context.Request.Method))
     {
-        context.Response.Headers.Allow = "GET, HEAD, POST, DELETE, PUT, PATCH, OPTIONS";
+        context.Response.Headers["Allow"] = "GET, HEAD, POST, DELETE, PUT, PATCH, OPTIONS";
         return Results.NoContent();
     }
 
