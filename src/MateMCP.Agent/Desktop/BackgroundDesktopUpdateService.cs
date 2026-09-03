@@ -282,6 +282,8 @@ $Status = {{PowerShellQuote(statusPath)}}
 $Failure = {{PowerShellQuote(failurePath)}}
 $InstalledRoot = Join-Path $env:LOCALAPPDATA 'MateMCP'
 $HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
+$ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
+$TaskName = 'MateMCP Agent'
 $WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
 Start-Sleep -Seconds 2
 New-Item -ItemType Directory -Force -Path $Package, (Split-Path $Marker) | Out-Null
@@ -295,14 +297,21 @@ try {
     [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
     [IO.File]::WriteAllText($Status, "$Now|updated|MateMCP Desktop was updated automatically in the background.")
     Remove-Item $Failure -Force -ErrorAction SilentlyContinue
-    if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
+    $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
+    if ($AgentMode -eq 'Elevated') {
+        & schtasks.exe /Run /TN $TaskName | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Desktop updated, but the elevated Agent task could not be started (schtasks exit $LASTEXITCODE)." }
+    }
+    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
 }
 catch {
     New-Item -ItemType Directory -Force -Path (Split-Path $Failure) | Out-Null
     $Now = [DateTimeOffset]::UtcNow.ToString('o')
     [IO.File]::WriteAllText($Failure, "Background Desktop update installation failed: $($_.Exception.Message)")
     [IO.File]::WriteAllText($Status, "$Now|failed|Background Desktop update installation failed; the previous installation will be restarted if possible.")
-    if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
+    $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
+    if ($AgentMode -eq 'Elevated') { & schtasks.exe /Run /TN $TaskName *> $null }
+    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
 }
 finally {
     Remove-Item $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -312,8 +321,13 @@ finally {
 
     private static string BuildMacInstallScript(string tempRoot, string archivePath, string markerPath, string statusPath, string failurePath, long assetId)
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var agentPlist = Path.Combine(home, "Library", "LaunchAgents", "com.matemcp.agent.plist");
+        var home = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_HOME")
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var user = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_NAME")
+            ?? Environment.UserName;
+        var uid = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_UID");
+        var modeFile = Path.Combine(home, "Library", "Application Support", "MateMCP", "agent-run-mode.txt");
+        var configureMode = Path.Combine(home, ".local", "share", "matemcp", "configure-agent-mode-macos.sh");
         return $$"""
 #!/bin/sh
 set -u
@@ -323,25 +337,37 @@ PACKAGE="$TEMP_ROOT/package"
 MARKER={{ShellQuote(markerPath)}}
 STATUS={{ShellQuote(statusPath)}}
 FAILURE={{ShellQuote(failurePath)}}
-AGENT_PLIST={{ShellQuote(agentPlist)}}
-LAUNCH_DOMAIN="gui/$(id -u)"
+MODE_FILE={{ShellQuote(modeFile)}}
+CONFIGURE_MODE={{ShellQuote(configureMode)}}
+TARGET_HOME={{ShellQuote(home)}}
+TARGET_USER={{ShellQuote(user)}}
+TARGET_UID={{ShellQuote(uid ?? string.Empty)}}
+[ -n "$TARGET_UID" ] || TARGET_UID="$(id -u)"
 sleep 2
 mkdir -p "$PACKAGE" "$(dirname "$MARKER")"
+AGENT_MODE="Normal"
+if [ -f "$MODE_FILE" ]; then
+    value="$(tr -d '[:space:]' < "$MODE_FILE")"
+    [ "$value" = "Elevated" ] && AGENT_MODE="Elevated"
+fi
 if tar -xzf "$ARCHIVE" -C "$PACKAGE" && \
    test -f "$PACKAGE/install-desktop-macos.sh" && \
+   test -d "$PACKAGE/agent-payload" && \
+   test -d "$PACKAGE/companion-payload" && \
    chmod +x "$PACKAGE/install-desktop-macos.sh" && \
-   "$PACKAGE/install-desktop-macos.sh" --no-start; then
+   "$PACKAGE/install-desktop-macos.sh" --no-start --agent-mode "$AGENT_MODE" && \
+   { [ "$AGENT_MODE" != "Elevated" ] || chown -R "$TARGET_USER" "$TARGET_HOME/Applications/MateMCP Agent Companion.app"; } && \
+   MATEMCP_TARGET_USER="$TARGET_USER" MATEMCP_TARGET_UID="$TARGET_UID" MATEMCP_TARGET_HOME="$TARGET_HOME" "$CONFIGURE_MODE" "$AGENT_MODE"; then
     printf '%s' '{{assetId.ToString(CultureInfo.InvariantCulture)}}' > "$MARKER"
     printf '%s|updated|%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 'MateMCP Desktop was updated automatically in the background.' > "$STATUS"
     rm -f "$FAILURE"
-    launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST" >/dev/null 2>&1 || true
-    launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent" >/dev/null 2>&1 || true
 else
     code=$?
     printf '%s\n' 'Background Desktop update installation failed; the previous installation will be restarted if possible.' > "$FAILURE"
     printf '%s|failed|%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 'Background Desktop update installation failed; the previous installation will be restarted if possible.' > "$STATUS"
-    launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST" >/dev/null 2>&1 || true
-    launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent" >/dev/null 2>&1 || true
+    if [ -x "$CONFIGURE_MODE" ]; then
+        MATEMCP_TARGET_USER="$TARGET_USER" MATEMCP_TARGET_UID="$TARGET_UID" MATEMCP_TARGET_HOME="$TARGET_HOME" "$CONFIGURE_MODE" "$AGENT_MODE" >/dev/null 2>&1 || true
+    fi
     rm -rf "$TEMP_ROOT"
     exit "$code"
 fi

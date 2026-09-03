@@ -19,7 +19,7 @@
         <div class="row">
             <span class="muted">Companion / Agent compatibility</span>
             <div>@CompatibilityStatus.Message</div>
-            <div class="muted">Companion @CompatibilityStatus.CompanionVersion@if (!string.IsNullOrWhiteSpace(CompatibilityStatus.CapabilityRevision)) { <text> · Agent capability revision @CompatibilityStatus.CapabilityRevision</text> }</div>
+            <div class="muted">Companion @CompatibilityStatus.CompanionVersion@if (!string.IsNullOrWhiteSpace(CompatibilityStatus.AgentVersion)) { <text> · Agent @CompatibilityStatus.AgentVersion</text> }@if (!string.IsNullOrWhiteSpace(CompatibilityStatus.CapabilityRevision)) { <text> · MCP revision @CompatibilityStatus.CapabilityRevision</text> }@if (CompatibilityStatus.ManagementApiRevision is { } apiRevision) { <text> · Management API @apiRevision</text> }</div>
             @if (!CompatibilityStatus.Compatible)
             {
                 <div class="actions">
@@ -75,9 +75,9 @@
     {
         <div class="actions">
             <Button Text="Check for updates" OnClick="CheckNowAsync" />
-            @if (UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
+            @if (UpdateStatus is { AssetId: { } assetId } && (UpdateStatus.UpdateAvailable || CompatibilityStatus is { Compatible: false }))
             {
-                <Button Text="Update now" OnClick="() => BeginUpdateAsync(assetId)" />
+                <Button Text="@(UpdateStatus.UpdateAvailable ? "Update now" : "Repair current package")" OnClick="() => BeginUpdateAsync(assetId)" />
             }
         </div>
     }

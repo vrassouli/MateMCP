@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 
 namespace MateMCP.Agent.Companion.Services;
@@ -45,21 +46,17 @@ public sealed class DesktopUpdateService : IDisposable
         var markerPath = GetMarkerPath();
         var installedAssetId = ReadInstalledAssetId(markerPath);
         if (installedAssetId == 0)
-        {
-            // First launch after introducing update tracking: the Companion being
-            // executed came from the current public Desktop package, so establish
-            // that release asset as the baseline without reinstalling it.
-            Directory.CreateDirectory(Path.GetDirectoryName(markerPath)!);
-            File.WriteAllText(markerPath, asset.Id.ToString(CultureInfo.InvariantCulture));
-            installedAssetId = asset.Id;
-        }
+            installedAssetId = ReadInstalledAssetId(GetLegacyMarkerPath());
+        var installedPackageKnown = installedAssetId > 0;
 
         return new DesktopUpdateStatus(
             Supported: true,
-            UpdateAvailable: installedAssetId != asset.Id,
+            UpdateAvailable: !installedPackageKnown || installedAssetId != asset.Id,
             AssetId: asset.Id,
             UpdatedAt: asset.UpdatedAt,
-            Message: installedAssetId == asset.Id ? "MateMCP Desktop is up to date." : "A newer MateMCP Desktop build is available.",
+            Message: !installedPackageKnown
+                ? "The installed Desktop package version is unknown. Repair/update the coordinated Companion + Agent package."
+                : installedAssetId == asset.Id ? "MateMCP Desktop is up to date." : "A newer MateMCP Desktop build is available.",
             LastFailure: lastFailure);
     }
 
@@ -124,9 +121,11 @@ public sealed class DesktopUpdateService : IDisposable
             using var response = await _http.GetAsync(asset.BrowserDownloadUrl, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             response.EnsureSuccessStatusCode();
 
+            var expectedHash = ParseSha256Digest(asset.Digest);
             var totalBytes = response.Content.Headers.ContentLength ?? (asset.Size > 0 ? asset.Size : null);
             await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
             await using var target = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
             var buffer = new byte[81920];
             long received = 0;
@@ -135,13 +134,16 @@ public sealed class DesktopUpdateService : IDisposable
                 var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), timeout.Token);
                 if (read == 0) break;
                 await target.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
+                hash.AppendData(buffer, 0, read);
                 received += read;
-                progress?.Report(new DesktopUpdateProgress("Downloading", "Downloading update...", received, totalBytes));
+                progress?.Report(new DesktopUpdateProgress("Downloading", "Downloading and verifying update...", received, totalBytes));
             }
 
             await target.FlushAsync(timeout.Token);
             if (totalBytes is > 0 && received != totalBytes)
                 throw new IOException($"Update download was incomplete ({received} of {totalBytes} bytes received).");
+            if (!CryptographicOperations.FixedTimeEquals(hash.GetHashAndReset(), expectedHash))
+                throw new InvalidDataException("Desktop update SHA-256 verification failed. Installation was aborted.");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -189,9 +191,11 @@ public sealed class DesktopUpdateService : IDisposable
     private static string BuildMacInstallScript(string tempRoot, string archivePath, string markerPath, string failurePath, long assetId)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var user = Environment.UserName;
         var logPath = Path.Combine(home, "Library", "Logs", "MateMCP", "update.log");
         var companionPath = Path.Combine(home, "Applications", "MateMCP Agent Companion.app");
-        var agentPlist = Path.Combine(home, "Library", "LaunchAgents", "com.matemcp.agent.plist");
+        var modeFile = Path.Combine(home, "Library", "Application Support", "MateMCP", "agent-run-mode.txt");
+        var configureMode = Path.Combine(home, ".local", "share", "matemcp", "configure-agent-mode-macos.sh");
         return $$"""
 #!/bin/sh
 set -u
@@ -202,32 +206,64 @@ MARKER={{ShellQuote(markerPath)}}
 FAILURE={{ShellQuote(failurePath)}}
 LOG={{ShellQuote(logPath)}}
 COMPANION={{ShellQuote(companionPath)}}
-AGENT_PLIST={{ShellQuote(agentPlist)}}
-LAUNCH_DOMAIN="gui/$(id -u)"
+MODE_FILE={{ShellQuote(modeFile)}}
+CONFIGURE_MODE={{ShellQuote(configureMode)}}
+TARGET_HOME={{ShellQuote(home)}}
+TARGET_USER={{ShellQuote(user)}}
+TARGET_UID="$(id -u)"
 sleep 2
 mkdir -p "$PACKAGE" "$(dirname "$MARKER")" "$(dirname "$LOG")"
 rm -f "$FAILURE"
+AGENT_MODE="Normal"
+if [ -f "$MODE_FILE" ]; then
+    value="$(tr -d '[:space:]' < "$MODE_FILE")"
+    [ "$value" = "Elevated" ] && AGENT_MODE="Elevated"
+fi
+INSTALL_OK=0
 if tar -xzf "$ARCHIVE" -C "$PACKAGE" >>"$LOG" 2>&1 && \
    test -f "$PACKAGE/install-desktop-macos.sh" && \
-   chmod +x "$PACKAGE/install-desktop-macos.sh" && \
-   "$PACKAGE/install-desktop-macos.sh" --no-start >>"$LOG" 2>&1; then
+   test -x "$PACKAGE/install-macos.sh" && \
+   test -d "$PACKAGE/agent-payload" && \
+   test -d "$PACKAGE/companion-payload" && \
+   chmod +x "$PACKAGE/install-desktop-macos.sh"; then
+    if [ "$AGENT_MODE" = "Elevated" ]; then
+        HELPER="$TEMP_ROOT/install-elevated.sh"
+        cat > "$HELPER" <<HELPER_EOF
+#!/bin/sh
+set -eu
+export HOME={{ShellQuote(home)}}
+export USER={{ShellQuote(user)}}
+export LOGNAME={{ShellQuote(user)}}
+"$PACKAGE/install-desktop-macos.sh" --no-start --agent-mode Elevated
+chown -R {{ShellQuote(user)}} {{ShellQuote(Path.Combine(home, "Applications", "MateMCP Agent Companion.app"))}}
+MATEMCP_TARGET_USER={{ShellQuote(user)}} MATEMCP_TARGET_UID="$TARGET_UID" MATEMCP_TARGET_HOME={{ShellQuote(home)}} {{ShellQuote(configureMode)}} Elevated
+HELPER_EOF
+        chmod +x "$HELPER"
+        /usr/bin/osascript - "$HELPER" >>"$LOG" 2>&1 <<'APPLESCRIPT'
+on run argv
+    do shell script "/bin/sh " & quoted form of item 1 of argv with administrator privileges
+end run
+APPLESCRIPT
+        INSTALL_OK=$?
+    else
+        "$PACKAGE/install-desktop-macos.sh" --no-start --agent-mode Normal >>"$LOG" 2>&1 && \
+            "$CONFIGURE_MODE" Normal >>"$LOG" 2>&1
+        INSTALL_OK=$?
+    fi
+else
+    INSTALL_OK=1
+fi
+if [ "$INSTALL_OK" -eq 0 ]; then
     printf '%s' '{{assetId.ToString(CultureInfo.InvariantCulture)}}' > "$MARKER"
     rm -f "$FAILURE"
-    launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST" >>"$LOG" 2>&1 || true
-    launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent" >>"$LOG" 2>&1 || \
-        printf '%s\n' "Desktop updated, but the Agent could not be restarted automatically. See $LOG for details." > "$FAILURE"
     open "$COMPANION" >>"$LOG" 2>&1 || true
     rm -rf "$TEMP_ROOT"
     exit 0
-else
-    code=$?
-    printf '%s\n' "Desktop update installation failed. See $LOG for details." > "$FAILURE"
-    launchctl bootstrap "$LAUNCH_DOMAIN" "$AGENT_PLIST" >>"$LOG" 2>&1 || true
-    launchctl kickstart -k "$LAUNCH_DOMAIN/com.matemcp.agent" >>"$LOG" 2>&1 || true
-    open "$COMPANION" >>"$LOG" 2>&1 || true
-    rm -rf "$TEMP_ROOT"
-    exit "$code"
 fi
+printf '%s\n' "Desktop update installation failed or Agent restart was not verified. See $LOG for details." > "$FAILURE"
+open "$COMPANION" >>"$LOG" 2>&1 || true
+rm -rf "$TEMP_ROOT"
+exit "$INSTALL_OK"
 """;
     }
 
@@ -245,6 +281,8 @@ $Log = Join-Path $LogRoot 'update.log'
 $InstalledRoot = Join-Path $env:LOCALAPPDATA 'MateMCP'
 $Companion = Join-Path $InstalledRoot 'Companion\MateMCP.Agent.Companion.exe'
 $HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
+$ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
+$TaskName = 'MateMCP Agent'
 $WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
 Start-Sleep -Seconds 2
 New-Item -ItemType Directory -Force -Path $Package, $LogRoot, (Split-Path $Marker) | Out-Null
@@ -258,14 +296,21 @@ try {
     New-Item -ItemType Directory -Force -Path (Split-Path $Marker) | Out-Null
     [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
     Remove-Item $Failure -Force -ErrorAction SilentlyContinue
-    if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
+    $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
+    if ($AgentMode -eq 'Elevated') {
+        & schtasks.exe /Run /TN $TaskName | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Desktop updated, but the elevated Agent task could not be started (schtasks exit $LASTEXITCODE)." }
+    }
+    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
     Start-Sleep -Milliseconds 750
     if (Test-Path $Companion) { Start-Process -FilePath $Companion -WorkingDirectory (Split-Path $Companion) }
 }
 catch {
     New-Item -ItemType Directory -Force -Path (Split-Path $Failure) | Out-Null
     [IO.File]::WriteAllText($Failure, "Desktop update installation failed: $($_.Exception.Message). See $Log for details.")
-    if (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
+    $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
+    if ($AgentMode -eq 'Elevated') { & schtasks.exe /Run /TN $TaskName *> $null }
+    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
     if (Test-Path $Companion) { Start-Process -FilePath $Companion -WorkingDirectory (Split-Path $Companion) -ErrorAction SilentlyContinue }
 }
 finally {
@@ -304,14 +349,21 @@ finally {
 
     private static string GetMarkerPath() => Path.Combine(GetStateDirectory(), MarkerFileName);
     private static string GetFailurePath() => Path.Combine(GetStateDirectory(), FailureFileName);
+    private static string GetLegacyMarkerPath()
+    {
+        if (OperatingSystem.IsWindows())
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MateMCP", MarkerFileName);
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, "Library", "Application Support", "MateMCP", MarkerFileName);
+    }
 
     private static string GetStateDirectory()
     {
         if (OperatingSystem.IsWindows())
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MateMCP");
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MateMCP-Companion");
 
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, "Library", "Application Support", "MateMCP");
+        return Path.Combine(home, "Library", "Application Support", "MateMCP Companion");
     }
 
     private static string? GetAssetName()
@@ -321,6 +373,22 @@ finally {
         if ((OperatingSystem.IsMacCatalyst() || OperatingSystem.IsMacOS()) && RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
             return "MateMCP-Desktop-macos-arm64.tar.gz";
         return null;
+    }
+
+    private static byte[] ParseSha256Digest(string? digest)
+    {
+        const string prefix = "sha256:";
+        if (string.IsNullOrWhiteSpace(digest) || !digest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Desktop release asset does not include a supported SHA-256 digest. Installation was aborted.");
+        try
+        {
+            var bytes = Convert.FromHexString(digest[prefix.Length..].Trim());
+            return bytes.Length == 32 ? bytes : throw new FormatException();
+        }
+        catch (FormatException)
+        {
+            throw new InvalidDataException("Desktop release asset contains an invalid SHA-256 digest.");
+        }
     }
 
     private static void TryDeleteDirectory(string path)
@@ -343,7 +411,8 @@ finally {
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
         [property: JsonPropertyName("browser_download_url")] string BrowserDownloadUrl,
-        [property: JsonPropertyName("size")] long Size);
+        [property: JsonPropertyName("size")] long Size,
+        [property: JsonPropertyName("digest")] string? Digest);
 }
 
 public sealed record DesktopUpdateStatus(

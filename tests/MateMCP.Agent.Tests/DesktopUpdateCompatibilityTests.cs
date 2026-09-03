@@ -3,28 +3,72 @@ namespace MateMCP.Agent.Tests;
 public sealed class DesktopUpdateCompatibilityTests
 {
     [Fact]
-    public void Companion_verifies_running_agent_capabilities_and_offers_recovery()
+    public void Agent_exposes_management_api_handshake_and_skills_memory_routes()
+    {
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Program.cs"));
+
+        Assert.Contains("version = agentVersion", program, StringComparison.Ordinal);
+        Assert.Contains("managementApi = new", program, StringComparison.Ordinal);
+        Assert.Contains("skills-memory", program, StringComparison.Ordinal);
+        Assert.Contains("projects-stable-id", program, StringComparison.Ordinal);
+        Assert.Contains("app.MapGet(\"/skills-memory\"", program, StringComparison.Ordinal);
+        Assert.Contains("app.MapPost(\"/skills-memory\"", program, StringComparison.Ordinal);
+        Assert.Contains("app.MapPut(\"/skills-memory/{id}\"", program, StringComparison.Ordinal);
+        Assert.Contains("app.MapDelete(\"/skills-memory/{id}\"", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Companion_verifies_management_endpoints_not_only_mcp_tool_names()
     {
         var root = FindRepositoryRoot();
         var service = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentCompatibilityService.cs"));
         var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdatePanel.razor"));
-        var updater = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "DesktopUpdateService.cs"));
 
         Assert.Contains("mcpTools", service, StringComparison.Ordinal);
-        Assert.Contains("revision", service, StringComparison.Ordinal);
-        Assert.Contains("memory_search", service, StringComparison.Ordinal);
-        Assert.Contains("does not expose the capability handshake", service, StringComparison.Ordinal);
-        Assert.Contains("Companion / Agent compatibility", panel, StringComparison.Ordinal);
+        Assert.Contains("managementApi", service, StringComparison.Ordinal);
+        Assert.Contains("RequiredManagementCapabilities", service, StringComparison.Ordinal);
+        Assert.Contains("skills-memory?includeDisabled=true", service, StringComparison.Ordinal);
+        Assert.Contains("\"projects\"", service, StringComparison.Ordinal);
+        Assert.Contains("\"desktop-update\"", service, StringComparison.Ordinal);
+        Assert.Contains("\"logs?limit=1\"", service, StringComparison.Ordinal);
+        Assert.Contains("exposes MCP memory tools but not the local management API", service, StringComparison.Ordinal);
+        Assert.Contains("AgentVersion", panel, StringComparison.Ordinal);
+        Assert.Contains("ManagementApiRevision", panel, StringComparison.Ordinal);
+        Assert.Contains("Repair current package", panel, StringComparison.Ordinal);
         Assert.Contains("Restart Agent", panel, StringComparison.Ordinal);
         Assert.Contains("Check again", panel, StringComparison.Ordinal);
-        Assert.Contains("AgentProcess.RestartAsync", panel, StringComparison.Ordinal);
+    }
 
-        Assert.Contains("install-desktop-macos.sh\" --no-start", updater, StringComparison.Ordinal);
+    [Fact]
+    public void Manual_updater_verifies_package_and_preserves_agent_execution_mode()
+    {
+        var root = FindRepositoryRoot();
+        var updater = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "DesktopUpdateService.cs"));
+
+        Assert.Contains("installedPackageKnown", updater, StringComparison.Ordinal);
+        Assert.DoesNotContain("establish", updater, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ParseSha256Digest", updater, StringComparison.Ordinal);
+        Assert.Contains("CryptographicOperations.FixedTimeEquals", updater, StringComparison.Ordinal);
+        Assert.Contains("agent-run-mode.txt", updater, StringComparison.Ordinal);
+        Assert.Contains("--agent-mode Elevated", updater, StringComparison.Ordinal);
+        Assert.Contains("configure-agent-mode-macos.sh", updater, StringComparison.Ordinal);
+        Assert.Contains("/usr/bin/osascript", updater, StringComparison.Ordinal);
+        Assert.Contains("schtasks.exe /Run /TN $TaskName", updater, StringComparison.Ordinal);
         Assert.Contains("install-desktop-windows.ps1", updater, StringComparison.Ordinal);
-        Assert.Contains("launchctl kickstart -k", updater, StringComparison.Ordinal);
-        Assert.Contains("start-agent-hidden.vbs", updater, StringComparison.Ordinal);
-        Assert.Contains("open \"$COMPANION\"", updater, StringComparison.Ordinal);
-        Assert.Contains("Start-Process -FilePath $Companion", updater, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Background_updater_restarts_the_selected_execution_mode()
+    {
+        var root = FindRepositoryRoot();
+        var updater = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Desktop", "BackgroundDesktopUpdateService.cs"));
+
+        Assert.Contains("agent-run-mode.txt", updater, StringComparison.Ordinal);
+        Assert.Contains("--agent-mode \"$AGENT_MODE\"", updater, StringComparison.Ordinal);
+        Assert.Contains("MATEMCP_MAC_USER_HOME", updater, StringComparison.Ordinal);
+        Assert.Contains("configure-agent-mode-macos.sh", updater, StringComparison.Ordinal);
+        Assert.Contains("schtasks.exe /Run /TN $TaskName", updater, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
