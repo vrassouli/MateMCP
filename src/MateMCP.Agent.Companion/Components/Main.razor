@@ -38,7 +38,7 @@
                 <Icon Value="@FluentIcons.Document" />
                 <span>Projects</span>
             </button>
-            <button class="@(Section == "memory" ? "active" : null)" @onclick='() => Section = "memory"'>
+            <button class="@(Section == "memory" ? "active" : null)" @onclick="OpenGlobalSkillsMemory">
                 <Icon Value="@FluentIcons.Document" />
                 <span>Skills &amp; Memory</span>
             </button>
@@ -255,11 +255,11 @@
         }
         else if (Section == "projects")
         {
-            <ProjectsPanel />
+            <ProjectsPanel OpenSkillsMemory="OpenProjectSkillsMemory" />
         }
         else if (Section == "memory")
         {
-            <SkillsMemoryPanel />
+            <SkillsMemoryPanel ProjectContext="@MemoryProjectContext" />
         }
         else if (Section == "logs")
         {
@@ -320,6 +320,7 @@
     private readonly CancellationTokenSource _disposeCts = new();
     private Task? _pollTask;
     private string Section { get; set; } = "dashboard";
+    private string? MemoryProjectContext { get; set; }
     private string? Error { get; set; }
     private AgentStatus? Status { get; set; }
     private bool AgentRunning { get; set; }
@@ -356,7 +357,7 @@
         "shell" => "Interactive Shell",
         "secrets" => "Secret Manager",
         "projects" => "Projects",
-        "memory" => "Skills & Memory",
+        "memory" => MemoryProjectContext is null ? "Skills & Memory" : "Project Skills & Memory",
         "logs" => "Agent Logs",
         "audit" => "Activity & Audit",
         _ => "Dashboard"
@@ -366,6 +367,18 @@
     {
         await RefreshAllAsync();
         _pollTask = PollAsync(_disposeCts.Token);
+    }
+
+    private void OpenGlobalSkillsMemory()
+    {
+        MemoryProjectContext = null;
+        Section = "memory";
+    }
+
+    private void OpenProjectSkillsMemory(string projectId)
+    {
+        MemoryProjectContext = projectId;
+        Section = "memory";
     }
 
     private async Task RefreshAllAsync()
