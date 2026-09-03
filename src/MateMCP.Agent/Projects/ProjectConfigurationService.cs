@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using MateMCP.Agent.Configuration;
 
 namespace MateMCP.Agent.Projects;
 
@@ -7,7 +8,7 @@ public sealed record ProjectUpdate(string Name, string Root, bool Read = true, b
 
 public sealed class ProjectConfigurationService
 {
-    private readonly string _configurationPath = Configuration.ConfigurationBootstrap.EnsureUserConfiguration();
+    private readonly string _configurationPath = ConfigurationBootstrap.EnsureUserConfiguration();
     private readonly object _gate = new();
 
     public ProjectDefinition Add(ProjectUpdate update)
@@ -124,8 +125,8 @@ public sealed class ProjectConfigurationService
     {
         var temp = _configurationPath + ".tmp";
         File.WriteAllText(temp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-        Configuration.ConfigurationBootstrap.TryRestrictPermissions(temp);
+        ConfigurationBootstrap.TryRestrictPermissions(temp);
         File.Move(temp, _configurationPath, true);
-        Configuration.ConfigurationBootstrap.TryRestrictPermissions(_configurationPath);
+        ConfigurationBootstrap.TryRestrictPermissions(_configurationPath);
     }
 }
