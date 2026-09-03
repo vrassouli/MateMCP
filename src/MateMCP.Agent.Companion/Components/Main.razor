@@ -16,11 +16,19 @@
             </button>
             <button class="@(Section == "approvals" ? "active" : null)" @onclick='() => Section = "approvals"'>
                 <Icon Value="@FluentIcons.Checkmark" />
-                <span>Approvals (@Approvals.Count)</span>
+                <span>Approvals</span>
+                @if (Approvals.Count > 0)
+                {
+                    <Badge Text="@Approvals.Count.ToString()" />
+                }
             </button>
             <button class="@(Section == "shell" ? "active" : null)" @onclick='() => Section = "shell"'>
                 <Icon Value="@FluentIcons.Code" />
-                <span>Shell@(ActiveShellCount > 0 ? $" ({ActiveShellCount})" : string.Empty)</span>
+                <span>Shell</span>
+                @if (ActiveShellCount > 0)
+                {
+                    <Badge Text="@ActiveShellCount.ToString()" />
+                }
             </button>
             <button class="@(Section == "secrets" ? "active" : null)" @onclick='() => Section = "secrets"'>
                 <Icon Value="@FluentIcons.Settings" />

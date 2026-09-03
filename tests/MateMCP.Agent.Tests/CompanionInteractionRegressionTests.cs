@@ -3,12 +3,17 @@ namespace MateMCP.Agent.Tests;
 public sealed class CompanionInteractionRegressionTests
 {
     [Fact]
-    public void Companion_shell_navigation_shows_only_active_session_count()
+    public void Companion_navigation_uses_zero_hidden_badges_for_approval_and_active_shell_counts()
     {
         var main = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
 
         Assert.Contains("private int ActiveShellCount => ShellSessions.Count(x => !x.Exited);", main, StringComparison.Ordinal);
-        Assert.Contains("Shell@(ActiveShellCount > 0 ? $\" ({ActiveShellCount})\" : string.Empty)", main, StringComparison.Ordinal);
+        Assert.Contains("@if (Approvals.Count > 0)", main, StringComparison.Ordinal);
+        Assert.Contains("<Badge Text=\"@Approvals.Count.ToString()\" />", main, StringComparison.Ordinal);
+        Assert.Contains("@if (ActiveShellCount > 0)", main, StringComparison.Ordinal);
+        Assert.Contains("<Badge Text=\"@ActiveShellCount.ToString()\" />", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Approvals (@Approvals.Count)", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Shell@(ActiveShellCount", main, StringComparison.Ordinal);
     }
 
     [Fact]
