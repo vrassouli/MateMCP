@@ -1,4 +1,5 @@
 @inject AgentApiClient Api
+@inject ILogger<SkillsMemoryPanel> Logger
 
 <div class="grid">
     <div class="panel">
@@ -20,6 +21,10 @@
         </div>
         <div class="muted" style="margin-top:10px">This is user-visible persistent knowledge for rules, skills, procedures, and durable context. Never store credentials here; use Secret Manager.</div>
         @if (!string.IsNullOrWhiteSpace(Message)) { <div class="muted" style="margin-top:8px">@Message</div> }
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="error" style="margin-top:8px">@ErrorMessage</div>
+        }
     </div>
 
     <div class="panel">
@@ -30,7 +35,11 @@
             <input @bind="FilterText" placeholder="Search" />
             <Button Text="Search" OnClick="LoadAsync" />
         </div>
-        @if (Items.Count == 0)
+        @if (IsLoading)
+        {
+            <div class="muted" style="margin-top:12px">Loading…</div>
+        }
+        else if (Items.Count == 0)
         {
             <div class="muted" style="margin-top:12px">No matching items.</div>
         }
@@ -39,7 +48,7 @@
             <div class="row" @key="item.Id">
                 <strong>@item.Title</strong>
                 <div class="muted">@item.Type · @item.Scope@(item.Project is null ? "" : $":{item.Project}") · created by: @item.Source · updated by: @item.UpdatedBy · @(item.Enabled ? "enabled" : "disabled")</div>
-                @if (item.Tags.Count > 0) { <div class="muted">@string.Join(", ", item.Tags)</div> }
+                @if (item.Tags is { Count: > 0 }) { <div class="muted">@string.Join(", ", item.Tags)</div> }
                 @if (!string.IsNullOrWhiteSpace(item.Description)) { <div>@item.Description</div> }
                 <div style="white-space:pre-wrap">@item.Content</div>
                 <div class="actions"><Button Text="Edit" OnClick="() => Edit(item)" /><Button Text="Delete" OnClick="() => DeleteAsync(item.Id)" /></div>
@@ -63,30 +72,61 @@
     private string FilterType { get; set; } = "";
     private string FilterText { get; set; } = "";
     private string? Message { get; set; }
+    private string? ErrorMessage { get; set; }
+    private bool IsLoading { get; set; }
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
-        Items = await Api.GetSkillMemoryAsync(string.IsNullOrWhiteSpace(FilterScope) ? null : FilterScope, type: string.IsNullOrWhiteSpace(FilterType) ? null : FilterType, text: string.IsNullOrWhiteSpace(FilterText) ? null : FilterText);
+        IsLoading = true;
+        ErrorMessage = null;
+        try
+        {
+            Items = await Api.GetSkillMemoryAsync(
+                string.IsNullOrWhiteSpace(FilterScope) ? null : FilterScope,
+                type: string.IsNullOrWhiteSpace(FilterType) ? null : FilterType,
+                text: string.IsNullOrWhiteSpace(FilterText) ? null : FilterText);
+        }
+        catch (Exception ex) when (IsRecoverableApiFailure(ex))
+        {
+            Items = [];
+            ErrorMessage = BuildApiErrorMessage(ex, "load");
+            Logger.LogError(ex, "Failed to load Skills & Memory from the local Agent API.");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private async Task SaveAsync()
     {
         if (string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Content)) return;
-        var tags = Tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        var edit = new SkillMemoryEdit(Title.Trim(), Type, Scope, Scope == "project" ? Project.Trim() : null, tags,
-            string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled);
-        await Api.SaveSkillMemoryAsync(EditingId, edit);
-        Message = EditingId is null ? "Item created." : "Item updated.";
-        CancelEdit();
-        await LoadAsync();
+
+        ErrorMessage = null;
+        try
+        {
+            var tags = Tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var edit = new SkillMemoryEdit(Title.Trim(), Type, Scope, Scope == "project" ? Project.Trim() : null, tags,
+                string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled);
+            var wasCreating = EditingId is null;
+            await Api.SaveSkillMemoryAsync(EditingId, edit);
+            CancelEdit();
+            Message = wasCreating ? "Item created." : "Item updated.";
+            await LoadAsync();
+        }
+        catch (Exception ex) when (IsRecoverableApiFailure(ex))
+        {
+            ErrorMessage = BuildApiErrorMessage(ex, "save");
+            Logger.LogError(ex, "Failed to save Skills & Memory item through the local Agent API.");
+        }
     }
 
     private void Edit(SkillMemoryItem item)
     {
         EditingId = item.Id; Title = item.Title; Type = item.Type; Scope = item.Scope; Project = item.Project ?? "";
-        Tags = string.Join(", ", item.Tags); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Message = null;
+        Tags = string.Join(", ", item.Tags ?? []); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Message = null; ErrorMessage = null;
     }
 
     private void CancelEdit()
@@ -96,9 +136,35 @@
 
     private async Task DeleteAsync(string id)
     {
-        await Api.DeleteSkillMemoryAsync(id);
-        if (EditingId == id) CancelEdit();
-        Message = "Item deleted.";
-        await LoadAsync();
+        ErrorMessage = null;
+        try
+        {
+            await Api.DeleteSkillMemoryAsync(id);
+            if (EditingId == id) CancelEdit();
+            Message = "Item deleted.";
+            await LoadAsync();
+        }
+        catch (Exception ex) when (IsRecoverableApiFailure(ex))
+        {
+            ErrorMessage = BuildApiErrorMessage(ex, "delete");
+            Logger.LogError(ex, "Failed to delete Skills & Memory item {SkillMemoryId} through the local Agent API.", id);
+        }
+    }
+
+    private static bool IsRecoverableApiFailure(Exception ex)
+        => ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or NotSupportedException;
+
+    private static string BuildApiErrorMessage(Exception ex, string operation)
+    {
+        if (ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound })
+            return "Skills & Memory is not available in the running Agent. Update/restart the Agent so it matches this Companion version.";
+
+        if (ex is TaskCanceledException)
+            return $"Could not {operation} Skills & Memory because the local Agent did not respond in time.";
+
+        if (ex is System.Text.Json.JsonException or NotSupportedException)
+            return "The running Agent returned an incompatible Skills & Memory response. Update/restart the Agent so it matches this Companion version.";
+
+        return $"Could not {operation} Skills & Memory from the local Agent. Check that the Agent is running, then try again.";
     }
 }
