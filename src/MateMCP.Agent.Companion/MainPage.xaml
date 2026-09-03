@@ -5,7 +5,7 @@
              x:Class="MateMCP.Agent.Companion.MainPage">
     <BlazorWebView HostPage="wwwroot/index.html">
         <BlazorWebView.RootComponents>
-            <RootComponent Selector="#app" ComponentType="{x:Type components:Main}" />
+            <RootComponent Selector="#app" ComponentType="{x:Type components:CompanionRoot}" />
         </BlazorWebView.RootComponents>
     </BlazorWebView>
 </ContentPage>
