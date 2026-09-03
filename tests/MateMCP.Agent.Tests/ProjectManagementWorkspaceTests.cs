@@ -29,6 +29,8 @@ public sealed class ProjectManagementWorkspaceTests
         var root = FindRepositoryRoot();
         var tools = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Tools", "ProjectTools.cs"));
         var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "ProjectsPanel.razor"));
+        var memoryPanel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "SkillsMemoryPanel.razor"));
+        var api = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
         var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
 
         Assert.Contains("Name = \"project_list\"", tools, StringComparison.Ordinal);
@@ -41,10 +43,16 @@ public sealed class ProjectManagementWorkspaceTests
         Assert.Contains("Add Project", panel, StringComparison.Ordinal);
         Assert.Contains("Search projects", panel, StringComparison.Ordinal);
         Assert.Contains("Edit Project", panel, StringComparison.Ordinal);
-        Assert.Contains("Unregister only; source files will not be deleted.", panel, StringComparison.Ordinal);
-        Assert.Contains("Missing", panel, StringComparison.Ordinal);
+        Assert.Contains("associated Skills & Memory will not be deleted", panel, StringComparison.Ordinal);
+        Assert.Contains("OpenSkillsMemory.InvokeAsync(project.Id)", panel, StringComparison.Ordinal);
+        Assert.Contains("project.Available", panel, StringComparison.Ordinal);
+        Assert.Contains("GetProjectsAsync", api, StringComparison.Ordinal);
+        Assert.Contains("Select a registered project", memoryPanel, StringComparison.Ordinal);
+        Assert.Contains("ProjectContext", memoryPanel, StringComparison.Ordinal);
+        Assert.Contains("project: string.IsNullOrWhiteSpace(FilterProject)", memoryPanel, StringComparison.Ordinal);
         Assert.Contains("Section == \"projects\"", main, StringComparison.Ordinal);
-        Assert.Contains("<ProjectsPanel />", main, StringComparison.Ordinal);
+        Assert.Contains("<ProjectsPanel OpenSkillsMemory=\"OpenProjectSkillsMemory\" />", main, StringComparison.Ordinal);
+        Assert.Contains("<SkillsMemoryPanel ProjectContext=\"@MemoryProjectContext\" />", main, StringComparison.Ordinal);
         Assert.Contains("\"projects\" => \"Projects\"", main, StringComparison.Ordinal);
     }
 
