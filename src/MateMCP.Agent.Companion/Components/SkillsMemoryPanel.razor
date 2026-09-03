@@ -9,7 +9,16 @@
         <div class="field"><label>Scope</label><select @bind="Scope"><option value="global">Global</option><option value="project">Project</option></select></div>
         @if (Scope == "project")
         {
-            <div class="field"><label>Project</label><input @bind="Project" placeholder="Configured project name" /></div>
+            <div class="field">
+                <label>Project</label>
+                <select @bind="Project">
+                    <option value="">Select a registered project</option>
+                    @foreach (var project in Projects.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <option value="@project.Id">@project.Name@(project.Available ? "" : " (missing)")</option>
+                    }
+                </select>
+            </div>
         }
         <div class="field"><label>Tags (comma separated)</label><input @bind="Tags" /></div>
         <div class="field"><label>Description</label><input @bind="Description" /></div>
@@ -19,7 +28,7 @@
             <Button Text="Save" OnClick="SaveAsync" />
             @if (EditingId is not null) { <Button Text="Cancel" OnClick="CancelEdit" /> }
         </div>
-        <div class="muted" style="margin-top:10px">This is user-visible persistent knowledge for rules, skills, procedures, and durable context. Never store credentials here; use Secret Manager.</div>
+        <div class="muted" style="margin-top:10px">Project-scoped items are bound to the selected registered project's stable ID. Unregistering a project does not delete these items. Never store credentials here; use Secret Manager.</div>
         @if (!string.IsNullOrWhiteSpace(Message)) { <div class="muted" style="margin-top:8px">@Message</div> }
         @if (!string.IsNullOrWhiteSpace(ErrorMessage))
         {
@@ -31,6 +40,13 @@
         <strong>Stored Skills & Memory</strong>
         <div class="actions" style="margin-top:10px">
             <select @bind="FilterScope" @bind:after="LoadAsync"><option value="">All scopes</option><option value="global">Global</option><option value="project">Project</option></select>
+            <select @bind="FilterProject" @bind:after="LoadAsync">
+                <option value="">All projects</option>
+                @foreach (var project in Projects.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    <option value="@project.Id">@project.Name</option>
+                }
+            </select>
             <select @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
             <input @bind="FilterText" placeholder="Search" />
             <Button Text="Search" OnClick="LoadAsync" />
@@ -47,7 +63,7 @@
         {
             <div class="row" @key="item.Id">
                 <strong>@item.Title</strong>
-                <div class="muted">@item.Type · @item.Scope@(item.Project is null ? "" : $":{item.Project}") · created by: @item.Source · updated by: @item.UpdatedBy · @(item.Enabled ? "enabled" : "disabled")</div>
+                <div class="muted">@item.Type · @item.Scope@(item.Project is null ? "" : $":{ProjectLabel(item.Project)}") · created by: @item.Source · updated by: @item.UpdatedBy · @(item.Enabled ? "enabled" : "disabled")</div>
                 @if (item.Tags is { Count: > 0 }) { <div class="muted">@string.Join(", ", item.Tags)</div> }
                 @if (!string.IsNullOrWhiteSpace(item.Description)) { <div>@item.Description</div> }
                 <div style="white-space:pre-wrap">@item.Content</div>
@@ -58,7 +74,10 @@
 </div>
 
 @code {
+    [Parameter] public string? ProjectContext { get; set; }
+
     private IReadOnlyList<SkillMemoryItem> Items { get; set; } = [];
+    private IReadOnlyList<CompanionProjectInfo> Projects { get; set; } = [];
     private string? EditingId { get; set; }
     private string Title { get; set; } = "";
     private string Type { get; set; } = "memory";
@@ -69,13 +88,54 @@
     private string Content { get; set; } = "";
     private bool Enabled { get; set; } = true;
     private string FilterScope { get; set; } = "";
+    private string FilterProject { get; set; } = "";
     private string FilterType { get; set; } = "";
     private string FilterText { get; set; } = "";
     private string? Message { get; set; }
     private string? ErrorMessage { get; set; }
     private bool IsLoading { get; set; }
+    private bool Initialized { get; set; }
+    private string? AppliedProjectContext { get; set; }
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProjectsAsync();
+        ApplyProjectContext();
+        await LoadAsync();
+        Initialized = true;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Initialized || string.Equals(ProjectContext, AppliedProjectContext, StringComparison.OrdinalIgnoreCase)) return;
+        ApplyProjectContext();
+        await LoadAsync();
+    }
+
+    private async Task LoadProjectsAsync()
+    {
+        try
+        {
+            Projects = await Api.GetProjectsAsync();
+        }
+        catch (Exception ex) when (IsRecoverableApiFailure(ex))
+        {
+            Projects = [];
+            ErrorMessage = $"Could not load registered projects: {ex.Message}";
+            Logger.LogError(ex, "Failed to load Projects for Skills & Memory.");
+        }
+    }
+
+    private void ApplyProjectContext()
+    {
+        AppliedProjectContext = ProjectContext;
+        if (string.IsNullOrWhiteSpace(ProjectContext)) return;
+        var resolved = ResolveProjectReference(ProjectContext);
+        Scope = "project";
+        Project = resolved;
+        FilterScope = "project";
+        FilterProject = resolved;
+    }
 
     private async Task LoadAsync()
     {
@@ -85,6 +145,7 @@
         {
             Items = await Api.GetSkillMemoryAsync(
                 string.IsNullOrWhiteSpace(FilterScope) ? null : FilterScope,
+                project: string.IsNullOrWhiteSpace(FilterProject) ? null : FilterProject,
                 type: string.IsNullOrWhiteSpace(FilterType) ? null : FilterType,
                 text: string.IsNullOrWhiteSpace(FilterText) ? null : FilterText);
         }
@@ -103,12 +164,17 @@
     private async Task SaveAsync()
     {
         if (string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Content)) return;
+        if (Scope == "project" && string.IsNullOrWhiteSpace(Project))
+        {
+            ErrorMessage = "Select a registered project for project-scoped Skills & Memory.";
+            return;
+        }
 
         ErrorMessage = null;
         try
         {
             var tags = Tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            var edit = new SkillMemoryEdit(Title.Trim(), Type, Scope, Scope == "project" ? Project.Trim() : null, tags,
+            var edit = new SkillMemoryEdit(Title.Trim(), Type, Scope, Scope == "project" ? Project : null, tags,
                 string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled);
             var wasCreating = EditingId is null;
             await Api.SaveSkillMemoryAsync(EditingId, edit);
@@ -125,13 +191,33 @@
 
     private void Edit(SkillMemoryItem item)
     {
-        EditingId = item.Id; Title = item.Title; Type = item.Type; Scope = item.Scope; Project = item.Project ?? "";
+        EditingId = item.Id; Title = item.Title; Type = item.Type; Scope = item.Scope; Project = ResolveProjectReference(item.Project);
         Tags = string.Join(", ", item.Tags ?? []); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Message = null; ErrorMessage = null;
+    }
+
+    private string ResolveProjectReference(string? reference)
+    {
+        if (string.IsNullOrWhiteSpace(reference)) return "";
+        var project = Projects.FirstOrDefault(x => string.Equals(x.Id, reference, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(x.Name, reference, StringComparison.OrdinalIgnoreCase));
+        return project?.Id ?? reference;
+    }
+
+    private string ProjectLabel(string reference)
+    {
+        var project = Projects.FirstOrDefault(x => string.Equals(x.Id, reference, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(x.Name, reference, StringComparison.OrdinalIgnoreCase));
+        return project?.Name ?? reference;
     }
 
     private void CancelEdit()
     {
         EditingId = null; Title = ""; Type = "memory"; Scope = "global"; Project = ""; Tags = ""; Description = ""; Content = ""; Enabled = true;
+        if (!string.IsNullOrWhiteSpace(ProjectContext))
+        {
+            Scope = "project";
+            Project = ResolveProjectReference(ProjectContext);
+        }
     }
 
     private async Task DeleteAsync(string id)
