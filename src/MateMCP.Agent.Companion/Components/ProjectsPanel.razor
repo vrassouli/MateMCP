@@ -51,19 +51,19 @@
         <div class="list" style="margin-top:12px">
             @foreach (var project in FilteredProjects)
             {
-                var available = Directory.Exists(project.Root);
-                <div class="row" @key="project.Name">
+                <div class="row" @key="project.Id">
                     <div class="actions" style="justify-content:space-between">
                         <strong>@project.Name</strong>
-                        <Badge Text="@(available ? "Available" : "Missing")" />
+                        <Badge Text="@(project.Available ? "Available" : "Missing")" />
                     </div>
                     <div>@project.Root</div>
-                    <div class="muted">Read: @YesNo(project.Read) · Write: @YesNo(project.Write) · Shell: @YesNo(project.Shell)</div>
+                    <div class="muted">ID: @project.Id · Read: @YesNo(project.Read) · Write: @YesNo(project.Write) · Shell: @YesNo(project.Shell)</div>
                     <div class="actions">
+                        <Button Text="Skills & Memory" OnClick="() => OpenSkillsMemory.InvokeAsync(project.Id)" />
                         <Button Text="Edit" OnClick="() => BeginEdit(project)" />
                         @if (ConfirmRemoveName == project.Name)
                         {
-                            <span class="muted">Unregister only; source files will not be deleted.</span>
+                            <span class="muted">Unregister only; source files and associated Skills & Memory will not be deleted.</span>
                             <Button Text="Confirm unregister" OnClick="() => RemoveAsync(project.Name)" />
                             <Button Text="Cancel" OnClick="() => ConfirmRemoveName = null" />
                         }
@@ -79,6 +79,8 @@
 </div>
 
 @code {
+    [Parameter] public EventCallback<string> OpenSkillsMemory { get; set; }
+
     private readonly HttpClient _http;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private IReadOnlyList<ProjectInfo> Projects { get; set; } = [];
@@ -223,7 +225,7 @@
     private static string YesNo(bool value) => value ? "Yes" : "No";
     public void Dispose() => _http.Dispose();
 
-    private sealed record ProjectInfo(string Name, string Root, bool Read, bool Write, bool Shell);
+    private sealed record ProjectInfo(string Id, string Name, string Root, bool Read, bool Write, bool Shell, bool Available);
     private sealed record ProjectEdit(string Name, string Root, bool Read, bool Write, bool Shell);
     private sealed record Problem(string? Title, string? Detail);
 }
