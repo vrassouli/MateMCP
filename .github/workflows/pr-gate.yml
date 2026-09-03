@@ -1,0 +1,29 @@
+name: PR Gate
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-gate:
+    name: PR Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore MateMCP.slnx
+      - name: Build
+        run: dotnet build MateMCP.slnx -c Release --no-restore
+      - name: Test
+        run: dotnet test MateMCP.slnx -c Release --no-build
