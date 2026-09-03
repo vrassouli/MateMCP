@@ -1,10 +1,18 @@
 param(
     [string]$Source = (Join-Path $PSScriptRoot 'payload'),
     [switch]$NoStart,
-    [switch]$AgentOnly
+    [switch]$AgentOnly,
+    [ValidateSet('','Normal','Elevated')]
+    [string]$AgentMode = ''
 )
 
 $ErrorActionPreference = 'Stop'
+$ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
+
+if ([string]::IsNullOrWhiteSpace($AgentMode)) {
+    $persistedMode = if (Test-Path $ModeFile) { (Get-Content $ModeFile -Raw).Trim() } else { '' }
+    $AgentMode = if ($persistedMode -in @('Normal','Elevated')) { $persistedMode } else { 'Normal' }
+}
 
 # In a unified Desktop package, install-windows.ps1 is the obvious entry point a
 # user will choose. Delegate to the Desktop installer unless this script is being
@@ -16,7 +24,7 @@ if (-not $AgentOnly -and
     (Test-Path $DesktopInstaller) -and
     (Test-Path (Join-Path $AgentPayload 'MateMCP.Agent.exe')) -and
     (Test-Path (Join-Path $CompanionPayload 'MateMCP.Agent.Companion.exe'))) {
-    if ($NoStart) { & $DesktopInstaller -NoStart } else { & $DesktopInstaller }
+    if ($NoStart) { & $DesktopInstaller -NoStart -AgentMode $AgentMode } else { & $DesktopInstaller -AgentMode $AgentMode }
     return
 }
 
@@ -25,9 +33,7 @@ $Bin = Join-Path $Target 'bin'
 $Exe = Join-Path $Target 'MateMCP.Agent.exe'
 $Shim = Join-Path $Bin 'matemcp.cmd'
 $HiddenLauncher = Join-Path $Target 'start-agent-hidden.vbs'
-$StartupDirectory = [Environment]::GetFolderPath('Startup')
-$StartupShortcut = Join-Path $StartupDirectory 'MateMCP Agent.lnk'
-$WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
+$ConfigureMode = Join-Path $Target 'configure-agent-mode-windows.ps1'
 
 if (-not (Test-Path (Join-Path $Source 'MateMCP.Agent.exe'))) { throw "MateMCP payload not found at: $Source" }
 
@@ -60,15 +66,9 @@ shell.Run Chr(34) & "$escapedExe" & Chr(34), 0, False
 
 $packageUninstall = Join-Path $PSScriptRoot 'uninstall-windows.ps1'
 if (Test-Path $packageUninstall) { Copy-Item $packageUninstall (Join-Path $Target 'uninstall-windows.ps1') -Force }
-
-$shortcutShell = New-Object -ComObject WScript.Shell
-$shortcut = $shortcutShell.CreateShortcut($StartupShortcut)
-$shortcut.TargetPath = $WScript
-$shortcut.Arguments = "`"$HiddenLauncher`""
-$shortcut.WorkingDirectory = $Target
-$shortcut.WindowStyle = 7
-$shortcut.Description = 'MateMCP Agent (background)'
-$shortcut.Save()
+$packageConfigureMode = Join-Path $PSScriptRoot 'configure-agent-mode-windows.ps1'
+if (-not (Test-Path $packageConfigureMode)) { throw "Agent mode configurator not found: $packageConfigureMode" }
+Copy-Item $packageConfigureMode $ConfigureMode -Force
 
 $currentUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $parts = @($currentUserPath -split ';' | Where-Object { $_ })
@@ -79,17 +79,22 @@ if ($parts -notcontains $Bin) {
 $currentProcessParts = @($env:Path -split ';' | Where-Object { $_ })
 if ($currentProcessParts -notcontains $Bin) { $env:Path = (($currentProcessParts + $Bin) -join ';').Trim(';') }
 
+# Configure startup only after payload replacement so upgrades keep the selected
+# execution model. Elevated mode intentionally requires an already elevated
+# installer process; the Desktop wrapper can request UAC when needed.
+& $ConfigureMode -Mode $AgentMode -NoStart
+
 Write-Host 'MateMCP installed/upgraded.'
 Write-Host "Binary: $Exe"
 Write-Host "Command: $Shim"
 Write-Host "Config: $env:APPDATA\MateMCP\appsettings.json"
 Write-Host 'Credentials: Windows Credential Manager'
-Write-Host "Background startup: $StartupShortcut"
+Write-Host "Agent execution mode: $AgentMode"
 Write-Host "Uninstall: powershell -ExecutionPolicy Bypass -File `"$Target\uninstall-windows.ps1`""
 Write-Host ''
 Write-Host 'The matemcp command is now available in this installer process and in newly opened terminals.'
 
 if (-not $NoStart) {
-    Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`""
-    Write-Host 'MateMCP Agent started in the background.'
+    & $ConfigureMode -Mode $AgentMode
+    Write-Host 'MateMCP Agent started in the configured background mode.'
 }

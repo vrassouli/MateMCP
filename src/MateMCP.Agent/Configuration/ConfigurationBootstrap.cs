@@ -6,9 +6,7 @@ public static class ConfigurationBootstrap
 {
     public static string EnsureUserConfiguration()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "MateMCP");
+        var directory = GetUserDataDirectory();
         Directory.CreateDirectory(directory);
 
         var path = Path.Combine(directory, "appsettings.json");
@@ -43,6 +41,18 @@ public static class ConfigurationBootstrap
         return path;
     }
 
+    public static string GetUserDataDirectory()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            var delegatedHome = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_HOME");
+            if (!string.IsNullOrWhiteSpace(delegatedHome))
+                return Path.Combine(delegatedHome, "Library", "Application Support", "MateMCP");
+        }
+
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MateMCP");
+    }
+
     public static void TryRestrictPermissions(string path)
     {
         if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
@@ -54,5 +64,13 @@ public static class ConfigurationBootstrap
         {
             // Best effort. Sensitive values are not expected in this file.
         }
+    }
+
+    public static void TryRestoreDelegatedMacOwnership(string path)
+    {
+        // Ownership is intentionally managed by configure-agent-mode-macos.sh:
+        // root-owned while elevated, restored to the user when returning to Normal.
+        // Keep this compatibility hook so secret-index migration does not override
+        // the stronger mode-level ownership policy.
     }
 }

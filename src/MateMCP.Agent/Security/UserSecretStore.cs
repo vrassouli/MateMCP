@@ -24,6 +24,7 @@ public sealed class UserSecretStore : ICredentialStore
         var directory = Path.GetDirectoryName(Path.GetFullPath(indexPath))
             ?? throw new ArgumentException("Secret index path must include a directory.", nameof(indexPath));
         Directory.CreateDirectory(directory);
+        ConfigurationBootstrap.TryRestoreDelegatedMacOwnership(directory);
         _indexPath = Path.Combine(directory, Path.GetFileName(indexPath));
     }
 
@@ -36,16 +37,12 @@ public sealed class UserSecretStore : ICredentialStore
 
         if (!OperatingSystem.IsMacOS()) return applicationDataPath;
 
-        // Keep secret metadata in a stable, installer-independent macOS user-data location.
-        // Older builds used Environment.SpecialFolder.ApplicationData, whose mapping changed
-        // across packaging/runtime combinations. The actual secret values remain in Keychain;
-        // migrating this index prevents an upgrade from making those values appear deleted.
-        var stablePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Library",
-            "Application Support",
-            "MateMCP",
-            "secrets.json");
+        // Keep secret metadata in the original user's stable data directory even
+        // when the Agent itself is running as a root LaunchDaemon.
+        var userHome = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_HOME");
+        if (string.IsNullOrWhiteSpace(userHome))
+            userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var stablePath = Path.Combine(userHome, "Library", "Application Support", "MateMCP", "secrets.json");
 
         if (string.Equals(Path.GetFullPath(stablePath), Path.GetFullPath(applicationDataPath), StringComparison.Ordinal))
             return stablePath;
@@ -55,13 +52,13 @@ public sealed class UserSecretStore : ICredentialStore
             if (!File.Exists(stablePath) && File.Exists(applicationDataPath))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(stablePath)!);
+                ConfigurationBootstrap.TryRestoreDelegatedMacOwnership(Path.GetDirectoryName(stablePath)!);
                 File.Copy(applicationDataPath, stablePath, overwrite: false);
                 ConfigurationBootstrap.TryRestrictPermissions(stablePath);
             }
         }
         catch (IOException)
         {
-            // A concurrent process may have completed migration. Prefer the stable copy if present.
             if (!File.Exists(stablePath)) throw;
         }
 
@@ -236,13 +233,42 @@ public sealed class UserSecretStore : ICredentialStore
 
     private static Process NewSecurityProcess(params string[] arguments)
     {
-        var start = new ProcessStartInfo("/usr/bin/security")
+        var delegatedUser = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_NAME");
+        var delegatedUid = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_UID");
+        ProcessStartInfo start;
+
+        if (ProcessPrivilege.IsElevated() &&
+            !string.IsNullOrWhiteSpace(delegatedUser) &&
+            uint.TryParse(delegatedUid, out _))
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+            // Root has a different login Keychain. Enter the enrolled user's GUI
+            // bootstrap namespace and drop privileges only for the security(1)
+            // operation so existing secrets remain in that user's Keychain.
+            start = new ProcessStartInfo("/bin/launchctl")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            start.ArgumentList.Add("asuser");
+            start.ArgumentList.Add(delegatedUid!);
+            start.ArgumentList.Add("/usr/bin/sudo");
+            start.ArgumentList.Add("-u");
+            start.ArgumentList.Add(delegatedUser);
+            start.ArgumentList.Add("/usr/bin/security");
+        }
+        else
+        {
+            start = new ProcessStartInfo("/usr/bin/security")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+        }
+
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         return new Process { StartInfo = start };
     }
