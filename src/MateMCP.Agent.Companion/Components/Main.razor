@@ -34,6 +34,10 @@
                 <Icon Value="@FluentIcons.Settings" />
                 <span>Secrets</span>
             </button>
+            <button class="@(Section == "memory" ? "active" : null)" @onclick='() => Section = "memory"'>
+                <Icon Value="@FluentIcons.Document" />
+                <span>Skills &amp; Memory</span>
+            </button>
             <button class="@(Section == "audit" ? "active" : null)" @onclick='() => Section = "audit"'>
                 <Icon Value="@FluentIcons.Document" />
                 <span>Activity</span>
@@ -241,6 +245,10 @@
                 </div>
             </div>
         }
+        else if (Section == "memory")
+        {
+            <SkillsMemoryPanel />
+        }
         else if (Section == "audit")
         {
             <div class="panel">
@@ -331,6 +339,7 @@
         "approvals" => "Approval Center",
         "shell" => "Interactive Shell",
         "secrets" => "Secret Manager",
+        "memory" => "Skills & Memory",
         "audit" => "Activity & Audit",
         _ => "Dashboard"
     };

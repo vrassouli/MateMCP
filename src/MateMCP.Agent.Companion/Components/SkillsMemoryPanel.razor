@@ -1,0 +1,104 @@
+@inject AgentApiClient Api
+
+<div class="grid">
+    <div class="panel">
+        <strong>@(EditingId is null ? "Add Skills / Memory item" : "Edit Skills / Memory item")</strong>
+        <div class="field"><label>Title</label><input @bind="Title" /></div>
+        <div class="field"><label>Type</label><select @bind="Type"><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select></div>
+        <div class="field"><label>Scope</label><select @bind="Scope"><option value="global">Global</option><option value="project">Project</option></select></div>
+        @if (Scope == "project")
+        {
+            <div class="field"><label>Project</label><input @bind="Project" placeholder="Configured project name" /></div>
+        }
+        <div class="field"><label>Tags (comma separated)</label><input @bind="Tags" /></div>
+        <div class="field"><label>Description</label><input @bind="Description" /></div>
+        <div class="field"><label>Content (Markdown)</label><textarea rows="12" @bind="Content"></textarea></div>
+        <label><input type="checkbox" @bind="Enabled" /> Enabled</label>
+        <div class="actions" style="margin-top:12px">
+            <Button Text="Save" OnClick="SaveAsync" />
+            @if (EditingId is not null) { <Button Text="Cancel" OnClick="CancelEdit" /> }
+        </div>
+        <div class="muted" style="margin-top:10px">This is user-visible persistent knowledge for rules, skills, procedures, and durable context. Never store credentials here; use Secret Manager.</div>
+        @if (!string.IsNullOrWhiteSpace(Message)) { <div class="muted" style="margin-top:8px">@Message</div> }
+    </div>
+
+    <div class="panel">
+        <strong>Stored Skills & Memory</strong>
+        <div class="actions" style="margin-top:10px">
+            <select @bind="FilterScope" @bind:after="LoadAsync"><option value="">All scopes</option><option value="global">Global</option><option value="project">Project</option></select>
+            <select @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
+            <input @bind="FilterText" placeholder="Search" />
+            <Button Text="Search" OnClick="LoadAsync" />
+        </div>
+        @if (Items.Count == 0)
+        {
+            <div class="muted" style="margin-top:12px">No matching items.</div>
+        }
+        @foreach (var item in Items)
+        {
+            <div class="row" @key="item.Id">
+                <strong>@item.Title</strong>
+                <div class="muted">@item.Type · @item.Scope@(item.Project is null ? "" : $":{item.Project}") · created by: @item.Source · updated by: @item.UpdatedBy · @(item.Enabled ? "enabled" : "disabled")</div>
+                @if (item.Tags.Count > 0) { <div class="muted">@string.Join(", ", item.Tags)</div> }
+                @if (!string.IsNullOrWhiteSpace(item.Description)) { <div>@item.Description</div> }
+                <div style="white-space:pre-wrap">@item.Content</div>
+                <div class="actions"><Button Text="Edit" OnClick="() => Edit(item)" /><Button Text="Delete" OnClick="() => DeleteAsync(item.Id)" /></div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<SkillMemoryItem> Items { get; set; } = [];
+    private string? EditingId { get; set; }
+    private string Title { get; set; } = "";
+    private string Type { get; set; } = "memory";
+    private string Scope { get; set; } = "global";
+    private string Project { get; set; } = "";
+    private string Tags { get; set; } = "";
+    private string Description { get; set; } = "";
+    private string Content { get; set; } = "";
+    private bool Enabled { get; set; } = true;
+    private string FilterScope { get; set; } = "";
+    private string FilterType { get; set; } = "";
+    private string FilterText { get; set; } = "";
+    private string? Message { get; set; }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        Items = await Api.GetSkillMemoryAsync(string.IsNullOrWhiteSpace(FilterScope) ? null : FilterScope, type: string.IsNullOrWhiteSpace(FilterType) ? null : FilterType, text: string.IsNullOrWhiteSpace(FilterText) ? null : FilterText);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Content)) return;
+        var tags = Tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var edit = new SkillMemoryEdit(Title.Trim(), Type, Scope, Scope == "project" ? Project.Trim() : null, tags,
+            string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled);
+        await Api.SaveSkillMemoryAsync(EditingId, edit);
+        Message = EditingId is null ? "Item created." : "Item updated.";
+        CancelEdit();
+        await LoadAsync();
+    }
+
+    private void Edit(SkillMemoryItem item)
+    {
+        EditingId = item.Id; Title = item.Title; Type = item.Type; Scope = item.Scope; Project = item.Project ?? "";
+        Tags = string.Join(", ", item.Tags); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Message = null;
+    }
+
+    private void CancelEdit()
+    {
+        EditingId = null; Title = ""; Type = "memory"; Scope = "global"; Project = ""; Tags = ""; Description = ""; Content = ""; Enabled = true;
+    }
+
+    private async Task DeleteAsync(string id)
+    {
+        await Api.DeleteSkillMemoryAsync(id);
+        if (EditingId == id) CancelEdit();
+        Message = "Item deleted.";
+        await LoadAsync();
+    }
+}

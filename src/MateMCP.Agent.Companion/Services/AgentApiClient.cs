@@ -88,6 +88,31 @@ public sealed class AgentApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<IReadOnlyList<SkillMemoryItem>> GetSkillMemoryAsync(string? scope = null, string? project = null, string? type = null, string? text = null, CancellationToken ct = default)
+    {
+        var query = "skills-memory?includeDisabled=true";
+        if (!string.IsNullOrWhiteSpace(scope)) query += "&scope=" + Uri.EscapeDataString(scope);
+        if (!string.IsNullOrWhiteSpace(project)) query += "&project=" + Uri.EscapeDataString(project);
+        if (!string.IsNullOrWhiteSpace(type)) query += "&type=" + Uri.EscapeDataString(type);
+        if (!string.IsNullOrWhiteSpace(text)) query += "&text=" + Uri.EscapeDataString(text);
+        return await _http.GetFromJsonAsync<List<SkillMemoryItem>>(query, Json, ct) ?? [];
+    }
+
+    public async Task<SkillMemoryItem?> SaveSkillMemoryAsync(string? id, SkillMemoryEdit update, CancellationToken ct = default)
+    {
+        using var response = id is null
+            ? await _http.PostAsJsonAsync("skills-memory", update, Json, ct)
+            : await _http.PutAsJsonAsync($"skills-memory/{Uri.EscapeDataString(id)}", update, Json, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SkillMemoryItem>(Json, ct);
+    }
+
+    public async Task DeleteSkillMemoryAsync(string id, CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync($"skills-memory/{Uri.EscapeDataString(id)}", ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task<IReadOnlyList<ShellSessionSnapshot>> GetShellSessionsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<ShellSessionSnapshot>>("shell/sessions", Json, ct) ?? [];
 
@@ -149,3 +174,6 @@ public sealed record ShellSessionSnapshot(string SessionId, int ProcessId, strin
     int? ExitCode, string WorkingDirectory, DateTimeOffset CreatedAt, DateTimeOffset LastTouched);
 public sealed record AuditEntry(DateTimeOffset Timestamp, string Capability, string Target, string Result, string? Credential, string? Tool);
 public sealed record AuditCleanupResult(int Deleted);
+
+public sealed record SkillMemoryItem(string Id, string Title, string Type, string Scope, string? Project, IReadOnlyList<string> Tags, string? Description, string Content, string Source, string UpdatedBy, bool Enabled, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+public sealed record SkillMemoryEdit(string Title, string Type, string Scope, string? Project, IReadOnlyList<string>? Tags, string? Description, string Content, string Source = "user", bool Enabled = true);
