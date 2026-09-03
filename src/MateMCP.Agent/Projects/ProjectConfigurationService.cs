@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using MateMCP.Agent.Configuration;
 
 namespace MateMCP.Agent.Projects;
 
@@ -8,18 +7,18 @@ public sealed record ProjectUpdate(string Name, string Root, bool Read = true, b
 
 public sealed class ProjectConfigurationService
 {
-    private readonly string _configurationPath = ConfigurationBootstrap.EnsureUserConfiguration();
+    private readonly string _configurationPath = Configuration.ConfigurationBootstrap.EnsureUserConfiguration();
     private readonly object _gate = new();
 
     public ProjectDefinition Add(ProjectUpdate update)
     {
-        var project = Normalize(update);
+        var normalized = Normalize(update, requireExistingRoot: true);
+        var project = normalized with { Id = Guid.NewGuid().ToString("N") };
         lock (_gate)
         {
             var root = ReadRoot();
             var projects = GetProjects(root);
-            if (projects.Any(p => string.Equals(p?["Name"]?.GetValue<string>(), project.Name, StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException($"Project '{project.Name}' already exists.");
+            EnsureUnique(projects, project, exceptName: null);
             projects.Add(ToNode(project));
             Save(root);
         }
@@ -28,18 +27,20 @@ public sealed class ProjectConfigurationService
 
     public ProjectDefinition Update(string existingName, ProjectUpdate update)
     {
-        var project = Normalize(update);
+        var project = Normalize(update, requireExistingRoot: false);
         lock (_gate)
         {
             var root = ReadRoot();
             var projects = GetProjects(root);
             var node = projects.FirstOrDefault(p => string.Equals(p?["Name"]?.GetValue<string>(), existingName, StringComparison.OrdinalIgnoreCase));
             if (node is null) throw new KeyNotFoundException($"Project '{existingName}' was not found.");
-            if (!string.Equals(existingName, project.Name, StringComparison.OrdinalIgnoreCase) &&
-                projects.Any(p => string.Equals(p?["Name"]?.GetValue<string>(), project.Name, StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException($"Project '{project.Name}' already exists.");
-            var index = projects.IndexOf(node);
-            projects[index] = ToNode(project);
+
+            var existingId = node["Id"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(existingId))
+                existingId = ProjectRegistry.LegacyId(node["Name"]!.GetValue<string>(), node["Root"]!.GetValue<string>());
+            project = project with { Id = existingId };
+            EnsureUnique(projects, project, existingName);
+            projects[projects.IndexOf(node)] = ToNode(project);
             Save(root);
         }
         return project;
@@ -51,7 +52,8 @@ public sealed class ProjectConfigurationService
         {
             var root = ReadRoot();
             var projects = GetProjects(root);
-            var node = projects.FirstOrDefault(p => string.Equals(p?["Name"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase));
+            var node = projects.FirstOrDefault(p => string.Equals(p?["Name"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p?["Id"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase));
             if (node is null) return false;
             projects.Remove(node);
             Save(root);
@@ -59,7 +61,7 @@ public sealed class ProjectConfigurationService
         }
     }
 
-    private static ProjectDefinition Normalize(ProjectUpdate update)
+    private static ProjectDefinition Normalize(ProjectUpdate update, bool requireExistingRoot)
     {
         var name = update.Name?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Project name is required.");
@@ -69,9 +71,30 @@ public sealed class ProjectConfigurationService
         var expanded = Environment.ExpandEnvironmentVariables(update.Root?.Trim() ?? string.Empty);
         if (string.IsNullOrWhiteSpace(expanded)) throw new ArgumentException("Project root is required.");
         var fullPath = Path.GetFullPath(expanded);
-        if (!Directory.Exists(fullPath)) throw new DirectoryNotFoundException($"Project root '{fullPath}' does not exist.");
+        if (requireExistingRoot && !Directory.Exists(fullPath)) throw new DirectoryNotFoundException($"Project root '{fullPath}' does not exist.");
 
-        return new ProjectDefinition(name, fullPath, update.Read, update.Write, update.Shell);
+        return new ProjectDefinition(string.Empty, name, fullPath, update.Read, update.Write, update.Shell, Directory.Exists(fullPath));
+    }
+
+    private static void EnsureUnique(JsonArray projects, ProjectDefinition project, string? exceptName)
+    {
+        foreach (var candidate in projects)
+        {
+            var candidateName = candidate?["Name"]?.GetValue<string>() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(exceptName) && string.Equals(candidateName, exceptName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(candidateName, project.Name, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Project '{project.Name}' already exists.");
+            var candidateRoot = candidate?["Root"]?.GetValue<string>();
+            if (!string.IsNullOrWhiteSpace(candidateRoot) && PathsEqual(candidateRoot, project.Root))
+                throw new InvalidOperationException($"Workspace '{project.Root}' is already registered as project '{candidateName}'.");
+        }
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(Path.GetFullPath(Environment.ExpandEnvironmentVariables(left)).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), comparison);
     }
 
     private JsonObject ReadRoot()
@@ -89,6 +112,7 @@ public sealed class ProjectConfigurationService
 
     private static JsonObject ToNode(ProjectDefinition project) => new()
     {
+        ["Id"] = project.Id,
         ["Name"] = project.Name,
         ["Root"] = project.Root,
         ["Read"] = project.Read,
@@ -100,8 +124,8 @@ public sealed class ProjectConfigurationService
     {
         var temp = _configurationPath + ".tmp";
         File.WriteAllText(temp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-        ConfigurationBootstrap.TryRestrictPermissions(temp);
+        Configuration.ConfigurationBootstrap.TryRestrictPermissions(temp);
         File.Move(temp, _configurationPath, true);
-        ConfigurationBootstrap.TryRestrictPermissions(_configurationPath);
+        Configuration.ConfigurationBootstrap.TryRestrictPermissions(_configurationPath);
     }
 }
