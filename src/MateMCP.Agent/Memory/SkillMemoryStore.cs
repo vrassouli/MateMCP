@@ -48,11 +48,15 @@ public sealed class SkillMemoryStore
         string? text = null, bool includeDisabled = false, CancellationToken cancellationToken = default)
     {
         var normalizedScope = NormalizeScope(scope, allowNull: true);
-        var normalizedProject = NormalizeProject(project, normalizedScope);
+        ProjectDefinition? projectFilter = null;
+        if (!string.IsNullOrWhiteSpace(project)) projectFilter = projects.Get(project.Trim());
+        if (string.Equals(normalizedScope, "global", StringComparison.OrdinalIgnoreCase) && projectFilter is not null)
+            throw new ArgumentException("Global searches cannot specify a project.");
+
         var query = (await LoadAsync(cancellationToken)).AsEnumerable();
         if (!includeDisabled) query = query.Where(x => x.Enabled);
         if (normalizedScope is not null) query = query.Where(x => string.Equals(x.Scope, normalizedScope, StringComparison.OrdinalIgnoreCase));
-        if (normalizedProject is not null) query = query.Where(x => string.Equals(x.Project, normalizedProject, StringComparison.OrdinalIgnoreCase));
+        if (projectFilter is not null) query = query.Where(x => MatchesProject(x.Project, projectFilter));
         if (!string.IsNullOrWhiteSpace(type)) query = query.Where(x => string.Equals(x.Type, type.Trim(), StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(text))
         {
@@ -67,11 +71,11 @@ public sealed class SkillMemoryStore
 
     public async Task<IReadOnlyList<SkillMemoryItem>> ApplicableAsync(string? project, CancellationToken cancellationToken = default)
     {
-        var normalizedProject = string.IsNullOrWhiteSpace(project) ? null : projects.Get(project.Trim()).Name;
+        var configuredProject = string.IsNullOrWhiteSpace(project) ? null : projects.Get(project.Trim());
         var items = await LoadAsync(cancellationToken);
         return items.Where(x => x.Enabled && (string.Equals(x.Scope, "global", StringComparison.OrdinalIgnoreCase)
-            || (normalizedProject is not null && string.Equals(x.Scope, "project", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.Project, normalizedProject, StringComparison.OrdinalIgnoreCase))))
+            || (configuredProject is not null && string.Equals(x.Scope, "project", StringComparison.OrdinalIgnoreCase)
+                && MatchesProject(x.Project, configuredProject))))
             .OrderBy(x => string.Equals(x.Scope, "project", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
             .ThenByDescending(x => x.UpdatedAt).ToArray();
     }
@@ -146,12 +150,16 @@ public sealed class SkillMemoryStore
         }
         if (string.Equals(scope, "project", StringComparison.OrdinalIgnoreCase))
         {
-            if (string.IsNullOrWhiteSpace(project)) throw new ArgumentException("Project-scoped items require a configured project name.");
-            return projects.Get(project.Trim()).Name;
+            if (string.IsNullOrWhiteSpace(project)) throw new ArgumentException("Project-scoped items require a configured project name or id.");
+            return projects.Get(project.Trim()).Id;
         }
-        if (!string.IsNullOrWhiteSpace(project)) return projects.Get(project.Trim()).Name;
+        if (!string.IsNullOrWhiteSpace(project)) return projects.Get(project.Trim()).Id;
         return null;
     }
+
+    private static bool MatchesProject(string? storedReference, ProjectDefinition project)
+        => string.Equals(storedReference, project.Id, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(storedReference, project.Name, StringComparison.OrdinalIgnoreCase);
 
     private static string? NormalizeScope(string? scope, bool allowNull)
     {

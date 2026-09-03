@@ -1,41 +1,61 @@
+using System.Security.Cryptography;
+using System.Text;
 using MateMCP.Agent.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace MateMCP.Agent.Projects;
 
-public sealed record ProjectDefinition(string Name, string Root, bool Read, bool Write, bool Shell);
+public sealed record ProjectDefinition(string Id, string Name, string Root, bool Read, bool Write, bool Shell, bool Available);
 
 public sealed class ProjectRegistry(IOptionsMonitor<MateOptions> options)
 {
     public IEnumerable<ProjectDefinition> All => Build(options.CurrentValue.Projects).Values;
 
-    public ProjectDefinition Get(string name)
+    public ProjectDefinition Get(string nameOrId)
     {
         var projects = Build(options.CurrentValue.Projects);
-        return projects.TryGetValue(name, out var project)
-            ? project
-            : throw new InvalidOperationException($"Unknown project '{name}'.");
+        if (projects.TryGetValue(nameOrId, out var project)) return project;
+        project = projects.Values.FirstOrDefault(p => string.Equals(p.Id, nameOrId, StringComparison.OrdinalIgnoreCase));
+        return project ?? throw new InvalidOperationException($"Unknown project '{nameOrId}'.");
+    }
+
+    public ProjectDefinition? ResolveWorkspace(string path)
+    {
+        var fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
+        return All.OrderByDescending(p => p.Root.Length).FirstOrDefault(p => IsWithin(p.Root, fullPath));
     }
 
     public string ResolvePath(string projectName, string relativePath, bool requireWrite = false)
     {
         var project = Get(projectName);
-        if (requireWrite && !project.Write) throw new UnauthorizedAccessException($"Project '{projectName}' is read-only.");
-        if (!requireWrite && !project.Read) throw new UnauthorizedAccessException($"Project '{projectName}' does not allow reads.");
+        if (requireWrite && !project.Write) throw new UnauthorizedAccessException($"Project '{project.Name}' is read-only.");
+        if (!requireWrite && !project.Read) throw new UnauthorizedAccessException($"Project '{project.Name}' does not allow reads.");
 
         var root = Path.GetFullPath(project.Root);
         var candidate = Path.GetFullPath(Path.Combine(root, relativePath ?? string.Empty));
         var prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
-        if (!candidate.Equals(root, StringComparison.Ordinal) && !candidate.StartsWith(prefix, StringComparison.Ordinal))
+        if (!candidate.Equals(root, PathComparison) && !candidate.StartsWith(prefix, PathComparison))
             throw new UnauthorizedAccessException("Path escapes the configured project root.");
 
         EnsureNoSymlinkEscape(root, candidate);
         return candidate;
     }
 
+    internal static string GetStableId(ProjectOptions project)
+        => string.IsNullOrWhiteSpace(project.Id) ? LegacyId(project.Name, project.Root) : project.Id.Trim();
+
+    internal static string LegacyId(string name, string root)
+    {
+        var canonical = name.Trim().ToLowerInvariant() + "\n" + Path.GetFullPath(Environment.ExpandEnvironmentVariables(root)).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return "legacy-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant()[..24];
+    }
+
     private static Dictionary<string, ProjectDefinition> Build(IEnumerable<ProjectOptions> projects)
-        => projects.Select(p => new ProjectDefinition(p.Name, Path.GetFullPath(Environment.ExpandEnvironmentVariables(p.Root)), p.Read, p.Write, p.Shell))
-            .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+        => projects.Select(p =>
+        {
+            var root = Path.GetFullPath(Environment.ExpandEnvironmentVariables(p.Root));
+            return new ProjectDefinition(GetStableId(p), p.Name, root, p.Read, p.Write, p.Shell, Directory.Exists(root));
+        }).ToDictionary(p => p.Name, PathComparer);
 
     private static void EnsureNoSymlinkEscape(string root, string candidate)
     {
@@ -57,9 +77,12 @@ public sealed class ProjectRegistry(IOptionsMonitor<MateOptions> options)
 
     private static bool IsWithin(string root, string path)
     {
-        root = Path.GetFullPath(root);
+        root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         path = Path.GetFullPath(path);
-        var prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
-        return path.Equals(root, StringComparison.Ordinal) || path.StartsWith(prefix, StringComparison.Ordinal);
+        var prefix = root + Path.DirectorySeparatorChar;
+        return path.Equals(root, PathComparison) || path.StartsWith(prefix, PathComparison);
     }
+
+    private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 }

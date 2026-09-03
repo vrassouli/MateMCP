@@ -39,6 +39,7 @@ public sealed class RelayOptions
 
 public sealed class ProjectOptions
 {
+    public string? Id { get; set; }
     public required string Name { get; set; }
     public required string Root { get; set; }
     public bool Read { get; set; } = true;
