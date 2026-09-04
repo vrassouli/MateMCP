@@ -30,6 +30,20 @@
         }
     </div>
     <div class="muted">This reflects live Agent/MCP work without exposing prompts, command arguments, credentials, or other request contents.</div>
+    @if (PowerStatus is not null)
+    {
+        <div class="row update-toggle-row">
+            <label class="update-toggle">
+                <input type="checkbox" checked="@PowerStatus.PreventSleepWhileInUse" @onchange="SetPreventSleepAsync" disabled="@(!PowerStatus.Supported || ChangingPower)" />
+                <span>Prevent Sleep While In Use</span>
+            </label>
+            <div class="muted">@PowerStatus.Message</div>
+            @if (!string.IsNullOrWhiteSpace(PowerStatus.LastError))
+            {
+                <div class="error">@PowerStatus.LastError</div>
+            }
+        </div>
+    }
 </div>
 
 <div class="panel">
@@ -125,19 +139,23 @@
     private DesktopBackgroundUpdateStatus? BackgroundUpdate { get; set; }
     private AgentCompatibilityStatus? CompatibilityStatus { get; set; }
     private AgentActivityStatus? ActivityStatus { get; set; }
+    private AgentPowerStatus? PowerStatus { get; set; }
     private DesktopUpdateProgress? UpdateProgress { get; set; }
     private string? Error { get; set; }
     private bool Checking { get; set; }
     private bool Updating { get; set; }
     private bool RestartingAgent { get; set; }
+    private bool ChangingPower { get; set; }
     private bool AutoUpdateEnabled { get; set; }
 
-    private string ActivityLabel => ActivityStatus switch
-    {
-        { InUse: true } => "In use",
-        not null => "Idle",
-        _ => "Unavailable"
-    };
+    private string ActivityLabel => PowerStatus is { SleepPrevented: true }
+        ? "In use · Sleep prevented"
+        : ActivityStatus switch
+        {
+            { InUse: true } => "In use",
+            not null => "Idle",
+            _ => "Unavailable"
+        };
 
     private string StatusText => Updating
         ? UpdateProgress?.Message ?? "Preparing update..."
@@ -176,10 +194,42 @@
         {
             ActivityStatus = (await Agent.GetStatusAsync(_cts.Token))?.Activity;
         }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { return; }
         catch
         {
             ActivityStatus = null;
+        }
+
+        try
+        {
+            PowerStatus = await Agent.GetPowerStatusAsync(_cts.Token);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch
+        {
+            PowerStatus = null;
+        }
+    }
+
+    private async Task SetPreventSleepAsync(ChangeEventArgs args)
+    {
+        if (ChangingPower) return;
+        var requested = args.Value is bool value && value;
+        var previous = PowerStatus;
+        ChangingPower = true;
+        try
+        {
+            PowerStatus = await Agent.SetPreventSleepWhileInUseAsync(requested, _cts.Token);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            PowerStatus = previous;
+            Error = $"Could not change Prevent Sleep While In Use: {ex.Message}";
+        }
+        finally
+        {
+            ChangingPower = false;
         }
     }
 
