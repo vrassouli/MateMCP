@@ -1,27 +1,42 @@
 namespace MateMCP.Agent.Desktop;
 
 /// <summary>
-/// Prevents a Desktop update handoff from racing with long-running Agent work.
-/// Normal operations take a lease; the updater can begin a drain only when no
-/// leased work is active. Once draining starts, new leased work is rejected.
+/// Tracks active Agent work and prevents a Desktop update handoff from racing
+/// with running operations. Normal operations take a lease; the updater can
+/// begin a drain only when no leased work is active. Once draining starts,
+/// new leased work is rejected.
 /// </summary>
 public sealed class AgentActivityGate
 {
     private int _active;
     private int _draining;
+    private long _activeSinceUnixMilliseconds;
 
     public int ActiveCount => Volatile.Read(ref _active);
+    public bool IsActive => ActiveCount > 0;
     public bool IsDraining => Volatile.Read(ref _draining) != 0;
+
+    public DateTimeOffset? ActiveSince
+    {
+        get
+        {
+            var value = Volatile.Read(ref _activeSinceUnixMilliseconds);
+            return value <= 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(value);
+        }
+    }
 
     public bool TryEnter(out IDisposable? lease)
     {
         lease = null;
         if (IsDraining) return false;
 
-        Interlocked.Increment(ref _active);
+        var active = Interlocked.Increment(ref _active);
+        if (active == 1)
+            Interlocked.Exchange(ref _activeSinceUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
         if (IsDraining)
         {
-            Interlocked.Decrement(ref _active);
+            Exit();
             return false;
         }
 
@@ -43,6 +58,12 @@ public sealed class AgentActivityGate
 
     public void CancelDrain() => Volatile.Write(ref _draining, 0);
 
+    private void Exit()
+    {
+        if (Interlocked.Decrement(ref _active) == 0)
+            Interlocked.Exchange(ref _activeSinceUnixMilliseconds, 0);
+    }
+
     private sealed class ActivityLease(AgentActivityGate owner) : IDisposable
     {
         private AgentActivityGate? _owner = owner;
@@ -50,8 +71,7 @@ public sealed class AgentActivityGate
         public void Dispose()
         {
             var current = Interlocked.Exchange(ref _owner, null);
-            if (current is not null)
-                Interlocked.Decrement(ref current._active);
+            current?.Exit();
         }
     }
 }
