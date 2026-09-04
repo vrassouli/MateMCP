@@ -1,5 +1,6 @@
 @inject AgentApiClient Api
 @inject ILogger<SkillsMemoryPanel> Logger
+@inject IJSRuntime JS
 
 <div class="grid">
     <div class="panel">
@@ -48,6 +49,8 @@
                 }
             </select>
             <select @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
+            <select @bind="FilterArchived"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All states</option></select>
+            <select @bind="SortBy"><option value="updated-desc">Recently updated</option><option value="updated-asc">Oldest updated</option><option value="title">Title</option><option value="created-desc">Recently created</option></select>
             <input @bind="FilterText" placeholder="Search" />
             <Button Text="Search" OnClick="LoadAsync" />
         </div>
@@ -55,19 +58,25 @@
         {
             <div class="muted" style="margin-top:12px">Loading…</div>
         }
-        else if (Items.Count == 0)
+        else if (!VisibleItems.Any())
         {
-            <div class="muted" style="margin-top:12px">No matching items.</div>
+            <div class="muted" style="margin-top:12px">No matching items. Use the form on the left to add one.</div>
         }
-        @foreach (var item in Items)
+        @foreach (var item in VisibleItems)
         {
             <div class="row" @key="item.Id">
                 <strong>@item.Title</strong>
-                <div class="muted">@item.Type · @item.Scope@(item.Project is null ? "" : $":{ProjectLabel(item.Project)}") · created by: @item.Source · updated by: @item.UpdatedBy · @(item.Enabled ? "enabled" : "disabled")</div>
+                <div class="muted">@item.Type · @item.Scope@(item.Project is null ? "" : $":{ProjectLabel(item.Project)}") · source: @item.Source · last modified by: @item.UpdatedBy · @(item.Archived ? "archived" : item.Enabled ? "enabled" : "disabled")</div>
+                <div class="muted">Created @FormatTime(item.CreatedAt) · Updated @FormatTime(item.UpdatedAt)</div>
                 @if (item.Tags is { Count: > 0 }) { <div class="muted">@string.Join(", ", item.Tags)</div> }
                 @if (!string.IsNullOrWhiteSpace(item.Description)) { <div>@item.Description</div> }
                 <div style="white-space:pre-wrap">@item.Content</div>
-                <div class="actions"><Button Text="Edit" OnClick="() => Edit(item)" /><Button Text="Delete" OnClick="() => DeleteAsync(item.Id)" /></div>
+                <div class="actions">
+                    <Button Text="Edit" OnClick="() => Edit(item)" />
+                    <Button Text="@(item.Enabled ? "Disable" : "Enable")" OnClick="() => ToggleEnabledAsync(item)" />
+                    <Button Text="@(item.Archived ? "Unarchive" : "Archive")" OnClick="() => ToggleArchiveAsync(item)" />
+                    <Button Text="Delete" OnClick="() => DeleteAsync(item)" />
+                </div>
             </div>
         }
     </div>
@@ -87,15 +96,39 @@
     private string Description { get; set; } = "";
     private string Content { get; set; } = "";
     private bool Enabled { get; set; } = true;
+    private bool Archived { get; set; }
     private string FilterScope { get; set; } = "";
     private string FilterProject { get; set; } = "";
     private string FilterType { get; set; } = "";
+    private string FilterArchived { get; set; } = "active";
+    private string SortBy { get; set; } = "updated-desc";
     private string FilterText { get; set; } = "";
     private string? Message { get; set; }
     private string? ErrorMessage { get; set; }
     private bool IsLoading { get; set; }
     private bool Initialized { get; set; }
     private string? AppliedProjectContext { get; set; }
+
+    private IEnumerable<SkillMemoryItem> VisibleItems
+    {
+        get
+        {
+            IEnumerable<SkillMemoryItem> query = Items;
+            query = FilterArchived switch
+            {
+                "archived" => query.Where(x => x.Archived),
+                "all" => query,
+                _ => query.Where(x => !x.Archived)
+            };
+            return SortBy switch
+            {
+                "updated-asc" => query.OrderBy(x => x.UpdatedAt),
+                "title" => query.OrderBy(x => x.Title, StringComparer.OrdinalIgnoreCase),
+                "created-desc" => query.OrderByDescending(x => x.CreatedAt),
+                _ => query.OrderByDescending(x => x.UpdatedAt)
+            };
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -175,7 +208,7 @@
         {
             var tags = Tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             var edit = new SkillMemoryEdit(Title.Trim(), Type, Scope, Scope == "project" ? Project : null, tags,
-                string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled);
+                string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled, Archived);
             var wasCreating = EditingId is null;
             await Api.SaveSkillMemoryAsync(EditingId, edit);
             CancelEdit();
@@ -192,7 +225,34 @@
     private void Edit(SkillMemoryItem item)
     {
         EditingId = item.Id; Title = item.Title; Type = item.Type; Scope = item.Scope; Project = ResolveProjectReference(item.Project);
-        Tags = string.Join(", ", item.Tags ?? []); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Message = null; ErrorMessage = null;
+        Tags = string.Join(", ", item.Tags ?? []); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Archived = item.Archived; Message = null; ErrorMessage = null;
+    }
+
+    private async Task ToggleEnabledAsync(SkillMemoryItem item)
+    {
+        await UpdateStateAsync(item, !item.Enabled, item.Archived, item.Enabled ? "Item disabled." : "Item enabled.");
+    }
+
+    private async Task ToggleArchiveAsync(SkillMemoryItem item)
+    {
+        await UpdateStateAsync(item, item.Enabled, !item.Archived, item.Archived ? "Item unarchived." : "Item archived.");
+    }
+
+    private async Task UpdateStateAsync(SkillMemoryItem item, bool enabled, bool archived, string message)
+    {
+        ErrorMessage = null;
+        try
+        {
+            var edit = new SkillMemoryEdit(item.Title, item.Type, item.Scope, item.Project, item.Tags, item.Description, item.Content, "user", enabled, archived);
+            await Api.SaveSkillMemoryAsync(item.Id, edit);
+            Message = message;
+            await LoadAsync();
+        }
+        catch (Exception ex) when (IsRecoverableApiFailure(ex))
+        {
+            ErrorMessage = BuildApiErrorMessage(ex, "update");
+            Logger.LogError(ex, "Failed to update Skills & Memory item {SkillMemoryId} state.", item.Id);
+        }
     }
 
     private string ResolveProjectReference(string? reference)
@@ -210,9 +270,11 @@
         return project?.Name ?? reference;
     }
 
+    private static string FormatTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
     private void CancelEdit()
     {
-        EditingId = null; Title = ""; Type = "memory"; Scope = "global"; Project = ""; Tags = ""; Description = ""; Content = ""; Enabled = true;
+        EditingId = null; Title = ""; Type = "memory"; Scope = "global"; Project = ""; Tags = ""; Description = ""; Content = ""; Enabled = true; Archived = false;
         if (!string.IsNullOrWhiteSpace(ProjectContext))
         {
             Scope = "project";
@@ -220,20 +282,22 @@
         }
     }
 
-    private async Task DeleteAsync(string id)
+    private async Task DeleteAsync(SkillMemoryItem item)
     {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete '{item.Title}' permanently? This cannot be undone.")) return;
+
         ErrorMessage = null;
         try
         {
-            await Api.DeleteSkillMemoryAsync(id);
-            if (EditingId == id) CancelEdit();
+            await Api.DeleteSkillMemoryAsync(item.Id);
+            if (EditingId == item.Id) CancelEdit();
             Message = "Item deleted.";
             await LoadAsync();
         }
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
             ErrorMessage = BuildApiErrorMessage(ex, "delete");
-            Logger.LogError(ex, "Failed to delete Skills & Memory item {SkillMemoryId} through the local Agent API.", id);
+            Logger.LogError(ex, "Failed to delete Skills & Memory item {SkillMemoryId} through the local Agent API.", item.Id);
         }
     }
 

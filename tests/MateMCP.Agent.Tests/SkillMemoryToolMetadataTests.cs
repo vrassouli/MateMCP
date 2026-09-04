@@ -49,9 +49,14 @@ public sealed class SkillMemoryToolMetadataTests
         Assert.Contains("Global", panel, StringComparison.Ordinal);
         Assert.Contains("Project", panel, StringComparison.Ordinal);
         Assert.Contains("Enabled", panel, StringComparison.Ordinal);
-        Assert.Contains("created by:", panel, StringComparison.Ordinal);
-        Assert.Contains("updated by:", panel, StringComparison.Ordinal);
+        Assert.Contains("source:", panel, StringComparison.Ordinal);
+        Assert.Contains("last modified by:", panel, StringComparison.Ordinal);
+        Assert.Contains("Created @FormatTime", panel, StringComparison.Ordinal);
+        Assert.Contains("Archive", panel, StringComparison.Ordinal);
+        Assert.Contains("Unarchive", panel, StringComparison.Ordinal);
+        Assert.Contains("Disable", panel, StringComparison.Ordinal);
         Assert.Contains("Delete", panel, StringComparison.Ordinal);
+        Assert.Contains("confirm", panel, StringComparison.Ordinal);
         Assert.Contains("Secret Manager", panel, StringComparison.Ordinal);
     }
 

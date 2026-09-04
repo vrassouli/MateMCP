@@ -16,7 +16,8 @@ public sealed record SkillMemoryItem(
     string UpdatedBy,
     bool Enabled,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    bool Archived = false);
 
 public sealed record SkillMemoryUpdate(
     string Title,
@@ -27,7 +28,8 @@ public sealed record SkillMemoryUpdate(
     string? Description,
     string Content,
     string Source = "user",
-    bool Enabled = true);
+    bool Enabled = true,
+    bool Archived = false);
 
 public sealed class SkillMemoryStore
 {
@@ -73,7 +75,7 @@ public sealed class SkillMemoryStore
     {
         var configuredProject = string.IsNullOrWhiteSpace(project) ? null : projects.Get(project.Trim());
         var items = await LoadAsync(cancellationToken);
-        return items.Where(x => x.Enabled && (string.Equals(x.Scope, "global", StringComparison.OrdinalIgnoreCase)
+        return items.Where(x => x.Enabled && !x.Archived && (string.Equals(x.Scope, "global", StringComparison.OrdinalIgnoreCase)
             || (configuredProject is not null && string.Equals(x.Scope, "project", StringComparison.OrdinalIgnoreCase)
                 && MatchesProject(x.Project, configuredProject))))
             .OrderBy(x => string.Equals(x.Scope, "project", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
@@ -120,7 +122,7 @@ public sealed class SkillMemoryStore
             if (id is null)
             {
                 var item = new SkillMemoryItem(Guid.NewGuid().ToString("N"), update.Title.Trim(), update.Type.Trim().ToLowerInvariant(), scope,
-                    project, tags, Clean(update.Description), update.Content.Trim(), source, source, update.Enabled, now, now);
+                    project, tags, Clean(update.Description), update.Content.Trim(), source, source, update.Enabled, now, now, update.Archived);
                 items.Add(item);
                 await PersistUnsafeAsync(items, cancellationToken);
                 return item;
@@ -132,7 +134,8 @@ public sealed class SkillMemoryStore
             var updated = existing with
             {
                 Title = update.Title.Trim(), Type = update.Type.Trim().ToLowerInvariant(), Scope = scope, Project = project, Tags = tags,
-                Description = Clean(update.Description), Content = update.Content.Trim(), UpdatedBy = source, Enabled = update.Enabled, UpdatedAt = now
+                Description = Clean(update.Description), Content = update.Content.Trim(), UpdatedBy = source, Enabled = update.Enabled,
+                Archived = update.Archived, UpdatedAt = now
             };
             items[index] = updated;
             await PersistUnsafeAsync(items, cancellationToken);
