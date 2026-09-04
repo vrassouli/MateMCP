@@ -5,6 +5,34 @@
 @inject AgentProcessController AgentProcess
 
 <div class="panel">
+    <strong>Agent activity</strong>
+    <div class="row" aria-live="polite">
+        <span class="muted">Current state</span>
+        <div><strong>@ActivityLabel</strong></div>
+        @if (ActivityStatus is { InUse: true })
+        {
+            @if (ActivityStatus.ActiveSince is { } activeSince)
+            {
+                <div class="muted">Active since @activeSince.LocalDateTime</div>
+            }
+            @if (ActivityStatus.InteractiveSessions > 0)
+            {
+                <div class="muted">Interactive shell sessions: @ActivityStatus.InteractiveSessions</div>
+            }
+        }
+        else if (ActivityStatus is null)
+        {
+            <div class="muted">Activity state is available after the updated Agent is running.</div>
+        }
+        else
+        {
+            <div class="muted">No active MCP work is currently running.</div>
+        }
+    </div>
+    <div class="muted">This reflects live Agent/MCP work without exposing prompts, command arguments, credentials, or other request contents.</div>
+</div>
+
+<div class="panel">
     <strong>Desktop updates</strong>
     <div class="row">
         <span class="muted">Status</span>
@@ -92,15 +120,24 @@
 @code {
     private readonly CancellationTokenSource _cts = new();
     private Task? _worker;
+    private Task? _activityWorker;
     private DesktopUpdateStatus? UpdateStatus { get; set; }
     private DesktopBackgroundUpdateStatus? BackgroundUpdate { get; set; }
     private AgentCompatibilityStatus? CompatibilityStatus { get; set; }
+    private AgentActivityStatus? ActivityStatus { get; set; }
     private DesktopUpdateProgress? UpdateProgress { get; set; }
     private string? Error { get; set; }
     private bool Checking { get; set; }
     private bool Updating { get; set; }
     private bool RestartingAgent { get; set; }
     private bool AutoUpdateEnabled { get; set; }
+
+    private string ActivityLabel => ActivityStatus switch
+    {
+        { InUse: true } => "In use",
+        not null => "Idle",
+        _ => "Unavailable"
+    };
 
     private string StatusText => Updating
         ? UpdateProgress?.Message ?? "Preparing update..."
@@ -113,6 +150,7 @@
     protected override async Task OnInitializedAsync()
     {
         await CheckCompatibilityAsync();
+        await RefreshActivityAsync();
         try
         {
             BackgroundUpdate = await Agent.GetDesktopUpdateStatusAsync(_cts.Token);
@@ -123,12 +161,26 @@
             Error = $"Could not read background updater status: {ex.Message}";
         }
 
+        _activityWorker = RunActivityLoopAsync(_cts.Token);
         _worker = RunUpdateLoopAsync(_cts.Token);
     }
 
     private async Task CheckCompatibilityAsync()
     {
         CompatibilityStatus = await Compatibility.CheckAsync(_cts.Token);
+    }
+
+    private async Task RefreshActivityAsync()
+    {
+        try
+        {
+            ActivityStatus = (await Agent.GetStatusAsync(_cts.Token))?.Activity;
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch
+        {
+            ActivityStatus = null;
+        }
     }
 
     private async Task RestartAgentAsync()
@@ -141,6 +193,7 @@
             await AgentProcess.RestartAsync(_cts.Token);
             await Task.Delay(750, _cts.Token);
             await CheckCompatibilityAsync();
+            await RefreshActivityAsync();
             if (CompatibilityStatus is { Compatible: false })
                 Error = "Agent restarted, but it is still incompatible with this Companion. Use Update now or repair/reinstall the current Desktop package.";
         }
@@ -166,6 +219,7 @@
             BackgroundUpdate = await Agent.GetDesktopUpdateStatusAsync(_cts.Token);
             AutoUpdateEnabled = BackgroundUpdate?.AutoUpdateEnabled ?? AutoUpdateEnabled;
             await CheckCompatibilityAsync();
+            await RefreshActivityAsync();
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception ex)
@@ -229,6 +283,17 @@
         }
     }
 
+    private async Task RunActivityLoopAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+                await InvokeAsync(async () => { await RefreshActivityAsync(); StateHasChanged(); });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
     private async Task RunUpdateLoopAsync(CancellationToken ct)
     {
         try
@@ -244,6 +309,10 @@
     public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
+        if (_activityWorker is not null)
+        {
+            try { await _activityWorker; } catch (OperationCanceledException) { }
+        }
         if (_worker is not null)
         {
             try { await _worker; } catch (OperationCanceledException) { }
