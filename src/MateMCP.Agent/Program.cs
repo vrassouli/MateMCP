@@ -53,9 +53,13 @@ builder.Services.AddSingleton<LocalNotificationService>();
 builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddSingleton<IApprovalService>(sp => sp.GetRequiredService<ApprovalService>());
 builder.Services.AddSingleton<AgentActivityGate>();
+builder.Services.AddSingleton<AgentPowerSettingsStore>();
+builder.Services.AddSingleton<IPowerInhibitor, NativePowerInhibitor>();
+builder.Services.AddSingleton<AgentPowerInhibitionService>();
 builder.Services.AddSingleton<DesktopUpdateSettingsStore>();
 builder.Services.AddSingleton<BackgroundDesktopUpdateService>();
 builder.Services.AddHttpClient();
+builder.Services.AddHostedService<AgentPowerInhibitionService>(sp => sp.GetRequiredService<AgentPowerInhibitionService>());
 builder.Services.AddHostedService<BackgroundDesktopUpdateService>(sp => sp.GetRequiredService<BackgroundDesktopUpdateService>());
 builder.Services.AddHostedService<EnrollmentService>();
 builder.Services.AddHostedService<RelayConnector>();
@@ -96,7 +100,7 @@ app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOption
         version = agentVersion,
         endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp",
         management = $"http://127.0.0.1:{current.Port}/ui",
-        managementApi = new { revision = 2, capabilities = new[] { "projects-stable-id", "skills-memory", "desktop-update", "agent-logs" } },
+        managementApi = new { revision = 3, capabilities = new[] { "projects-stable-id", "skills-memory", "desktop-update", "agent-logs", "power-inhibition" } },
         configuration = userConfigPath,
         projects = projects.All.Select(p => p.Name).ToArray(),
         shellApproval = current.RequireShellApproval,
@@ -166,6 +170,18 @@ app.MapPut("/desktop-update/auto", async (DesktopAutoUpdateUpdate update, HttpCo
     await settings.SetAutoUpdateEnabledAsync(update.Enabled, ct);
     updates.RequestCheck();
     return Results.Ok(await updates.GetStatusAsync(ct));
+});
+app.MapGet("/power", async (HttpContext context, AgentPowerInhibitionService power, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return Results.Ok(await power.GetStatusAsync(ct));
+});
+app.MapPut("/power/prevent-sleep", async (AgentPowerPreferenceUpdate update, HttpContext context, AgentPowerSettingsStore settings, AgentPowerInhibitionService power, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    await settings.SetPreventSleepWhileInUseAsync(update.Enabled, ct);
+    power.RequestReconcile();
+    return Results.Ok(await power.GetStatusAsync(ct));
 });
 
 app.MapGet("/skills-memory", async (HttpContext context, SkillMemoryStore store, string? scope, string? project, string? type, string? text, bool? includeDisabled, CancellationToken ct) =>
@@ -360,3 +376,4 @@ public sealed record SecretUpdate(string Name, string Value, string? Description
     IReadOnlyCollection<string>? AllowedTools = null);
 public sealed record ShellInput(string? Text, bool Submit = true);
 public sealed record DesktopAutoUpdateUpdate(bool Enabled);
+public sealed record AgentPowerPreferenceUpdate(bool Enabled);
