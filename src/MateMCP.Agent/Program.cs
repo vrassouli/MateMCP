@@ -64,10 +64,29 @@ builder.Services.AddMcpServer().WithHttpTransport(o => o.SessionMode = HttpServe
 
 var app = builder.Build();
 app.UseRateLimiter(); app.UseMiddleware<BearerTokenMiddleware>();
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/mcp"))
+    {
+        await next();
+        return;
+    }
+
+    var activity = context.RequestServices.GetRequiredService<AgentActivityGate>();
+    if (!activity.TryEnter(out var lease) || lease is null)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        await context.Response.WriteAsJsonAsync(new { error = "MateMCP Agent is preparing a verified Desktop update. Retry after the Agent restarts." });
+        return;
+    }
+
+    using (lease)
+        await next();
+});
 app.MapGet("/", (HttpContext context) => IsLoopback(context) ? Results.Redirect("/ui", permanent: false) : Results.NotFound());
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP", status = "ok" }));
 app.MapGet("/ui", (HttpContext context) => IsLoopback(context) ? Results.Content(AgentUi.Html, "text/html; charset=utf-8") : Results.NotFound());
-app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions, ProjectRegistry projects, InteractiveShellSessionManager sessions) =>
+app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions, ProjectRegistry projects, InteractiveShellSessionManager sessions, AgentActivityGate activity) =>
 {
     if (!IsLoopback(context)) return Results.NotFound(); var current = currentOptions.CurrentValue;
     var agentVersion = typeof(ProjectRegistry).Assembly.GetName().Version?.ToString() ?? "unknown";
@@ -82,6 +101,13 @@ app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOption
         projects = projects.All.Select(p => p.Name).ToArray(),
         shellApproval = current.RequireShellApproval,
         interactiveSessions = sessions.ActiveSessionCount,
+        activity = new
+        {
+            inUse = activity.IsActive || sessions.ActiveSessionCount > 0,
+            activeLeases = activity.ActiveCount,
+            activeSince = activity.ActiveSince,
+            interactiveSessions = sessions.ActiveSessionCount
+        },
         mcpTools = new { count = McpToolCatalog.Names.Count, revision = McpToolCatalog.Revision, names = McpToolCatalog.Names },
         relay = new { current.Relay.Enabled, current.Relay.Url, current.Relay.DeviceId, current.Relay.EnrollmentSuppressed },
         credentials = OperatingSystem.IsMacOS() ? "macOS Keychain" : OperatingSystem.IsWindows() ? "Windows Credential Manager" : "platform credential store"
