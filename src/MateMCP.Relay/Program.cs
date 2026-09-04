@@ -49,12 +49,18 @@ app.Use(async (context, next) =>
         if (context.Request.Path.StartsWithSegments("/mcp") || context.Request.Path.StartsWithSegments("/.well-known"))
         {
             logger.LogInformation(
-                "Remote MCP request {RequestId}: {Method} {Path} -> {StatusCode} in {ElapsedMs:F1} ms",
+                "Remote MCP request {RequestId}: stage={Stage}; {Method} {Path} -> {StatusCode} in {ElapsedMs:F1} ms; accept={Accept}; contentType={ContentType}; protocol={ProtocolVersion}; auth={HasAuthorization}; redirect={Redirect}",
                 correlationId,
+                McpRequestDiagnostics.Stage(context.Request.Path),
                 context.Request.Method,
                 context.Request.Path,
                 context.Response.StatusCode,
-                Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                McpRequestDiagnostics.SafeHeader(context.Request.Headers.Accept.ToString()),
+                McpRequestDiagnostics.SafeHeader(context.Request.ContentType),
+                McpRequestDiagnostics.SafeHeader(context.Request.Headers["MCP-Protocol-Version"].ToString()),
+                context.Request.Headers.ContainsKey("Authorization"),
+                McpRequestDiagnostics.SafeRedirect(context.Response.Headers.Location.ToString()));
         }
     }
 });
@@ -122,6 +128,12 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
 
 app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
 {
+    if (HttpMethods.IsOptions(context.Request.Method))
+    {
+        context.Response.Headers["Allow"] = "GET, HEAD, POST, DELETE, PUT, PATCH, OPTIONS";
+        return Results.NoContent();
+    }
+
     var principal = await AuthenticateOAuthAsync(context);
     var requiredResource = $"{publicBaseUrl}/mcp/{deviceId}";
     if (principal is null || principal.FindFirstValue("agent_id") != deviceId || !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
@@ -143,12 +155,6 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
             deviceId);
         context.Response.Headers.WWWAuthenticate = OAuthDiscovery.BearerChallenge(publicBaseUrl, deviceId, options.OAuthScopes);
         return Results.Unauthorized();
-    }
-
-    if (HttpMethods.IsOptions(context.Request.Method))
-    {
-        context.Response.Headers["Allow"] = "GET, HEAD, POST, DELETE, PUT, PATCH, OPTIONS";
-        return Results.NoContent();
     }
 
     if (!registry.TryGet(deviceId, out var agent)) return Results.NotFound(new { error = "device_offline" });
