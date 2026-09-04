@@ -176,7 +176,8 @@ public sealed class AgentApiClient : IDisposable
 }
 
 public sealed record AgentStatus(string Service, string Endpoint, string Management, string Configuration, IReadOnlyList<string> Projects,
-    bool ShellApproval, int InteractiveSessions, RelayStatus Relay, string Credentials);
+    bool ShellApproval, int InteractiveSessions, RelayStatus Relay, string Credentials, AgentActivityStatus? Activity = null);
+public sealed record AgentActivityStatus(bool InUse, int ActiveLeases, DateTimeOffset? ActiveSince, int InteractiveSessions);
 public sealed record CompanionProjectInfo(string Id, string Name, string Root, bool Read, bool Write, bool Shell, bool Available);
 
 public sealed record DeviceManagementStatus(bool Enrolled, bool EnrollmentSuppressed, string? CurrentDeviceId,
