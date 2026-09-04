@@ -54,6 +54,16 @@ public sealed class AgentApiClient : IDisposable
         return await response.Content.ReadFromJsonAsync<DesktopBackgroundUpdateStatus>(Json, ct);
     }
 
+    public async Task<AgentPowerStatus?> GetPowerStatusAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<AgentPowerStatus>("power", Json, ct);
+
+    public async Task<AgentPowerStatus?> SetPreventSleepWhileInUseAsync(bool enabled, CancellationToken ct = default)
+    {
+        using var response = await _http.PutAsJsonAsync("power/prevent-sleep", new { Enabled = enabled }, Json, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<AgentPowerStatus>(Json, ct);
+    }
+
     public async Task<IReadOnlyList<PendingApproval>> GetApprovalsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<PendingApproval>>("approvals", Json, ct) ?? [];
 
@@ -178,6 +188,7 @@ public sealed class AgentApiClient : IDisposable
 public sealed record AgentStatus(string Service, string Endpoint, string Management, string Configuration, IReadOnlyList<string> Projects,
     bool ShellApproval, int InteractiveSessions, RelayStatus Relay, string Credentials, AgentActivityStatus? Activity = null);
 public sealed record AgentActivityStatus(bool InUse, int ActiveLeases, DateTimeOffset? ActiveSince, int InteractiveSessions);
+public sealed record AgentPowerStatus(bool PreventSleepWhileInUse, bool Supported, bool InUse, bool SleepPrevented, string Message, string? LastError = null);
 public sealed record CompanionProjectInfo(string Id, string Name, string Root, bool Read, bool Write, bool Shell, bool Available);
 
 public sealed record DeviceManagementStatus(bool Enrolled, bool EnrollmentSuppressed, string? CurrentDeviceId,
