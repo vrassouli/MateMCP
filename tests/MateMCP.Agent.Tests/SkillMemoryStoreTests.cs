@@ -66,6 +66,27 @@ public sealed class SkillMemoryStoreTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => store.CreateAsync(new("Secret", "memory", "global", null, null, null, "password=hunter2", "ai")));
     }
 
+    [Fact]
+    public async Task Archived_items_remain_visible_to_management_but_are_not_applicable()
+    {
+        Directory.CreateDirectory(_root);
+        var projectRoot = Path.Combine(_root, "project");
+        Directory.CreateDirectory(projectRoot);
+        var store = CreateStore(projectRoot);
+
+        var item = await store.CreateAsync(new("Archived rule", "rule", "global", null, ["old"], null, "Do not apply this anymore.", "user"));
+        var archived = await store.UpdateAsync(item.Id,
+            new("Archived rule", "rule", "global", null, ["old"], null, "Do not apply this anymore.", "user", true, true));
+
+        Assert.True(archived.Archived);
+        Assert.Single(await store.SearchAsync(includeDisabled: true));
+        Assert.Empty(await store.ApplicableAsync(null));
+
+        var reopened = CreateStore(projectRoot);
+        var persisted = await reopened.GetAsync(item.Id);
+        Assert.True(persisted.Archived);
+    }
+
     private SkillMemoryStore CreateStore(string projectRoot)
     {
         var options = new MateOptions { Projects = [new ProjectOptions { Name = "Demo", Root = projectRoot, Read = true, Write = true, Shell = true }] };
