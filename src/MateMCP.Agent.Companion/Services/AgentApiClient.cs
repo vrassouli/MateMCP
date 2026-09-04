@@ -193,8 +193,8 @@ public sealed record ShellSessionSnapshot(string SessionId, int ProcessId, strin
 public sealed record AuditEntry(DateTimeOffset Timestamp, string Capability, string Target, string Result, string? Credential, string? Tool);
 public sealed record AuditCleanupResult(int Deleted);
 
-public sealed record SkillMemoryItem(string Id, string Title, string Type, string Scope, string? Project, IReadOnlyList<string> Tags, string? Description, string Content, string Source, string UpdatedBy, bool Enabled, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
-public sealed record SkillMemoryEdit(string Title, string Type, string Scope, string? Project, IReadOnlyList<string>? Tags, string? Description, string Content, string Source = "user", bool Enabled = true);
+public sealed record SkillMemoryItem(string Id, string Title, string Type, string Scope, string? Project, IReadOnlyList<string> Tags, string? Description, string Content, string Source, string UpdatedBy, bool Enabled, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool Archived = false);
+public sealed record SkillMemoryEdit(string Title, string Type, string Scope, string? Project, IReadOnlyList<string>? Tags, string? Description, string Content, string Source = "user", bool Enabled = true, bool Archived = false);
 
 public sealed record AgentLogEntry(long Id, DateTimeOffset Timestamp, int Level, string Category, string Message);
 public sealed record AgentLogBatch(IReadOnlyList<AgentLogEntry> Entries, long Cursor);
