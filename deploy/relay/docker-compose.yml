@@ -1,10 +1,14 @@
 services:
   relay:
     image: ${MATEMCP_RELAY_IMAGE:-vrassouli/matemcp-relay:latest}
+    # Intentionally fixed to one container: AgentRegistry ownership is process-local.
+    # Do not scale Relay replicas until distributed Agent connection routing exists.
     container_name: matemcp-relay
     restart: unless-stopped
     environment:
       ASPNETCORE_URLS: http://+:8080
+      # Optional stable diagnostic identity; blank falls back to a unique process identity.
+      MATEMCP_RELAY_INSTANCE_ID: ${MATEMCP_RELAY_INSTANCE_ID:-}
       Relay__PublicBaseUrl: ${MATEMCP_RELAY_PUBLIC_URL:-https://relay.matemcp.com}
       Relay__AuthorizationServerUrl: ${MATEMCP_API_PUBLIC_URL:-https://api.matemcp.com}
       Relay__ControlPlaneUrl: ${MATEMCP_API_INTERNAL_URL:-https://api.matemcp.com}
