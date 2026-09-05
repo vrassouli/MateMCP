@@ -35,6 +35,7 @@ public sealed class RelayOptions
     public string? DeviceId { get; set; }
     public bool EnrollmentSuppressed { get; set; }
     public int MaxMessageBytes { get; set; } = 8 * 1024 * 1024;
+    public int MaxConcurrentRequests { get; set; } = 8;
 }
 
 public sealed class ProjectOptions

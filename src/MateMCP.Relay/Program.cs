@@ -10,6 +10,7 @@ using OpenIddict.Validation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection(RelayOptions.SectionName));
+builder.Services.AddSingleton<RelayInstanceIdentity>();
 builder.Services.AddSingleton<AgentRegistry>();
 builder.Services.AddHttpClient("control-plane", client => client.BaseAddress = new Uri((builder.Configuration["Relay:ControlPlaneUrl"] ?? "https://api.matemcp.com").TrimEnd('/') + "/"));
 
@@ -29,6 +30,16 @@ builder.Services.AddOpenIddict().AddValidation(validation =>
 
 var app = builder.Build();
 var logger = app.Logger;
+var relayInstance = app.Services.GetRequiredService<RelayInstanceIdentity>();
+logger.LogInformation(
+    "MateMCP Relay starting: instance={RelayInstanceId}; processId={ProcessId}; startedAt={StartedAt:O}",
+    relayInstance.InstanceId,
+    Environment.ProcessId,
+    relayInstance.StartedAt);
+logger.LogWarning(
+    "Relay AgentRegistry is process-local; run a single Relay instance unless distributed Agent connection ownership/routing is implemented. instance={RelayInstanceId}",
+    relayInstance.InstanceId);
+
 app.UseWebSockets(new WebSocketOptions
 {
     KeepAliveInterval = TimeSpan.FromSeconds(20),
@@ -39,6 +50,7 @@ app.Use(async (context, next) =>
 {
     var correlationId = context.TraceIdentifier;
     context.Response.Headers["X-MateMCP-Request-Id"] = correlationId;
+    context.Response.Headers["X-MateMCP-Relay-Instance"] = relayInstance.InstanceId;
     var started = Stopwatch.GetTimestamp();
     try
     {
@@ -49,7 +61,7 @@ app.Use(async (context, next) =>
         if (context.Request.Path.StartsWithSegments("/mcp") || context.Request.Path.StartsWithSegments("/.well-known"))
         {
             logger.LogInformation(
-                "Remote MCP request {RequestId}: stage={Stage}; {Method} {Path} -> {StatusCode} in {ElapsedMs:F1} ms; accept={Accept}; contentType={ContentType}; protocol={ProtocolVersion}; auth={HasAuthorization}; redirect={Redirect}",
+                "Remote MCP request {RequestId}: stage={Stage}; {Method} {Path} -> {StatusCode} in {ElapsedMs:F1} ms; accept={Accept}; contentType={ContentType}; protocol={ProtocolVersion}; auth={HasAuthorization}; redirect={Redirect}; relayInstance={RelayInstanceId}",
                 correlationId,
                 McpRequestDiagnostics.Stage(context.Request.Path),
                 context.Request.Method,
@@ -60,12 +72,20 @@ app.Use(async (context, next) =>
                 McpRequestDiagnostics.SafeHeader(context.Request.ContentType),
                 McpRequestDiagnostics.SafeHeader(context.Request.Headers["MCP-Protocol-Version"].ToString()),
                 context.Request.Headers.ContainsKey("Authorization"),
-                McpRequestDiagnostics.SafeRedirect(context.Response.Headers.Location.ToString()));
+                McpRequestDiagnostics.SafeRedirect(context.Response.Headers.Location.ToString()),
+                relayInstance.InstanceId);
         }
     }
 });
 
-app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Relay", status = "ok" }));
+app.MapGet("/health", () => Results.Ok(new
+{
+    service = "MateMCP.Relay",
+    status = "ok",
+    instanceId = relayInstance.InstanceId,
+    processId = Environment.ProcessId,
+    startedAt = relayInstance.StartedAt
+}));
 
 app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
 {
@@ -89,16 +109,30 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
     if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
     var credential = Bearer(context);
     if (credential is null || !await AuthenticateAgentAsync(clients, options, deviceId, credential, context.RequestAborted)) { context.Response.StatusCode = 401; return; }
+
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
-    if (!registry.TryRegister(deviceId, socket, out var connection))
+    var requestedConnectionId = context.Request.Headers["X-MateMCP-Agent-Connection-Id"].ToString();
+    if (!registry.TryRegister(deviceId, socket, requestedConnectionId, context.RequestAborted, out var connection))
     {
         await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "device already connected", context.RequestAborted);
         return;
     }
 
+    logger.LogInformation(
+        "Agent relay WebSocket connected: device={DeviceId}; connection={ConnectionId}; connectedAt={ConnectedAt:O}; socketState={SocketState}; relayInstance={RelayInstanceId}",
+        deviceId,
+        connection.ConnectionId,
+        connection.ConnectedAt,
+        socket.State,
+        relayInstance.InstanceId);
+
     using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
     var heartbeatTask = RunAgentHeartbeatAsync(clients, options, deviceId, credential, heartbeatCts.Token);
     var buffer = new byte[64 * 1024];
+    WebSocketCloseStatus? closeStatus = null;
+    string? closeReason = null;
+    Exception? disconnectException = null;
+
     try
     {
         while (socket.State == WebSocketState.Open && !context.RequestAborted.IsCancellationRequested)
@@ -108,21 +142,78 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
             do
             {
                 result = await socket.ReceiveAsync(buffer, context.RequestAborted);
-                if (result.MessageType == WebSocketMessageType.Close) return;
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    closeStatus = result.CloseStatus;
+                    closeReason = McpRequestDiagnostics.SafeHeader(result.CloseStatusDescription);
+                    break;
+                }
                 ms.Write(buffer, 0, result.Count);
                 if (ms.Length > options.MaxBodyBytes * 2L) throw new InvalidOperationException("Relay response too large.");
             } while (!result.EndOfMessage);
 
+            if (result.MessageType == WebSocketMessageType.Close) break;
+
             var response = JsonSerializer.Deserialize(ms.ToArray(), RelayJsonContext.Default.RelayResponse);
-            if (response is not null) connection.Complete(response);
+            if (response is not null && !connection.Complete(response))
+            {
+                logger.LogInformation(
+                    "Relay received a late/unmatched Agent response: device={DeviceId}; connection={ConnectionId}; relayRequestId={RelayRequestId}; pending={PendingCount}; relayInstance={RelayInstanceId}",
+                    deviceId,
+                    connection.ConnectionId,
+                    response.Id,
+                    connection.PendingRequestCount,
+                    relayInstance.InstanceId);
+            }
         }
+    }
+    catch (OperationCanceledException ex) when (context.RequestAborted.IsCancellationRequested)
+    {
+        disconnectException = ex;
+    }
+    catch (Exception ex)
+    {
+        disconnectException = ex;
+        logger.LogWarning(ex,
+            "Agent relay WebSocket receive loop failed: device={DeviceId}; connection={ConnectionId}; socketState={SocketState}; relayInstance={RelayInstanceId}",
+            deviceId,
+            connection.ConnectionId,
+            socket.State,
+            relayInstance.InstanceId);
     }
     finally
     {
         heartbeatCts.Cancel();
-        await heartbeatTask;
-        if (registry.Remove(deviceId, connection))
-            await MarkAgentOfflineAsync(clients, options, deviceId, DateTimeOffset.UtcNow);
+        try { await heartbeatTask; }
+        catch (OperationCanceledException) when (heartbeatCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex,
+                "Agent heartbeat task ended with an error during disconnect: device={DeviceId}; connection={ConnectionId}",
+                deviceId,
+                connection.ConnectionId);
+        }
+
+        connection.Disconnect();
+        var removedCurrent = registry.Remove(deviceId, connection);
+        var disconnectedAt = DateTimeOffset.UtcNow;
+        logger.LogWarning(
+            "Agent relay WebSocket disconnected: device={DeviceId}; connection={ConnectionId}; connectedAt={ConnectedAt:O}; disconnectedAt={DisconnectedAt:O}; lifetimeMs={LifetimeMs:F0}; socketState={SocketState}; closeStatus={CloseStatus}; closeReason={CloseReason}; exceptionType={ExceptionType}; exceptionMessage={ExceptionMessage}; removedCurrent={RemovedCurrent}; relayInstance={RelayInstanceId}",
+            deviceId,
+            connection.ConnectionId,
+            connection.ConnectedAt,
+            disconnectedAt,
+            (disconnectedAt - connection.ConnectedAt).TotalMilliseconds,
+            socket.State,
+            closeStatus?.ToString() ?? socket.CloseStatus?.ToString() ?? "none",
+            string.IsNullOrWhiteSpace(closeReason) ? McpRequestDiagnostics.SafeHeader(socket.CloseStatusDescription) : closeReason,
+            disconnectException?.GetType().Name ?? "none",
+            disconnectException?.Message ?? "none",
+            removedCurrent,
+            relayInstance.InstanceId);
+
+        if (removedCurrent)
+            await MarkAgentOfflineAsync(clients, options, deviceId, disconnectedAt);
     }
 });
 
@@ -147,17 +238,31 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
                     ? "token_resource_mismatch"
                     : "control_plane_authorization_failed";
         logger.LogWarning(
-            "Remote MCP authentication failed {RequestId}: {Method} {Path}; reason={Reason}; device={DeviceId}",
+            "Remote MCP authentication failed {RequestId}: {Method} {Path}; reason={Reason}; device={DeviceId}; relayInstance={RelayInstanceId}",
             context.TraceIdentifier,
             context.Request.Method,
             context.Request.Path,
             reason,
-            deviceId);
+            deviceId,
+            relayInstance.InstanceId);
         context.Response.Headers.WWWAuthenticate = OAuthDiscovery.BearerChallenge(publicBaseUrl, deviceId, options.OAuthScopes);
         return Results.Unauthorized();
     }
 
-    if (!registry.TryGet(deviceId, out var agent)) return Results.NotFound(new { error = "device_offline" });
+    if (!registry.TryGet(deviceId, out var agent))
+    {
+        var snapshot = registry.Snapshot(deviceId);
+        logger.LogWarning(
+            "Remote MCP device_offline {RequestId}: device={DeviceId}; relayInstance={RelayInstanceId}; registryCount={RegistryCount}; currentConnection={CurrentConnectionId}; currentSocketState={CurrentSocketState}",
+            context.TraceIdentifier,
+            deviceId,
+            relayInstance.InstanceId,
+            snapshot.RegistryCount,
+            snapshot.CurrentConnectionId ?? "none",
+            snapshot.SocketState?.ToString() ?? "none");
+        return Results.NotFound(new { error = "device_offline" });
+    }
+
     if (context.Request.ContentLength > options.MaxBodyBytes) return Results.StatusCode(413);
 
     using var ms = new MemoryStream();
@@ -174,11 +279,44 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
     var request = new RelayRequest(Guid.NewGuid().ToString("N"), context.Request.Method, "/mcp" + context.Request.QueryString, headers, ms.Length == 0 ? null : Convert.ToBase64String(ms.ToArray()));
 
     RelayResponse response;
-    try { response = await agent.SendAsync(request, TimeSpan.FromSeconds(options.RequestTimeoutSeconds), context.RequestAborted); }
+    try
+    {
+        response = await agent.SendAsync(request, TimeSpan.FromSeconds(options.RequestTimeoutSeconds), context.RequestAborted);
+    }
     catch (TimeoutException)
     {
-        logger.LogWarning("Remote MCP upstream timeout {RequestId}: device={DeviceId}", context.TraceIdentifier, deviceId);
+        logger.LogWarning(
+            "Remote MCP upstream timeout {RequestId}: device={DeviceId}; connection={ConnectionId}; relayRequestId={RelayRequestId}; relayInstance={RelayInstanceId}",
+            context.TraceIdentifier,
+            deviceId,
+            agent.ConnectionId,
+            request.Id,
+            relayInstance.InstanceId);
         return Results.StatusCode(504);
+    }
+    catch (WebSocketException ex)
+    {
+        logger.LogWarning(ex,
+            "Remote MCP Agent transport failed {RequestId}: device={DeviceId}; connection={ConnectionId}; relayRequestId={RelayRequestId}; socketState={SocketState}; relayInstance={RelayInstanceId}",
+            context.TraceIdentifier,
+            deviceId,
+            agent.ConnectionId,
+            request.Id,
+            agent.Socket.State,
+            relayInstance.InstanceId);
+        return Results.Json(new { error = "agent_connection_lost" }, statusCode: StatusCodes.Status502BadGateway);
+    }
+    catch (InvalidOperationException ex) when (agent.Socket.State != WebSocketState.Open)
+    {
+        logger.LogWarning(ex,
+            "Remote MCP Agent transport unavailable {RequestId}: device={DeviceId}; connection={ConnectionId}; relayRequestId={RelayRequestId}; socketState={SocketState}; relayInstance={RelayInstanceId}",
+            context.TraceIdentifier,
+            deviceId,
+            agent.ConnectionId,
+            request.Id,
+            agent.Socket.State,
+            relayInstance.InstanceId);
+        return Results.Json(new { error = "agent_connection_lost" }, statusCode: StatusCodes.Status502BadGateway);
     }
 
     context.Response.StatusCode = response.StatusCode;

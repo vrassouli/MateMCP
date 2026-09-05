@@ -12,55 +12,223 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var reconnectAttempt = 0;
+        DateTimeOffset? offlineSince = null;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var current = options.CurrentValue;
             if (!current.Relay.Enabled || string.IsNullOrWhiteSpace(current.Relay.Url) || string.IsNullOrWhiteSpace(current.Relay.DeviceId))
-            { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); continue; }
+            {
+                reconnectAttempt = 0;
+                offlineSince = null;
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                continue;
+            }
+
+            var connectionId = Guid.NewGuid().ToString("N");
+            var attempt = reconnectAttempt + 1;
+            logger.LogInformation(
+                "Relay connect attempt: device={DeviceId}; agentConnection={ConnectionId}; attempt={ReconnectAttempt}; relay={RelayUrl}",
+                current.Relay.DeviceId,
+                connectionId,
+                attempt,
+                current.Relay.Url);
+
             try
             {
-                await RunConnectionAsync(current, stoppingToken);
-                if (!stoppingToken.IsCancellationRequested)
-                    await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+                await RunConnectionAsync(current, connectionId, attempt, offlineSince, () =>
+                {
+                    offlineSince = null;
+                    reconnectAttempt = 0;
+                }, stoppingToken);
+                if (stoppingToken.IsCancellationRequested) break;
+
+                offlineSince ??= DateTimeOffset.UtcNow;
+                reconnectAttempt++;
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-            catch (Exception ex) { logger.LogWarning(ex, "Relay connection lost; reconnecting."); await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                offlineSince ??= DateTimeOffset.UtcNow;
+                reconnectAttempt++;
+                logger.LogWarning(ex,
+                    "Relay connection lost; reconnecting: device={DeviceId}; agentConnection={ConnectionId}; attempt={ReconnectAttempt}; exceptionType={ExceptionType}; exceptionMessage={ExceptionMessage}",
+                    current.Relay.DeviceId,
+                    connectionId,
+                    attempt,
+                    ex.GetType().Name,
+                    ex.Message);
+            }
+
+            if (!stoppingToken.IsCancellationRequested)
+                await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
         }
     }
 
-    private async Task RunConnectionAsync(Configuration.MateOptions current, CancellationToken ct)
+    private async Task RunConnectionAsync(
+        Configuration.MateOptions current,
+        string connectionId,
+        int reconnectAttempt,
+        DateTimeOffset? offlineSince,
+        Action onConnected,
+        CancellationToken ct)
     {
         var relayUrl = current.Relay.Url!;
         var deviceId = current.Relay.DeviceId!;
-        var agentToken = await credentials.GetAsync(deviceId, ct) ?? throw new InvalidOperationException("Agent credential is missing from macOS Keychain. Re-enroll this Agent.");
+        var agentToken = await credentials.GetAsync(deviceId, ct) ?? throw new InvalidOperationException("Agent credential is missing from secure storage. Re-enroll this Agent.");
 
         using var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Authorization", $"Bearer {agentToken}");
+        socket.Options.SetRequestHeader("X-MateMCP-Agent-Connection-Id", connectionId);
         var uri = new Uri($"{relayUrl.TrimEnd('/')}/relay/agent/{Uri.EscapeDataString(deviceId)}".Replace("https://", "wss://").Replace("http://", "ws://"));
+
         await socket.ConnectAsync(uri, ct);
-        logger.LogInformation("Connected to MateMCP Relay as {DeviceId}", deviceId);
-        var buffer = new byte[Math.Max(64 * 1024, current.Relay.MaxMessageBytes)];
-        while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
+        var connectedAt = DateTimeOffset.UtcNow;
+        var offlineGap = offlineSince is null ? TimeSpan.Zero : connectedAt - offlineSince.Value;
+        logger.LogInformation(
+            "Connected to MateMCP Relay: device={DeviceId}; agentConnection={ConnectionId}; reconnectAttempt={ReconnectAttempt}; connectedAt={ConnectedAt:O}; elapsedOfflineMs={ElapsedOfflineMs:F0}",
+            deviceId,
+            connectionId,
+            reconnectAttempt,
+            connectedAt,
+            Math.Max(0, offlineGap.TotalMilliseconds));
+        onConnected();
+
+        if (reconnectAttempt > 1)
         {
-            using var ms = new MemoryStream(); WebSocketReceiveResult result;
-            do
+            logger.LogInformation(
+                "Relay reconnect succeeded: device={DeviceId}; agentConnection={ConnectionId}; reconnectAttempt={ReconnectAttempt}; elapsedOfflineMs={ElapsedOfflineMs:F0}",
+                deviceId, connectionId, reconnectAttempt, Math.Max(0, offlineGap.TotalMilliseconds));
+        }
+
+        using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        Exception? transportFailure = null;
+        var failureGate = new object();
+        var maxConcurrency = Math.Clamp(current.Relay.MaxConcurrentRequests, 1, 64);
+
+        await using var scheduler = new RelayRequestScheduler(
+            maxConcurrency,
+            (request, workerToken) => ForwardAsync(request, current, workerToken),
+            async (response, sendToken) =>
             {
-                result = await socket.ReceiveAsync(buffer, ct);
-                if (result.MessageType == WebSocketMessageType.Close)
+                var payload = JsonSerializer.SerializeToUtf8Bytes(response);
+                await socket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, sendToken);
+            },
+            connectionCts.Token,
+            ex =>
+            {
+                lock (failureGate)
+                {
+                    transportFailure ??= ex;
+                }
+                try { socket.Abort(); } catch { }
+                connectionCts.Cancel();
+            });
+
+        var buffer = new byte[Math.Max(64 * 1024, current.Relay.MaxMessageBytes)];
+        WebSocketCloseStatus? closeStatus = null;
+        string? closeReason = null;
+        Exception? disconnectException = null;
+
+        try
+        {
+            while (socket.State == WebSocketState.Open && !connectionCts.IsCancellationRequested)
+            {
+                using var ms = new MemoryStream();
+                WebSocketReceiveResult result;
+                do
+                {
+                    result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), connectionCts.Token);
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        closeStatus = result.CloseStatus;
+                        closeReason = SafeReason(result.CloseStatusDescription);
+                        break;
+                    }
+
+                    ms.Write(buffer, 0, result.Count);
+                    if (ms.Length > current.Relay.MaxMessageBytes)
+                        throw new InvalidOperationException("Relay request exceeded the configured maximum message size.");
+                } while (!result.EndOfMessage);
+
+                if (result.MessageType == WebSocketMessageType.Close) break;
+
+                RelayRequest? request;
+                try
+                {
+                    request = JsonSerializer.Deserialize<RelayRequest>(ms.ToArray());
+                }
+                catch (JsonException ex)
+                {
+                    logger.LogWarning(ex,
+                        "Ignored malformed Relay request: device={DeviceId}; agentConnection={ConnectionId}; exceptionType={ExceptionType}",
+                        deviceId,
+                        connectionId,
+                        ex.GetType().Name);
+                    continue;
+                }
+
+                if (request is null) continue;
+                if (!scheduler.TryQueue(request))
                 {
                     logger.LogWarning(
-                        "MateMCP Relay closed the connection for {DeviceId}. Status={CloseStatus}; Reason={CloseReason}",
+                        "Ignored duplicate or shutdown Relay request: device={DeviceId}; agentConnection={ConnectionId}; relayRequestId={RelayRequestId}; inFlight={InFlightCount}",
                         deviceId,
-                        result.CloseStatus?.ToString() ?? "none",
-                        string.IsNullOrWhiteSpace(result.CloseStatusDescription) ? "none" : result.CloseStatusDescription);
-                    return;
+                        connectionId,
+                        request.Id,
+                        scheduler.InFlightCount);
                 }
-                ms.Write(buffer, 0, result.Count);
-            } while (!result.EndOfMessage);
-            var request = JsonSerializer.Deserialize<RelayRequest>(ms.ToArray());
-            if (request is null) continue;
-            var response = await ForwardAsync(request, current, ct);
-            await socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(response), WebSocketMessageType.Text, true, ct);
+            }
+
+            lock (failureGate)
+            {
+                if (transportFailure is not null)
+                    throw new IOException("Relay WebSocket response transport failed.", transportFailure);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (OperationCanceledException ex) when (connectionCts.IsCancellationRequested)
+        {
+            lock (failureGate)
+            {
+                if (transportFailure is not null)
+                {
+                    disconnectException = transportFailure;
+                    throw new IOException("Relay WebSocket response transport failed.", transportFailure);
+                }
+            }
+            disconnectException = ex;
+            throw;
+        }
+        catch (Exception ex)
+        {
+            disconnectException = ex;
+            throw;
+        }
+        finally
+        {
+            connectionCts.Cancel();
+            await scheduler.DrainAsync();
+            var disconnectedAt = DateTimeOffset.UtcNow;
+            logger.LogWarning(
+                "Disconnected from MateMCP Relay: device={DeviceId}; agentConnection={ConnectionId}; connectedAt={ConnectedAt:O}; disconnectedAt={DisconnectedAt:O}; lifetimeMs={LifetimeMs:F0}; socketState={SocketState}; closeStatus={CloseStatus}; closeReason={CloseReason}; exceptionType={ExceptionType}; exceptionMessage={ExceptionMessage}; reconnectAttempt={ReconnectAttempt}",
+                deviceId,
+                connectionId,
+                connectedAt,
+                disconnectedAt,
+                (disconnectedAt - connectedAt).TotalMilliseconds,
+                socket.State,
+                closeStatus?.ToString() ?? socket.CloseStatus?.ToString() ?? "none",
+                closeReason ?? SafeReason(socket.CloseStatusDescription) ?? "none",
+                disconnectException?.GetType().Name ?? "none",
+                disconnectException?.Message ?? "none",
+                reconnectAttempt);
         }
     }
 
@@ -88,9 +256,20 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
             var headers = upstream.Headers.Concat(upstream.Content.Headers).ToDictionary(h => h.Key, h => h.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
             return new RelayResponse(request.Id, (int)upstream.StatusCode, headers, body.Length == 0 ? null : Convert.ToBase64String(body), null);
         }
-        catch (Exception ex) { return new RelayResponse(request.Id, 502, new(), null, ex.Message); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new RelayResponse(request.Id, 502, new(), null, ex.Message);
+        }
     }
 
-    private sealed record RelayRequest(string Id, string Method, string Path, Dictionary<string,string[]> Headers, string? BodyBase64);
-    private sealed record RelayResponse(string Id, int StatusCode, Dictionary<string,string[]> Headers, string? BodyBase64, string? Error);
+    private static string? SafeReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return null;
+        var safe = reason.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return safe.Length <= 160 ? safe : safe[..160];
+    }
 }
