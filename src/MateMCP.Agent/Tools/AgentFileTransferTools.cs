@@ -8,8 +8,10 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class AgentFileTransferTools(ProjectRegistry projects, AgentFileTransferManager transfers, ApprovalService approvals, AuditLog audit)
+public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalService approvals, AuditLog audit)
 {
+    private static readonly AgentFileTransferManager Transfers = new();
+
     [McpServerTool(
         Name = "agent_file_upload_start",
         Title = "Start uploading a conversation attachment to this Agent",
@@ -23,7 +25,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, AgentFileTr
         [Description("Exact attachment size in bytes.")] long size,
         [Description("Optional target MateMCP project. The project must allow writes.")] string? project = null,
         [Description("Optional MIME type supplied by the chat attachment metadata.")] string? mimeType = null,
-        [Description("Optional lowercase/uppercase 64-character SHA-256 hex digest for end-to-end integrity validation.")] string? sha256 = null,
+        [Description("Optional 64-character SHA-256 hex digest for end-to-end integrity validation.")] string? sha256 = null,
         CancellationToken cancellationToken = default)
     {
         string root;
@@ -61,7 +63,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, AgentFileTr
 
         try
         {
-            var started = transfers.Start(root, fileName, mimeType, size, sha256, project);
+            var started = Transfers.Start(root, fileName, mimeType, size, sha256, project);
             await audit.WriteAsync("agent.file-upload.start", $"{scope}:{started.TransferId}:{started.FileName}", "ok", cancellationToken);
             return new
             {
@@ -91,7 +93,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, AgentFileTr
         Destructive = false,
         Idempotent = false,
         OpenWorld = false)]
-    [Description("Appends the next base64-encoded chunk to an attachment transfer. Chunks must be sequential and no larger than the maxChunkBytes returned by agent_file_upload_start. This streams to disk and does not buffer the whole file in Agent memory.")]
+    [Description("Appends the next base64-encoded chunk to an attachment transfer. Chunks must be sequential and no larger than maxChunkBytes returned by agent_file_upload_start. The Agent writes each chunk directly to disk instead of buffering the whole attachment in memory.")]
     public async Task<object> UploadChunk(
         [Description("Transfer id returned by agent_file_upload_start.")] string transferId,
         [Description("Zero-based byte offset of this chunk in the original file. Must equal the next expected offset.")] long offset,
@@ -100,7 +102,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, AgentFileTr
     {
         try
         {
-            var progress = await transfers.AppendChunkAsync(transferId, offset, base64Data, cancellationToken);
+            var progress = await Transfers.AppendChunkAsync(transferId, offset, base64Data, cancellationToken);
             return new { progress.TransferId, progress.BytesReceived, progress.ExpectedSize, progress.ReadyToComplete, nextOffset = progress.BytesReceived };
         }
         catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or IOException or UnauthorizedAccessException)
@@ -117,14 +119,14 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, AgentFileTr
         Destructive = false,
         Idempotent = false,
         OpenWorld = false)]
-    [Description("Completes a chunked attachment upload, verifies declared size and optional SHA-256, atomically publishes the temporary file, and returns the remote path usable by shell tools. For project-scoped transfers the path is inside that project and can also be addressed by filesystem tools using the returned projectRelativePath.")]
+    [Description("Completes a chunked attachment upload, verifies declared size and optional SHA-256, atomically publishes the temporary file, and returns the remote path usable by shell tools. For project-scoped transfers the path is inside that project and can also be addressed by filesystem tools using projectRelativePath.")]
     public async Task<object> Complete(
         [Description("Transfer id returned by agent_file_upload_start.")] string transferId,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var completed = await transfers.CompleteAsync(transferId, cancellationToken);
+            var completed = await Transfers.CompleteAsync(transferId, cancellationToken);
             string? projectRelativePath = null;
             if (!string.IsNullOrWhiteSpace(completed.Project))
             {
@@ -160,12 +162,12 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, AgentFileTr
         Destructive = true,
         Idempotent = true,
         OpenWorld = false)]
-    [Description("Cancels an attachment transfer and removes its partial or completed temporary file immediately. Transfers are also cleaned up automatically after their lifecycle expires.")]
+    [Description("Cancels an attachment transfer and removes its partial or completed temporary file immediately. Incomplete transfers are automatically removed after one hour and completed temporary transfers after 24 hours.")]
     public async Task<string> Cancel(
         [Description("Transfer id returned by agent_file_upload_start.")] string transferId,
         CancellationToken cancellationToken = default)
     {
-        await transfers.CancelAsync(transferId, cancellationToken);
+        await Transfers.CancelAsync(transferId, cancellationToken);
         await audit.WriteAsync("agent.file-upload.cancel", transferId, "ok", cancellationToken);
         return "cancelled";
     }
