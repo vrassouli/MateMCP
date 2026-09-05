@@ -158,7 +158,7 @@ public sealed class AgentFileTransferManager : IDisposable
 
     private static string SanitizeFileName(string fileName)
     {
-        fileName = Path.GetFileName(fileName?.Trim());
+        fileName = Path.GetFileName(fileName.Trim()) ?? string.Empty;
         if (string.IsNullOrWhiteSpace(fileName) || fileName is "." or "..") fileName = "attachment.bin";
         foreach (var invalid in Path.GetInvalidFileNameChars()) fileName = fileName.Replace(invalid, '_');
         if (fileName.Length > 180)
