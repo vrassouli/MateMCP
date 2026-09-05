@@ -3,12 +3,18 @@ using System.Security.Cryptography;
 
 namespace MateMCP.Agent.Tools;
 
-public sealed class AgentFileTransferManager : BackgroundService
+public sealed class AgentFileTransferManager : IDisposable
 {
     public const int MaxChunkBytes = 512 * 1024;
     private static readonly TimeSpan IncompleteTtl = TimeSpan.FromHours(1);
     private static readonly TimeSpan CompletedTtl = TimeSpan.FromHours(24);
     private readonly ConcurrentDictionary<string, TransferState> _transfers = new(StringComparer.Ordinal);
+    private readonly Timer _cleanupTimer;
+
+    public AgentFileTransferManager()
+    {
+        _cleanupTimer = new Timer(_ => _ = CleanupTimerTickAsync(), null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+    }
 
     public TransferStarted Start(string root, string fileName, string? mimeType, long size, string? sha256, string? project)
     {
@@ -91,12 +97,6 @@ public sealed class AgentFileTransferManager : BackgroundService
         finally { state.Gate.Release(); state.Gate.Dispose(); }
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(5));
-        while (await timer.WaitForNextTickAsync(stoppingToken)) await CleanupExpiredAsync(stoppingToken);
-    }
-
     internal async Task<int> CleanupExpiredAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
@@ -111,6 +111,24 @@ public sealed class AgentFileTransferManager : BackgroundService
             finally { state.Gate.Release(); state.Gate.Dispose(); }
         }
         return removed;
+    }
+
+    public void Dispose()
+    {
+        _cleanupTimer.Dispose();
+        foreach (var pair in _transfers.ToArray())
+        {
+            if (!_transfers.TryRemove(pair.Key, out var state)) continue;
+            state.Gate.Wait();
+            try { DeleteTransferFiles(state); }
+            finally { state.Gate.Release(); state.Gate.Dispose(); }
+        }
+    }
+
+    private async Task CleanupTimerTickAsync()
+    {
+        try { await CleanupExpiredAsync(); }
+        catch { }
     }
 
     private TransferState Get(string transferId)
