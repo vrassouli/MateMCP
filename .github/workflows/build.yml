@@ -7,8 +7,6 @@ on:
     paths:
       - 'src/MateMCP.Agent/**'
       - 'src/MateMCP.Relay/**'
-      - 'tests/MateMCP.Agent.Tests/**'
-      - 'tests/MateMCP.Relay.Tests/**'
       - 'scripts/bootstrap-macos.sh'
       - 'scripts/bootstrap-windows.ps1'
       - 'scripts/configure-agent-mode-macos.sh'
