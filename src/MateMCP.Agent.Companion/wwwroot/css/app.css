@@ -116,7 +116,7 @@ html, body {
 
 .dashboard-primary-grid {
     display: grid;
-    grid-template-columns: minmax(220px, .9fr) minmax(220px, .9fr) minmax(320px, 1.5fr);
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
     gap: 14px;
 }
 
@@ -352,7 +352,6 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 @media (max-width: 1100px) {
     .dashboard-primary-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
-    .mcp-card { grid-column: 1 / -1; }
 }
 
 @media (max-width: 760px) {
@@ -369,7 +368,6 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     .nav { grid-template-columns: repeat(5, minmax(max-content, 1fr)); overflow-x: auto; }
     .content { height: auto; overflow: visible; }
     .dashboard-primary-grid { grid-template-columns: 1fr; }
-    .mcp-card { grid-column: auto; }
     .session-layout { grid-template-columns: 1fr; }
     #blazor-error-ui { left: 12px; right: 12px; bottom: 12px; }
     #blazor-error-ui .blazor-error-content { align-items: flex-start; }
@@ -385,3 +383,30 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .log-level { display: inline-block; min-width: 86px; font-weight: 600; }
 .log-empty { color: #aaa; }
 @media (max-width: 760px) { .log-filters { grid-template-columns: 1fr; } }
+
+.dashboard-attention-strip {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--colorStatusWarningBorder1, rgba(173, 110, 0, .32));
+    border-radius: var(--borderRadiusLarge, 12px);
+    background: var(--colorStatusWarningBackground1, rgba(255, 185, 0, .10));
+}
+
+.dashboard-status-line {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 10px 0 6px;
+    font-size: 18px;
+}
+
+.status-dot.attention {
+    background: var(--colorStatusWarningForeground1, #8a5d00);
+}
+
+.update-overview-card.needs-attention {
+    border-color: var(--colorStatusWarningBorder1, rgba(173, 110, 0, .32));
+    background: var(--colorStatusWarningBackground1, var(--colorNeutralBackground1, #fff));
+}

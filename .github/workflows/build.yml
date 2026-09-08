@@ -19,22 +19,6 @@ on:
       - 'scripts/uninstall-windows.ps1'
       - 'MateMCP.slnx'
       - '.github/workflows/build.yml'
-  pull_request:
-    paths:
-      - 'src/MateMCP.Agent/**'
-      - 'src/MateMCP.Relay/**'
-      - 'tests/MateMCP.Agent.Tests/**'
-      - 'tests/MateMCP.Relay.Tests/**'
-      - 'scripts/bootstrap-macos.sh'
-      - 'scripts/bootstrap-windows.ps1'
-      - 'scripts/configure-agent-mode-macos.sh'
-      - 'scripts/configure-agent-mode-windows.ps1'
-      - 'scripts/install-macos.sh'
-      - 'scripts/install-windows.ps1'
-      - 'scripts/uninstall-macos.sh'
-      - 'scripts/uninstall-windows.ps1'
-      - 'MateMCP.slnx'
-      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 concurrency:
