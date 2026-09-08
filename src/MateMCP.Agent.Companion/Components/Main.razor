@@ -69,89 +69,104 @@
 
         @if (Section == "dashboard")
         {
-            <div class="grid">
-                <div class="panel">
-                    <div class="muted">Agent</div>
-                    <div class="metric agent-status @(AgentRunning ? "online" : "stopped")">
-                        <span class="status-dot" aria-hidden="true"></span>
-                        <span>@AgentStateLabel</span>
-                    </div>
-                    <div class="muted">Local background process</div>
-                    <div class="actions">
-                        @if (LifecycleBusy)
-                        {
-                            <span class="muted">@LifecycleMessage</span>
-                        }
-                        else if (AgentRunning)
-                        {
-                            <Button Text="Restart" OnClick="RestartAgentAsync" />
-                            <Button Text="Stop" OnClick="StopAgentAsync" />
-                        }
-                        else
-                        {
-                            <Button Text="Start" OnClick="StartAgentAsync" />
-                        }
-                    </div>
-                    @if (!LifecycleBusy && !string.IsNullOrWhiteSpace(LifecycleMessage))
-                    {
-                        <div class="muted" style="margin-top:8px">@LifecycleMessage</div>
-                    }
-                </div>
-                <div class="panel"><div class="muted">Pending approvals</div><div class="metric">@Approvals.Count</div></div>
-                <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ActiveShellCount)</div></div>
-                <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div></div>
-            </div>
-            <DesktopUpdatePanel />
-            @if (Status is not null)
-            {
-                <div class="panel">
-                    <strong>Connection</strong>
-                    <div class="row">
-                        <span class="muted">MateMCP API</span>
-                        <div><a class="link" href="@ControlPlaneUrl" target="_blank" rel="noopener noreferrer">@ControlPlaneUrl</a></div>
-                    </div>
-                    <div class="row">
-                        <span class="muted">Relay</span>
-                        @if (Status.Relay.Enabled)
-                        {
-                            <div><a class="link" href="@Status.Relay.Url" target="_blank" rel="noopener noreferrer">@Status.Relay.Url</a></div>
-                        }
-                        else
-                        {
-                            <div>Disabled</div>
-                        }
-                    </div>
-                    <div class="row">
-                        <span class="muted">Device MCP URL</span>
-                        @if (DeviceMcpUrl is not null)
-                        {
-                            <div><a class="link" href="@DeviceMcpUrl" target="_blank" rel="noopener noreferrer">@DeviceMcpUrl</a></div>
+            <TabList>
+                <Tab Text="Overview">
+                    <div class="grid">
+                        <div class="panel">
+                            <div class="muted">Agent</div>
+                            <div class="metric agent-status @(AgentRunning ? "online" : "stopped")">
+                                <span class="status-dot" aria-hidden="true"></span>
+                                <span>@AgentStateLabel</span>
+                            </div>
+                            <div class="muted">Local background process</div>
                             <div class="actions">
-                                <Button Text="Copy" OnClick="CopyDeviceMcpUrlAsync" />
-                                @if (DeviceUrlCopied)
+                                @if (LifecycleBusy)
                                 {
-                                    <span class="muted copy-note">Copied</span>
+                                    <span class="muted">@LifecycleMessage</span>
+                                }
+                                else if (AgentRunning)
+                                {
+                                    <Button Text="Restart" OnClick="RestartAgentAsync" />
+                                    <Button Text="Stop" OnClick="StopAgentAsync" />
+                                }
+                                else
+                                {
+                                    <Button Text="Start" OnClick="StartAgentAsync" />
                                 }
                             </div>
-                        }
-                        else
-                        {
-                            <div class="muted">Available after this Agent is enrolled and connected to Relay.</div>
-                        }
+                            @if (!LifecycleBusy && !string.IsNullOrWhiteSpace(LifecycleMessage))
+                            {
+                                <div class="muted" style="margin-top:8px">@LifecycleMessage</div>
+                            }
+                        </div>
+                        <div class="panel"><div class="muted">Pending approvals</div><div class="metric">@Approvals.Count</div></div>
+                        <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ActiveShellCount)</div></div>
+                        <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div></div>
                     </div>
-                    <div class="row"><span class="muted">Device ID</span><div>@(Status.Relay.DeviceId ?? "Not enrolled")</div></div>
-                    <div class="row"><span class="muted">Local management</span><div><a class="link" href="@Status.Management" target="_blank" rel="noopener noreferrer">@Status.Management</a></div></div>
-                    <div class="row"><span class="muted">Projects</span><div>@string.Join(", ", Status.Projects)</div></div>
-                    <div class="row"><span class="muted">Configuration</span><div>@Status.Configuration</div></div>
-                </div>
-            }
-            else if (!AgentRunning)
-            {
-                <div class="panel">
-                    <strong>Agent is stopped</strong>
-                    <div class="muted" style="margin-top:8px">The Companion remains available so you can start the Agent again without using a terminal.</div>
-                </div>
-            }
+                    @if (!AgentRunning)
+                    {
+                        <div class="panel">
+                            <strong>Agent is stopped</strong>
+                            <div class="muted" style="margin-top:8px">The Companion remains available so you can start the Agent again without using a terminal.</div>
+                        </div>
+                    }
+                </Tab>
+                <Tab Text="Updates">
+                    <DesktopUpdatePanel />
+                </Tab>
+                <Tab Text="Connection">
+                    @if (Status is not null)
+                    {
+                        <div class="panel">
+                            <strong>Connection</strong>
+                            <div class="row">
+                                <span class="muted">MateMCP API</span>
+                                <div><a class="link" href="@ControlPlaneUrl" target="_blank" rel="noopener noreferrer">@ControlPlaneUrl</a></div>
+                            </div>
+                            <div class="row">
+                                <span class="muted">Relay</span>
+                                @if (Status.Relay.Enabled)
+                                {
+                                    <div><a class="link" href="@Status.Relay.Url" target="_blank" rel="noopener noreferrer">@Status.Relay.Url</a></div>
+                                }
+                                else
+                                {
+                                    <div>Disabled</div>
+                                }
+                            </div>
+                            <div class="row">
+                                <span class="muted">Device MCP URL</span>
+                                @if (DeviceMcpUrl is not null)
+                                {
+                                    <div><a class="link" href="@DeviceMcpUrl" target="_blank" rel="noopener noreferrer">@DeviceMcpUrl</a></div>
+                                    <div class="actions">
+                                        <Button Text="Copy" OnClick="CopyDeviceMcpUrlAsync" />
+                                        @if (DeviceUrlCopied)
+                                        {
+                                            <span class="muted copy-note">Copied</span>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="muted">Available after this Agent is enrolled and connected to Relay.</div>
+                                }
+                            </div>
+                            <div class="row"><span class="muted">Device ID</span><div>@(Status.Relay.DeviceId ?? "Not enrolled")</div></div>
+                            <div class="row"><span class="muted">Local management</span><div><a class="link" href="@Status.Management" target="_blank" rel="noopener noreferrer">@Status.Management</a></div></div>
+                            <div class="row"><span class="muted">Projects</span><div>@string.Join(", ", Status.Projects)</div></div>
+                            <div class="row"><span class="muted">Configuration</span><div>@Status.Configuration</div></div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="panel">
+                            <strong>Connection details unavailable</strong>
+                            <div class="muted" style="margin-top:8px">Start the Agent to view Relay, device, and local management details.</div>
+                        </div>
+                    }
+                </Tab>
+            </TabList>
         }
         else if (Section == "devices")
         {
