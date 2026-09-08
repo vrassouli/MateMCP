@@ -268,7 +268,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
     using var ms = new MemoryStream();
     await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
     if (ms.Length > options.MaxBodyBytes) return Results.StatusCode(413);
-    if (!ScopeAllowsPayload(principal, ms.ToArray())) return Results.Forbid();
+    if (!ScopeAllowsPayload(principal, ms.ToArray())) return Results.StatusCode(StatusCodes.Status403Forbidden);
 
     var headers = context.Request.Headers
         .Where(h => !string.Equals(h.Key, "Authorization", StringComparison.OrdinalIgnoreCase))
