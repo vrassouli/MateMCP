@@ -71,14 +71,18 @@
         {
             <TabList>
                 <Tab Text="Overview">
-                    <div class="grid">
-                        <div class="panel">
-                            <div class="muted">Agent</div>
-                            <div class="metric agent-status @(AgentRunning ? "online" : "stopped")">
-                                <span class="status-dot" aria-hidden="true"></span>
-                                <span>@AgentStateLabel</span>
+                    <div class="dashboard-primary-grid">
+                        <div class="panel dashboard-card">
+                            <div class="dashboard-card-heading">
+                                <div>
+                                    <div class="muted">Agent</div>
+                                    <div class="metric agent-status @(AgentRunning ? "online" : "stopped")">
+                                        <span class="status-dot" aria-hidden="true"></span>
+                                        <span>@AgentStateLabel</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="muted">Local background process</div>
+                            <div class="muted">MateMCP runs locally in the background on this device.</div>
                             <div class="actions">
                                 @if (LifecycleBusy)
                                 {
@@ -96,25 +100,70 @@
                             </div>
                             @if (!LifecycleBusy && !string.IsNullOrWhiteSpace(LifecycleMessage))
                             {
-                                <div class="muted" style="margin-top:8px">@LifecycleMessage</div>
+                                <div class="muted dashboard-card-note">@LifecycleMessage</div>
                             }
                         </div>
-                        <div class="panel"><div class="muted">Pending approvals</div><div class="metric">@Approvals.Count</div></div>
-                        <div class="panel"><div class="muted">Interactive sessions</div><div class="metric">@(Status?.InteractiveSessions ?? ActiveShellCount)</div></div>
-                        <div class="panel"><div class="muted">Credential store</div><div class="metric" style="font-size:18px">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div></div>
+
+                        <div class="panel dashboard-card usage-card @(Status?.Activity?.InUse == true ? "in-use" : null)">
+                            <div class="muted">Current usage</div>
+                            <div class="metric agent-status @(Status?.Activity?.InUse == true ? "online" : null)">
+                                <span class="status-dot" aria-hidden="true"></span>
+                                <span>@UsageStateLabel</span>
+                            </div>
+                            <div class="muted">@UsageDetail</div>
+                        </div>
+
+                        <div class="panel dashboard-card mcp-card">
+                            <div class="muted">Connect AI to this device</div>
+                            <strong class="dashboard-card-title">Device MCP URL</strong>
+                            @if (DeviceMcpUrl is not null)
+                            {
+                                <div class="mcp-url-box">@DeviceMcpUrl</div>
+                                <div class="actions">
+                                    <Button Text="Copy MCP URL" OnClick="CopyDeviceMcpUrlAsync" />
+                                    @if (DeviceUrlCopied)
+                                    {
+                                        <span class="muted copy-note">Copied</span>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="muted dashboard-card-note">Start and enroll the Agent to get its MCP URL.</div>
+                            }
+                        </div>
                     </div>
+
+                    <div class="grid dashboard-secondary-grid">
+                        <div class="panel dashboard-card">
+                            <div class="muted">Pending approvals</div>
+                            <div class="metric">@Approvals.Count</div>
+                            <div class="muted">@(Approvals.Count == 0 ? "Nothing needs your attention." : "Review requests waiting for your decision.")</div>
+                        </div>
+                        <div class="panel dashboard-card">
+                            <div class="muted">Interactive shell</div>
+                            <div class="metric">@(Status?.InteractiveSessions ?? ActiveShellCount)</div>
+                            <div class="muted">Active terminal sessions opened through MateMCP.</div>
+                        </div>
+                        <div class="panel dashboard-card">
+                            <div class="muted">Credential store</div>
+                            <div class="dashboard-secondary-value">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div>
+                            <div class="muted">Secrets stay local and are never displayed back.</div>
+                        </div>
+                    </div>
+
                     @if (!AgentRunning)
                     {
                         <div class="panel">
                             <strong>Agent is stopped</strong>
-                            <div class="muted" style="margin-top:8px">The Companion remains available so you can start the Agent again without using a terminal.</div>
+                            <div class="muted dashboard-card-note">The Companion remains available so you can start the Agent again without using a terminal.</div>
                         </div>
                     }
                 </Tab>
                 <Tab Text="Updates">
                     <DesktopUpdatePanel />
                 </Tab>
-                <Tab Text="Connection">
+                <Tab Text="Connection details">
                     @if (Status is not null)
                     {
                         <div class="panel">
@@ -132,24 +181,6 @@
                                 else
                                 {
                                     <div>Disabled</div>
-                                }
-                            </div>
-                            <div class="row">
-                                <span class="muted">Device MCP URL</span>
-                                @if (DeviceMcpUrl is not null)
-                                {
-                                    <div><a class="link" href="@DeviceMcpUrl" target="_blank" rel="noopener noreferrer">@DeviceMcpUrl</a></div>
-                                    <div class="actions">
-                                        <Button Text="Copy" OnClick="CopyDeviceMcpUrlAsync" />
-                                        @if (DeviceUrlCopied)
-                                        {
-                                            <span class="muted copy-note">Copied</span>
-                                        }
-                                    </div>
-                                }
-                                else
-                                {
-                                    <div class="muted">Available after this Agent is enrolled and connected to Relay.</div>
                                 }
                             </div>
                             <div class="row"><span class="muted">Device ID</span><div>@(Status.Relay.DeviceId ?? "Not enrolled")</div></div>
@@ -360,6 +391,18 @@
 
     private int ActiveShellCount => ShellSessions.Count(x => !x.Exited);
     private string AgentStateLabel => AgentRunning ? (Status is null ? "Starting…" : "Online") : "Stopped";
+    private string UsageStateLabel => !AgentRunning ? "Unavailable" : Status?.Activity?.InUse == true ? "In use" : "Idle";
+    private string UsageDetail
+    {
+        get
+        {
+            if (!AgentRunning) return "Start the Agent to accept MCP requests.";
+            if (Status?.Activity is not { InUse: true } activity) return "Ready for a new AI request.";
+            var since = activity.ActiveSince is null ? null : $" since {activity.ActiveSince.Value.LocalDateTime:t}";
+            var leases = activity.ActiveLeases == 1 ? "1 active request" : $"{activity.ActiveLeases} active requests";
+            return $"{leases}{since}.";
+        }
+    }
 
     private string? DeviceMcpUrl => Status?.Relay is { Enabled: true, Url: { Length: > 0 } relayUrl, DeviceId: { Length: > 0 } deviceId }
         ? $"{relayUrl.TrimEnd('/')}/mcp/{Uri.EscapeDataString(deviceId)}"
