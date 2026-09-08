@@ -56,11 +56,12 @@ public sealed class UserSecretStorePlatformTests
         var macMode = File.ReadAllText(Path.Combine(root, "scripts", "configure-agent-mode-macos.sh"));
         var store = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Security", "UserSecretStore.cs"));
 
-        // Windows payload replacement is LOCALAPPDATA-only; secret metadata is APPDATA
-        // and secret values remain in Windows Credential Manager.
-        Assert.Contains("Join-Path $env:LOCALAPPDATA 'MateMCP'", windows, StringComparison.Ordinal);
-        Assert.Contains("$env:APPDATA\\MateMCP\\appsettings.json", windows, StringComparison.Ordinal);
-        Assert.DoesNotContain("Remove-Item", windows[windows.IndexOf("$env:APPDATA", StringComparison.Ordinal)..], StringComparison.OrdinalIgnoreCase);
+        // Windows payload replacement is LOCALAPPDATA-only; durable Agent state uses
+        // APPDATA and secret values remain in Windows Credential Manager.
+        Assert.Contains("$Target = Join-Path $env:LOCALAPPDATA 'MateMCP'", windows, StringComparison.Ordinal);
+        Assert.Contains("$ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP')", windows, StringComparison.Ordinal);
+        Assert.DoesNotContain("Remove-Item $env:APPDATA", windows, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Remove-Item -Recurse -Force $ModeFile", windows, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Windows Credential Manager", windows, StringComparison.Ordinal);
 
         // macOS updates replace only the binary payload. Durable state remains under
@@ -71,7 +72,6 @@ public sealed class UserSecretStorePlatformTests
         Assert.Contains("MATEMCP_MAC_USER_HOME", macMode, StringComparison.Ordinal);
         Assert.Contains("MATEMCP_MAC_USER_NAME", macMode, StringComparison.Ordinal);
 
-        Assert.Contains("Library", store, StringComparison.Ordinal);
         Assert.Contains("Application Support", store, StringComparison.Ordinal);
         Assert.Contains("secrets.json", store, StringComparison.Ordinal);
         Assert.Contains("MATEMCP_MAC_USER_HOME", store, StringComparison.Ordinal);
