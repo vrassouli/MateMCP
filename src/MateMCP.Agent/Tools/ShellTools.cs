@@ -3,6 +3,7 @@ using System.Diagnostics;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Desktop;
+using MateMCP.Agent.Memory;
 using MateMCP.Agent.Projects;
 using MateMCP.Agent.Security;
 using Microsoft.Extensions.Options;
@@ -12,7 +13,7 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, ApprovalService approvals, IOptions<MateOptions> options, AgentActivityGate? activity = null)
+public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory, AuditLog audit, ApprovalService approvals, IOptions<MateOptions> options, AgentActivityGate? activity = null)
 {
     private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
 
@@ -23,10 +24,10 @@ public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, Approva
         Destructive = true,
         Idempotent = false,
         OpenWorld = true)]
-    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
+    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. When relevant durable MateMCP Skills & Memory exists, a small bounded memoryContext is automatically included in the result so the AI does not need to remember to call memory_search first. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
     public async Task<object> Exec(
         [Description("Shell/command-line command to run non-interactively.")] string command,
-        [Description("Optional configured MateMCP project whose directory and shell policy should be used. Omit to run from the Agent user's home directory.")] string? project = null,
+        [Description("Optional configured MateMCP project whose directory, shell policy, and project-scoped Skills & Memory should be used. Omit to run from the Agent user's home directory with relevant global durable context only.")] string? project = null,
         [Description("Maximum execution time in seconds, clamped to 1..600.")] int timeoutSeconds = 60,
         CancellationToken cancellationToken = default)
     {
@@ -70,7 +71,8 @@ public sealed class ShellTools(ProjectRegistry projects, AuditLog audit, Approva
         }
         var stdout = Limit(await stdoutTask); var stderr = Limit(await stderrTask);
         await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
-        return new { exitCode = process.ExitCode, stdout, stderr, workingDirectory, project = hasProject ? project : null };
+        var memoryContext = await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_exec", project, command, cancellationToken);
+        return new { exitCode = process.ExitCode, stdout, stderr, workingDirectory, project = hasProject ? project : null, memoryContext };
     }
 
     private IDisposable EnterActivity()
