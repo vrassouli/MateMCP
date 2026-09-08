@@ -81,8 +81,10 @@ jobs:
       - name: Build Mac Catalyst Companion
         run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-maccatalyst -r maccatalyst-arm64 --no-restore
       - name: Publish Agent
+        if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r osx-arm64 --self-contained true -o package/agent-payload
       - name: Publish Mac Catalyst Companion app bundle
+        if: github.event_name != 'pull_request'
         run: |
           dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj \
             -c Release -f net10.0-maccatalyst -r maccatalyst-arm64 \
@@ -94,6 +96,7 @@ jobs:
           codesign --verify --deep --strict "$APP_BUNDLE"
           cp -R "$APP_BUNDLE" package/companion-payload/
       - name: Stage unified macOS package
+        if: github.event_name != 'pull_request'
         run: |
           test -x package/agent-payload/MateMCP.Agent
           find package/companion-payload -maxdepth 1 -type d -name '*.app' | grep -q .
@@ -106,6 +109,7 @@ jobs:
           cp scripts/uninstall-desktop-macos.sh package/uninstall-desktop-macos.sh
           chmod +x package/*.sh package/agent-payload/MateMCP.Agent
       - name: Smoke test unified macOS installer
+        if: github.event_name != 'pull_request'
         run: |
           package/install-desktop-macos.sh --no-start
           test -x "$HOME/.local/share/matemcp/MateMCP.Agent"
@@ -118,8 +122,10 @@ jobs:
           test ! -e "$HOME/.local/share/matemcp/MateMCP.Agent"
           test ! -e "$HOME/Applications/MateMCP Agent Companion.app"
       - name: Build unified macOS archive
+        if: github.event_name != 'pull_request'
         run: tar -czf MateMCP-Desktop-macos-arm64.tar.gz -C package .
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: MateMCP-Desktop-macos-arm64
           path: MateMCP-Desktop-macos-arm64.tar.gz
@@ -146,10 +152,13 @@ jobs:
       - name: Build Windows Companion
         run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore
       - name: Publish Agent
+        if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r win-x64 --self-contained true -o package/agent-payload
       - name: Publish Windows Companion
+        if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --self-contained true -p:WindowsPackageType=None -p:PublishReadyToRun=false --no-restore -o package/companion-payload
       - name: Stage unified Windows package
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: |
           if (-not (Test-Path package/agent-payload/MateMCP.Agent.exe)) { throw 'Agent publish output missing.' }
@@ -162,6 +171,7 @@ jobs:
           Copy-Item scripts/install-desktop-windows.ps1 package/install-desktop-windows.ps1
           Copy-Item scripts/uninstall-desktop-windows.ps1 package/uninstall-desktop-windows.ps1
       - name: Smoke test unified Windows installer
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: |
           & package/install-desktop-windows.ps1 -NoStart
@@ -180,9 +190,11 @@ jobs:
           if (Test-Path $root) { throw 'Unified uninstall left the installation root behind.' }
           if (Test-Path (Join-Path $programs 'MateMCP Agent Companion.lnk')) { throw 'Companion Start Menu shortcut remained after uninstall.' }
       - name: Build unified Windows archive
+        if: github.event_name != 'pull_request'
         shell: pwsh
         run: Compress-Archive -Path package/* -DestinationPath MateMCP-Desktop-win-x64.zip -Force
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: MateMCP-Desktop-win-x64
           path: MateMCP-Desktop-win-x64.zip
