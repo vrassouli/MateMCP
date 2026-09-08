@@ -1,0 +1,117 @@
+@implements IAsyncDisposable
+@inject DesktopUpdateService Updates
+
+<div class="panel dashboard-card update-overview-card @(UpdateStatus?.UpdateAvailable == true ? "needs-attention" : null)" aria-live="polite">
+    <div class="muted">Desktop update</div>
+    <div class="dashboard-status-line">
+        <span class="status-dot @(UpdateStatus?.UpdateAvailable == true ? "attention" : "online")" aria-hidden="true"></span>
+        <strong>@StatusLabel</strong>
+    </div>
+
+    @if (UpdateStatus?.UpdatedAt is { } updatedAt)
+    {
+        <div class="muted">Latest package: @updatedAt.LocalDateTime:g</div>
+    }
+    else if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="muted">@Error</div>
+    }
+    else
+    {
+        <div class="muted">MateMCP checks the coordinated Companion + Agent package.</div>
+    }
+
+    @if (Updating)
+    {
+        <div class="update-progress-row dashboard-card-note">
+            <progress class="update-progress-bar" max="100" value="@(Progress?.Percentage ?? 0)"></progress>
+            <div class="muted">@(Progress?.Message ?? "Preparing update...")@if (Progress?.Percentage is { } percentage) { <text> @percentage%</text> }</div>
+        </div>
+    }
+    else
+    {
+        <div class="actions">
+            @if (UpdateStatus is { UpdateAvailable: true, AssetId: { } assetId })
+            {
+                <Button Text="Update now" OnClick="() => BeginUpdateAsync(assetId)" />
+            }
+            <Button Text="Check now" OnClick="CheckAsync" />
+        </div>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private DesktopUpdateStatus? UpdateStatus { get; set; }
+    private DesktopUpdateProgress? Progress { get; set; }
+    private string? Error { get; set; }
+    private bool Checking { get; set; }
+    private bool Updating { get; set; }
+
+    private string StatusLabel => Updating
+        ? "Updating…"
+        : Checking
+            ? "Checking…"
+            : UpdateStatus?.UpdateAvailable == true
+                ? "Update available"
+                : UpdateStatus is not null
+                    ? "Up to date"
+                    : "Update status unavailable";
+
+    protected override async Task OnInitializedAsync() => await CheckAsync();
+
+    private async Task CheckAsync()
+    {
+        if (Checking || Updating) return;
+        Checking = true;
+        Error = null;
+        try
+        {
+            UpdateStatus = await Updates.CheckAsync(_cts.Token);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Could not check for updates: {ex.Message}";
+        }
+        finally
+        {
+            Checking = false;
+        }
+    }
+
+    private async Task BeginUpdateAsync(long assetId)
+    {
+        if (Updating) return;
+        Updating = true;
+        Error = null;
+        Progress = new DesktopUpdateProgress("Preparing", "Preparing coordinated Companion + Agent update...", 0, null);
+        var progress = new Progress<DesktopUpdateProgress>(value =>
+        {
+            Progress = value;
+            _ = InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await Updates.BeginUpdateAsync(assetId, progress, _cts.Token);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Error = $"Update could not start: {ex.Message}";
+        }
+        finally
+        {
+            Updating = false;
+            Progress = null;
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

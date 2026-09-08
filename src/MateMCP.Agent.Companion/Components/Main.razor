@@ -71,6 +71,19 @@
         {
             <TabList>
                 <Tab Text="Overview">
+                    @if (!AgentRunning || Approvals.Count > 0)
+                    {
+                        <div class="dashboard-attention-strip">
+                            @if (!AgentRunning)
+                            {
+                                <div><strong>Agent is stopped.</strong> Start it to accept MCP requests.</div>
+                            }
+                            @if (Approvals.Count > 0)
+                            {
+                                <div><strong>@Approvals.Count approval@(Approvals.Count == 1 ? "" : "s") waiting.</strong> Open Approval Center to review.</div>
+                            }
+                        </div>
+                    }
                     <div class="dashboard-primary-grid">
                         <div class="panel dashboard-card">
                             <div class="dashboard-card-heading">
@@ -111,9 +124,19 @@
                                 <span>@UsageStateLabel</span>
                             </div>
                             <div class="muted">@UsageDetail</div>
+                            @if (PowerStatus is not null)
+                            {
+                                <label class="update-toggle dashboard-card-note">
+                                    <input type="checkbox" checked="@PowerStatus.PreventSleepWhileInUse" @onchange="SetPreventSleepAsync" disabled="@(!PowerStatus.Supported || ChangingPower)" />
+                                    <span>Prevent sleep while in use</span>
+                                </label>
+                            }
                         </div>
 
-                        <div class="panel dashboard-card mcp-card">
+                        <DesktopUpdateOverviewCard />
+                    </div>
+
+                    <div class="panel dashboard-card mcp-card">
                             <div class="muted">Connect AI to this device</div>
                             <strong class="dashboard-card-title">Device MCP URL</strong>
                             @if (DeviceMcpUrl is not null)
@@ -132,33 +155,28 @@
                                 <div class="muted dashboard-card-note">Start and enroll the Agent to get its MCP URL.</div>
                             }
                         </div>
-                    </div>
 
                     <div class="grid dashboard-secondary-grid">
                         <div class="panel dashboard-card">
                             <div class="muted">Pending approvals</div>
                             <div class="metric">@Approvals.Count</div>
-                            <div class="muted">@(Approvals.Count == 0 ? "Nothing needs your attention." : "Review requests waiting for your decision.")</div>
+                            <div class="muted">@(Approvals.Count == 0 ? "Nothing needs your attention." : "Requests are waiting for your decision.")</div>
+                            @if (Approvals.Count > 0)
+                            {
+                                <div class="actions"><Button Text="Review approvals" OnClick='() => Section = "approvals"' /></div>
+                            }
                         </div>
                         <div class="panel dashboard-card">
                             <div class="muted">Interactive shell</div>
                             <div class="metric">@(Status?.InteractiveSessions ?? ActiveShellCount)</div>
                             <div class="muted">Active terminal sessions opened through MateMCP.</div>
-                        </div>
-                        <div class="panel dashboard-card">
-                            <div class="muted">Credential store</div>
-                            <div class="dashboard-secondary-value">@(Status?.Credentials ?? (AgentRunning ? "Starting…" : "Agent stopped"))</div>
-                            <div class="muted">Secrets stay local and are never displayed back.</div>
+                            @if (ActiveShellCount > 0)
+                            {
+                                <div class="actions"><Button Text="Open shell" OnClick='() => Section = "shell"' /></div>
+                            }
                         </div>
                     </div>
 
-                    @if (!AgentRunning)
-                    {
-                        <div class="panel">
-                            <strong>Agent is stopped</strong>
-                            <div class="muted dashboard-card-note">The Companion remains available so you can start the Agent again without using a terminal.</div>
-                        </div>
-                    }
                 </Tab>
                 <Tab Text="Updates">
                     <DesktopUpdatePanel />
@@ -372,6 +390,8 @@
     private bool AgentRunning { get; set; }
     private bool LifecycleBusy { get; set; }
     private string? LifecycleMessage { get; set; }
+    private AgentPowerStatus? PowerStatus { get; set; }
+    private bool ChangingPower { get; set; }
     private IReadOnlyList<PendingApproval> Approvals { get; set; } = [];
     private IReadOnlyList<UserSecretInfo> Secrets { get; set; } = [];
     private IReadOnlyList<ShellSessionSnapshot> ShellSessions { get; set; } = [];
@@ -453,6 +473,7 @@
         try
         {
             Status = await Api.GetStatusAsync(_disposeCts.Token);
+            PowerStatus = await Api.GetPowerStatusAsync(_disposeCts.Token);
             Approvals = await Api.GetApprovalsAsync(_disposeCts.Token);
             Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
             ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
@@ -509,6 +530,7 @@
     private void ClearAgentData()
     {
         Status = null;
+        PowerStatus = null;
         Approvals = [];
         Secrets = [];
         ShellSessions = [];
@@ -576,6 +598,27 @@
         if (DeviceMcpUrl is null) return;
         await Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard.Default.SetTextAsync(DeviceMcpUrl);
         DeviceUrlCopied = true;
+    }
+
+    private async Task SetPreventSleepAsync(ChangeEventArgs args)
+    {
+        if (ChangingPower || PowerStatus is null) return;
+        var requested = args.Value is bool value && value;
+        var previous = PowerStatus;
+        ChangingPower = true;
+        try
+        {
+            PowerStatus = await Api.SetPreventSleepWhileInUseAsync(requested, _disposeCts.Token);
+        }
+        catch (Exception ex)
+        {
+            PowerStatus = previous;
+            Error = $"Could not change Prevent Sleep While In Use: {ex.Message}";
+        }
+        finally
+        {
+            ChangingPower = false;
+        }
     }
 
     private async Task DecideAsync(string id, string decision)

@@ -17,6 +17,27 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_overview_surfaces_attention_usage_updates_and_mcp_connection()
+    {
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var updateOverview = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdateOverviewCard.razor"));
+        var updatePanel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdatePanel.razor"));
+
+        Assert.Contains("Current usage", main, StringComparison.Ordinal);
+        Assert.Contains("Prevent sleep while in use", main, StringComparison.Ordinal);
+        Assert.Contains("<DesktopUpdateOverviewCard />", main, StringComparison.Ordinal);
+        Assert.Contains("Device MCP URL", main, StringComparison.Ordinal);
+        Assert.Contains("Copy MCP URL", main, StringComparison.Ordinal);
+        Assert.Contains("Review approvals", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Credential store", main, StringComparison.Ordinal);
+        Assert.Contains("Update available", updateOverview, StringComparison.Ordinal);
+        Assert.Contains("Update now", updateOverview, StringComparison.Ordinal);
+        Assert.DoesNotContain("Agent activity", updatePanel, StringComparison.Ordinal);
+        Assert.DoesNotContain("Prevent Sleep While In Use", updatePanel, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Companion_webview_supports_tab_and_shift_tab_focus_traversal()
     {
         var index = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
