@@ -10,6 +10,7 @@ MateMCP ships one Agent application for macOS and Windows. Supported Agent capab
 | Loopback management UI and root redirect | Supported | Supported | Native package smoke test checks `/health`, `/`, and `/ui` |
 | Projects and approval management | Supported | Supported | Shared Agent routes and tests |
 | Generic interactive terminal sessions | PTY via shared `shell_session_*` MCP tools | ConPTY via shared `shell_session_*` MCP tools | Shared interactive-shell tests plus real SSH password-authentication integration test through the generic API |
+| Desktop visual inspection (`screen_list`, `window_list`, `screen_capture`) | CoreGraphics/Quartz discovery and `screencapture`; requires macOS Screen Recording permission for pixels | Win32 discovery and signed-in desktop capture with per-monitor DPI awareness | Shared tool-contract tests plus Windows/macOS build/package jobs; real packaged screenshot verification remains required before #126 is closed |
 | Native actionable approval notifications | Notification Center actions | Windows App SDK notifications when supported; unpackaged Win32 toast fallback otherwise | Companion build plus notification fallback regression coverage; real desktop field verification remains required after packaging changes |
 | Named secret management | macOS Keychain | Windows Credential Manager | Platform credential-store integration test |
 | Credential injection policy and audit | Supported | Supported | Shared Agent integration tests |
