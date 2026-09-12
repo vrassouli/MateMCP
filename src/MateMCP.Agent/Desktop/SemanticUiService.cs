@@ -256,7 +256,7 @@ public sealed class SemanticUiService
                 focused,
                 selected,
                 toggleState is null ? null : toggleState == 1,
-                expandedState is null ? null : expandedState is 0 or 1,
+                expandedState is null ? (bool?)null : expandedState == 1,
                 bounds,
                 actions);
         }
@@ -489,7 +489,7 @@ public sealed class SemanticUiService
               }
             }
             walk(root, null, '0', 0);
-            console.log(JSON.stringify({truncated:truncated, elements:out}));
+            JSON.stringify({truncated:truncated, elements:out});
             """;
         }
 
