@@ -4,14 +4,14 @@ on:
   pull_request:
     paths:
       - 'src/MateMCP.Agent/Browser/**'
-      - 'src/MateMCP.Agent/Tools/BrowserTools.cs'
+      - 'src/MateMCP.Agent/Tools/Browser*.cs'
       - 'tests/MateMCP.Agent.Tests/Browser*'
       - '.github/workflows/browser-integration.yml'
   push:
     branches: [ main ]
     paths:
       - 'src/MateMCP.Agent/Browser/**'
-      - 'src/MateMCP.Agent/Tools/BrowserTools.cs'
+      - 'src/MateMCP.Agent/Tools/Browser*.cs'
       - 'tests/MateMCP.Agent.Tests/Browser*'
       - '.github/workflows/browser-integration.yml'
   workflow_dispatch:
