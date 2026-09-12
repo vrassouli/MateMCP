@@ -214,7 +214,7 @@ public sealed class DesktopVisionService
                 var height = rect.Bottom - rect.Top;
                 if (width <= 1 || height <= 1) return true;
 
-                _ = GetWindowThreadProcessId(window, out var processId);
+                GetWindowThreadProcessId(window, out var processId);
                 var application = ResolveProcessName(processId);
                 windows.Add(new DesktopWindowInfo(
                     window.ToInt64().ToString("X", CultureInfo.InvariantCulture),
