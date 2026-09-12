@@ -17,43 +17,71 @@ public sealed class BrowserRuntimeIntegrationTests
             (OperatingSystem.IsWindows() ? "msedge" : "chrome");
 
         await using var server = new LoopbackPageServer();
-        await using var browser = new BrowserAutomationService();
+        var lastStep = "starting";
+        var flow = RunFlowAsync();
+        var completed = await Task.WhenAny(flow, Task.Delay(TimeSpan.FromSeconds(60)));
+        if (completed != flow)
+            throw new TimeoutException($"Browser runtime integration timed out after step '{lastStep}'.");
+        await flow;
 
-        var opened = await browser.OpenAsync(server.Url, channel);
-        Assert.True(opened.Active);
-        Assert.Equal(channel, opened.Channel);
+        async Task RunFlowAsync()
+        {
+            var browser = new BrowserAutomationService();
 
-        var initial = await browser.SnapshotAsync();
-        Assert.Equal(server.Url, initial.Url);
-        Assert.Contains(initial.Elements, element => element.Role == "textbox" && element.Name == "Name");
-        Assert.Contains(initial.Elements, element => element.Role == "button" && element.Name == "Increment");
-        Assert.Contains(initial.Elements, element => element.Role == "heading" && element.Name == "Count 0");
+            Mark("open");
+            var opened = await browser.OpenAsync(server.Url, channel);
+            Assert.True(opened.Active);
+            Assert.Equal(channel, opened.Channel);
 
-        var filled = await browser.FillAsync(new BrowserSelector(Role: "textbox", Name: "Name"), "MateMCP");
-        Assert.True(filled.Ok);
+            Mark("initial snapshot");
+            var initial = await browser.SnapshotAsync();
+            Assert.Equal(server.Url, initial.Url);
+            Assert.Contains(initial.Elements, element => element.Role == "textbox" && element.Name == "Name");
+            Assert.Contains(initial.Elements, element => element.Role == "button" && element.Name == "Increment");
+            Assert.Contains(initial.Elements, element => element.Role == "heading" && element.Name == "Count 0");
 
-        var afterFill = await browser.SnapshotAsync();
-        Assert.Contains(afterFill.Elements, element =>
-            element.Role == "textbox" && element.Name == "Name" && element.Value == "MateMCP");
+            Mark("fill");
+            var filled = await browser.FillAsync(new BrowserSelector(Role: "textbox", Name: "Name"), "MateMCP");
+            Assert.True(filled.Ok);
 
-        var clicked = await browser.ClickAsync(new BrowserSelector(Role: "button", Name: "Increment"));
-        Assert.True(clicked.Ok);
+            Mark("snapshot after fill");
+            var afterFill = await browser.SnapshotAsync();
+            Assert.Contains(afterFill.Elements, element =>
+                element.Role == "textbox" && element.Name == "Name" && element.Value == "MateMCP");
 
-        var afterClick = await browser.SnapshotAsync();
-        Assert.Contains(afterClick.Elements, element => element.Role == "heading" && element.Name == "Count 1");
+            Mark("click");
+            var clicked = await browser.ClickAsync(new BrowserSelector(Role: "button", Name: "Increment"));
+            Assert.True(clicked.Ok);
 
-        var resized = await browser.SetViewportAsync(840, 620, 1);
-        Assert.Equal(840, resized.Viewport?.Width);
-        Assert.Equal(620, resized.Viewport?.Height);
+            Mark("snapshot after click");
+            var afterClick = await browser.SnapshotAsync();
+            Assert.Contains(afterClick.Elements, element => element.Role == "heading" && element.Name == "Count 1");
 
-        var screenshot = await browser.ScreenshotAsync();
-        Assert.Equal("image/png", screenshot.MimeType);
-        Assert.True(screenshot.Bytes.Length > 8);
-        Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, screenshot.Bytes[..4]);
+            Mark("viewport");
+            var resized = await browser.SetViewportAsync(840, 620, 1);
+            Assert.Equal(840, resized.Viewport?.Width);
+            Assert.Equal(620, resized.Viewport?.Height);
 
-        await browser.CloseAsync();
-        var closed = await browser.GetStatusAsync();
-        Assert.False(closed.Active);
+            Mark("screenshot");
+            var screenshot = await browser.ScreenshotAsync();
+            Assert.Equal("image/png", screenshot.MimeType);
+            Assert.True(screenshot.Bytes.Length > 8);
+            Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, screenshot.Bytes[..4]);
+
+            Mark("close");
+            await browser.CloseAsync();
+
+            Mark("status after close");
+            var closed = await browser.GetStatusAsync();
+            Assert.False(closed.Active);
+            Mark("complete");
+        }
+
+        void Mark(string step)
+        {
+            lastStep = step;
+            Console.WriteLine($"[MateMCP browser integration] {OperatingSystem.IsMacOS() switch { true => "macOS", false => OperatingSystem.IsWindows() ? "Windows" : "other" }} / {channel}: {step}");
+        }
     }
 
     private sealed class LoopbackPageServer : IAsyncDisposable
