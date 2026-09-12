@@ -2,7 +2,7 @@
 
 Desktop control remains independently permissioned from filesystem and shell access.
 
-The implementation is tracked by Epic #125. The first foundation is the read-only visual inspection surface from #126.
+The implementation is tracked by Epic #125. Phase 1 (#126) provides read-only visual inspection; Phase 2 (#127) adds raw mouse/keyboard/window input as an explicitly approval-gated fallback.
 
 ## Vision foundation
 
@@ -22,26 +22,45 @@ On HiDPI displays, the returned PNG can contain more physical pixels than the lo
 
 Capture payloads are bounded to 16 MiB and temporary image files are deleted immediately after the image is read into the MCP result. Audit records store capture metadata only, not screenshot pixels.
 
+## Raw desktop input
+
+Phase 2 publishes:
+
+- `mouse_move`
+- `mouse_click`
+- `mouse_drag`
+- `mouse_scroll`
+- `keyboard_type`
+- `keyboard_press`
+- `keyboard_shortcut`
+- `window_focus`
+
+Coordinates use the same global logical desktop coordinate space as visual discovery/capture. The intended loop is `observe -> act -> observe` rather than blind input.
+
+Raw input has no reliable semantic understanding of the target control, so all Phase 2 input actions request the `desktop.input / raw-input` approval. A user may approve once or approve for the current/persistent policy according to the existing MateMCP approval model. Approval text describes the specific action even though the policy key is shared, so the first decision is understandable while session approval remains usable across subsequent coordinates/keys.
+
+`keyboard_type` deliberately omits the actual typed string from approval/audit records. It is not a GUI secret-injection primitive and must not be used to disclose or log passwords. A future GUI secret path must resolve named secrets inside the Agent in the same non-disclosing manner as terminal secret injection.
+
 ### Platform notes
 
 #### macOS
 
-Display metadata comes from CoreGraphics. Window metadata comes from Quartz Window Services and window screenshots use the built-in `screencapture` utility. MateMCP must have the OS Screen Recording permission before pixel capture succeeds. When permission is missing, the tool returns an actionable error rather than bypassing the OS privacy boundary.
+Display metadata comes from CoreGraphics. Window metadata comes from Quartz Window Services and window screenshots use the built-in `screencapture` utility. MateMCP must have Screen Recording permission before pixel capture succeeds. Mouse/keyboard generation uses CoreGraphics events and therefore requires the appropriate macOS Accessibility/Input Monitoring permission. `window_focus` activates the owning application for the selected window.
 
 #### Windows
 
-Display/window metadata comes from Win32 APIs. Capture runs in the signed-in user's desktop session and uses the Windows graphics stack through the inbox PowerShell/.NET desktop assemblies. The implementation explicitly uses per-monitor DPI awareness so screenshot coordinates stay aligned with discovery results.
+Display/window metadata comes from Win32 APIs. Capture runs in the signed-in user's desktop session and uses the Windows graphics stack through inbox PowerShell/.NET desktop assemblies. The implementation explicitly uses per-monitor DPI awareness so screenshot coordinates stay aligned with discovery results. Input uses the signed-in interactive desktop; Windows secure desktop/UAC boundaries are not bypassed.
 
 Window capture in the Phase 1 implementation represents the currently rendered window bounds. Minimized Windows windows must be restored before capture. Later semantic/native automation phases can add richer off-screen/native capture strategies where useful.
 
-## Planned capability groups
+## Capability roadmap
 
 - screen capture / visual inspection — Phase 1 (#126)
-- mouse move / click / scroll — Phase 2 (#127)
-- keyboard text / key / hotkey — Phase 2 (#127)
+- mouse / keyboard / window focus — Phase 2 (#127)
 - semantic accessibility/UI automation — Phase 3 (#128)
 - browser/DOM automation — Phase 4 (#129)
 - responsive and before/after visual QA — Phase 5 (#131)
+- cross-cutting risk/session/revoke UX — #130
 - clipboard access — future scoped capability, independently permissioned
 
 Preferred interaction order:
@@ -53,11 +72,13 @@ Preferred interaction order:
 
 ## Security requirements
 
-- separate grants for screen viewing, mouse control, keyboard input, and clipboard
+- separate policy capabilities for visual inspection, raw input, semantic input, and future clipboard access
 - obvious local indicator while AI computer use is active
 - immediate local pause/kill control
 - sensitive OS permission prompts and credential surfaces remain approval-gated
 - every action is auditable
+- screenshot pixels are not retained by default
+- literal keyboard text is not written to audit logs
 - password/secure-text contents are never exposed through visual/semantic snapshots
 
-The cross-cutting approval, session-indicator and emergency-stop work is tracked in #130.
+The richer risk classification, Companion session indicator, local revoke/stop control, and semantic effect-aware approvals remain tracked in #130.
