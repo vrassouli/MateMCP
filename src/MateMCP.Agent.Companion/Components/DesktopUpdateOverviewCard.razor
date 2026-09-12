@@ -1,5 +1,6 @@
 @implements IAsyncDisposable
 @inject DesktopUpdateService Updates
+@inject AgentApiClient Api
 
 <div class="panel dashboard-card update-overview-card @(UpdateStatus?.UpdateAvailable == true ? "needs-attention" : null)" aria-live="polite">
     <div class="muted">Desktop update</div>
@@ -40,11 +41,41 @@
     }
 </div>
 
+<div class="panel dashboard-card usage-card @(ComputerUseActive ? "in-use" : null)" aria-live="polite">
+    <div class="muted">Computer Use</div>
+    <div class="metric agent-status @(ComputerUseActive ? "online" : null)">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>@ComputerUseLabel</span>
+    </div>
+    <div class="muted">@ComputerUseDetail</div>
+
+    @if (!string.IsNullOrWhiteSpace(ComputerUseError))
+    {
+        <div class="muted dashboard-card-note">@ComputerUseError</div>
+    }
+
+    <div class="actions">
+        @if (ComputerUseActive)
+        {
+            <Button Text="Stop computer use" OnClick="StopComputerUseAsync" />
+        }
+        else if (ComputerUse?.Blocked == true)
+        {
+            <Button Text="Resume computer use" OnClick="ResumeComputerUseAsync" />
+        }
+    </div>
+</div>
+
 @code {
+    private const int ComputerUseIdleSeconds = 45;
     private readonly CancellationTokenSource _cts = new();
+    private Task? _computerUseLoop;
     private DesktopUpdateStatus? UpdateStatus { get; set; }
     private DesktopUpdateProgress? Progress { get; set; }
+    private ComputerUseIndicator? ComputerUse { get; set; }
+    private string? AgentDataDirectory { get; set; }
     private string? Error { get; set; }
+    private string? ComputerUseError { get; set; }
     private bool Checking { get; set; }
     private bool Updating { get; set; }
 
@@ -58,7 +89,30 @@
                     ? "Up to date"
                     : "Update status unavailable";
 
-    protected override async Task OnInitializedAsync() => await CheckAsync();
+    private bool ComputerUseActive
+        => ComputerUse is { Blocked: false, LastActivityAt: { } last }
+           && DateTimeOffset.UtcNow - last <= TimeSpan.FromSeconds(ComputerUseIdleSeconds);
+
+    private string ComputerUseLabel
+        => ComputerUse?.Blocked == true
+            ? "Stopped by you"
+            : ComputerUseActive
+                ? "AI is controlling this device"
+                : "Idle";
+
+    private string ComputerUseDetail
+        => ComputerUse?.Blocked == true
+            ? "Vision and mouse/keyboard actions are blocked locally until you resume them."
+            : ComputerUseActive
+                ? $"Active mode: {ComputerUse!.Mode ?? "computer use"}. Use Stop computer use to revoke control immediately."
+                : "No recent AI screen, mouse, or keyboard activity.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckAsync();
+        await RefreshComputerUseAsync();
+        _computerUseLoop = PollComputerUseAsync();
+    }
 
     private async Task CheckAsync()
     {
@@ -108,10 +162,116 @@
         }
     }
 
-    public ValueTask DisposeAsync()
+    private async Task PollComputerUseAsync()
+    {
+        while (!_cts.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), _cts.Token);
+                await RefreshComputerUseAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (OperationCanceledException) when (_cts.IsCancellationRequested) { break; }
+            catch
+            {
+                // Keep the Companion usable if a transient file/API read fails; the next poll retries.
+            }
+        }
+    }
+
+    private async Task RefreshComputerUseAsync()
+    {
+        try
+        {
+            ComputerUseError = null;
+            if (string.IsNullOrWhiteSpace(AgentDataDirectory))
+            {
+                var status = await Api.GetStatusAsync(_cts.Token);
+                AgentDataDirectory = status is null ? null : System.IO.Path.GetDirectoryName(status.Configuration);
+            }
+
+            if (string.IsNullOrWhiteSpace(AgentDataDirectory))
+            {
+                ComputerUse = null;
+                return;
+            }
+
+            var indicatorPath = System.IO.Path.Combine(AgentDataDirectory, "computer-use-indicator.json");
+            if (!System.IO.File.Exists(indicatorPath))
+            {
+                ComputerUse = null;
+                return;
+            }
+
+            var json = await System.IO.File.ReadAllTextAsync(indicatorPath, _cts.Token);
+            ComputerUse = System.Text.Json.JsonSerializer.Deserialize<ComputerUseIndicator>(json,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            ComputerUseError = $"Computer Use status unavailable: {ex.Message}";
+        }
+    }
+
+    private Task StopComputerUseAsync()
+    {
+        if (string.IsNullOrWhiteSpace(AgentDataDirectory)) return Task.CompletedTask;
+        try
+        {
+            var stopPath = System.IO.Path.Combine(AgentDataDirectory, "computer-use.stop");
+            System.IO.File.WriteAllText(stopPath, DateTimeOffset.UtcNow.ToString("O") + Environment.NewLine);
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+            {
+                try { System.IO.File.SetUnixFileMode(stopPath, UnixFileMode.UserRead | UnixFileMode.UserWrite); } catch { }
+            }
+            ComputerUse = (ComputerUse ?? new ComputerUseIndicator(false, null, null, null, null)) with
+            {
+                Blocked = true,
+                LastActivityAt = null,
+                RevokedAt = DateTimeOffset.UtcNow
+            };
+            ComputerUseError = null;
+        }
+        catch (Exception ex)
+        {
+            ComputerUseError = $"Could not stop Computer Use: {ex.Message}";
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task ResumeComputerUseAsync()
+    {
+        if (string.IsNullOrWhiteSpace(AgentDataDirectory)) return Task.CompletedTask;
+        try
+        {
+            var stopPath = System.IO.Path.Combine(AgentDataDirectory, "computer-use.stop");
+            if (System.IO.File.Exists(stopPath)) System.IO.File.Delete(stopPath);
+            ComputerUse = new ComputerUseIndicator(false, null, null, null, null);
+            ComputerUseError = null;
+        }
+        catch (Exception ex)
+        {
+            ComputerUseError = $"Could not resume Computer Use: {ex.Message}";
+        }
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
+        if (_computerUseLoop is not null)
+        {
+            try { await _computerUseLoop; } catch (OperationCanceledException) { }
+        }
         _cts.Dispose();
-        return ValueTask.CompletedTask;
     }
+
+    private sealed record ComputerUseIndicator(
+        bool Blocked,
+        string? Mode,
+        DateTimeOffset? StartedAt,
+        DateTimeOffset? LastActivityAt,
+        DateTimeOffset? RevokedAt);
 }
