@@ -37,6 +37,7 @@ public sealed class BrowserRuntimeIntegrationTests
             var initial = await browser.SnapshotAsync();
             Assert.Equal(server.Url, initial.Url);
             Assert.Contains(initial.Elements, element => element.Role == "textbox" && element.Name == "Name");
+            Assert.Contains(initial.Elements, element => element.Role == "combobox" && element.Name == "Country");
             Assert.Contains(initial.Elements, element => element.Role == "button" && element.Name == "Increment");
             Assert.Contains(initial.Elements, element => element.Role == "heading" && element.Name == "Count 0");
 
@@ -44,10 +45,16 @@ public sealed class BrowserRuntimeIntegrationTests
             var filled = await browser.FillAsync(new BrowserSelector(Role: "textbox", Name: "Name"), "MateMCP");
             Assert.True(filled.Ok);
 
-            Mark("snapshot after fill");
+            Mark("select");
+            var selected = await browser.FillAsync(new BrowserSelector(Role: "combobox", Name: "Country"), "ir");
+            Assert.True(selected.Ok);
+
+            Mark("snapshot after fill/select");
             var afterFill = await browser.SnapshotAsync();
             Assert.Contains(afterFill.Elements, element =>
                 element.Role == "textbox" && element.Name == "Name" && element.Value == "MateMCP");
+            Assert.Contains(afterFill.Elements, element =>
+                element.Role == "combobox" && element.Name == "Country" && element.Value == "ir");
 
             Mark("click");
             var clicked = await browser.ClickAsync(new BrowserSelector(Role: "button", Name: "Increment"));
@@ -93,6 +100,11 @@ public sealed class BrowserRuntimeIntegrationTests
 <body>
   <label for="name">Name</label>
   <input id="name" type="text">
+  <label for="country">Country</label>
+  <select id="country">
+    <option value="us">United States</option>
+    <option value="ir">Iran</option>
+  </select>
   <button aria-label="Increment" onclick="const h=document.getElementById('count');const n=Number(h.dataset.count)+1;h.dataset.count=String(n);h.textContent='Count '+n;">Increment</button>
   <h1 id="count" data-count="0">Count 0</h1>
 </body>
