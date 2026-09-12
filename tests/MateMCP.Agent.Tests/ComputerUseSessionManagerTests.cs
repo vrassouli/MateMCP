@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MateMCP.Agent.Desktop;
 
 namespace MateMCP.Agent.Tests;
@@ -20,6 +21,23 @@ public sealed class ComputerUseSessionManagerTests
         Assert.NotNull(status.StartedAt);
         Assert.NotNull(status.LastActivityAt);
         Assert.True(File.Exists(Path.Combine(temp.Path, ComputerUseSessionManager.StatusFileName)));
+        Assert.True(File.Exists(Path.Combine(temp.Path, ComputerUseSessionManager.IndicatorFileName)));
+    }
+
+    [Fact]
+    public void Public_indicator_does_not_expose_session_or_target_details()
+    {
+        using var temp = new TempComputerUseDirectory();
+        var manager = temp.CreateManager();
+        manager.Touch("input", "Activate private window title");
+
+        var json = File.ReadAllText(Path.Combine(temp.Path, ComputerUseSessionManager.IndicatorFileName));
+        using var document = JsonDocument.Parse(json);
+
+        Assert.False(document.RootElement.TryGetProperty("sessionId", out _));
+        Assert.False(document.RootElement.TryGetProperty("target", out _));
+        Assert.False(document.RootElement.TryGetProperty("revokeReason", out _));
+        Assert.Equal("input", document.RootElement.GetProperty("mode").GetString());
     }
 
     [Fact]
@@ -66,6 +84,26 @@ public sealed class ComputerUseSessionManagerTests
         Assert.True(status.Blocked);
         Assert.False(status.Active);
         Assert.Equal("Stopped from local Companion.", status.RevokeReason);
+    }
+
+    [Fact]
+    public void Removing_external_stop_sentinel_resumes_without_restoring_old_session()
+    {
+        using var temp = new TempComputerUseDirectory();
+        var manager = temp.CreateManager();
+        var previous = manager.Touch("view", "screen");
+        File.WriteAllText(Path.Combine(temp.Path, ComputerUseSessionManager.StopFileName), "local stop");
+        Assert.Throws<InvalidOperationException>(() => manager.EnsureAvailable());
+
+        File.Delete(Path.Combine(temp.Path, ComputerUseSessionManager.StopFileName));
+        manager.EnsureAvailable();
+        var resumed = manager.GetStatus();
+
+        Assert.False(resumed.Blocked);
+        Assert.False(resumed.Active);
+        Assert.Null(resumed.SessionId);
+        var next = manager.Touch("view", "screen");
+        Assert.NotEqual(previous.SessionId, next.SessionId);
     }
 
     [Fact]
