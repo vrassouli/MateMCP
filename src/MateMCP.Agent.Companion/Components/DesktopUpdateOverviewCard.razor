@@ -197,16 +197,28 @@
                 return;
             }
 
+            var stopPath = System.IO.Path.Combine(AgentDataDirectory, "computer-use.stop");
+            var stoppedLocally = System.IO.File.Exists(stopPath);
             var indicatorPath = System.IO.Path.Combine(AgentDataDirectory, "computer-use-indicator.json");
             if (!System.IO.File.Exists(indicatorPath))
             {
-                ComputerUse = null;
+                ComputerUse = stoppedLocally
+                    ? new ComputerUseIndicator(true, null, null, null, DateTimeOffset.UtcNow)
+                    : null;
                 return;
             }
 
             var json = await System.IO.File.ReadAllTextAsync(indicatorPath, _cts.Token);
-            ComputerUse = System.Text.Json.JsonSerializer.Deserialize<ComputerUseIndicator>(json,
+            var indicator = System.Text.Json.JsonSerializer.Deserialize<ComputerUseIndicator>(json,
                 new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            ComputerUse = indicator is null
+                ? (stoppedLocally ? new ComputerUseIndicator(true, null, null, null, DateTimeOffset.UtcNow) : null)
+                : indicator with
+                {
+                    Blocked = stoppedLocally,
+                    LastActivityAt = stoppedLocally ? null : indicator.LastActivityAt,
+                    RevokedAt = stoppedLocally ? indicator.RevokedAt ?? DateTimeOffset.UtcNow : null
+                };
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception ex)
