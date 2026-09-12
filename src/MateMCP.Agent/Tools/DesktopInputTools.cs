@@ -8,18 +8,23 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit, AgentActivityGate? activity = null)
+public sealed class DesktopInputTools(
+    ApprovalService approvals,
+    AuditLog audit,
+    AgentActivityGate? activity = null)
 {
     private readonly DesktopInputService _input = new();
     private readonly DesktopVisionService _vision = new();
     private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
+    private readonly ComputerUseSessionManager _computerUse = ComputerUseSessionManager.Shared;
 
     [McpServerTool(Name = "mouse_move", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Moves the local mouse pointer to global desktop logical coordinates. Raw desktop input is approval-gated because coordinate actions do not carry semantic intent.")]
     public async Task<string> MouseMove(int x, int y, CancellationToken cancellationToken = default)
     {
         using var lease = EnterActivity();
-        await RequireInputApprovalAsync($"Move pointer to ({x},{y}).", cancellationToken);
+        var summary = $"Move pointer to ({x},{y}).";
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.MoveMouse(x, y);
         await audit.WriteAsync("desktop.input.mouse", $"move:{x},{y}", "ok", cancellationToken);
         return "moved";
@@ -37,7 +42,8 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
         using var lease = EnterActivity();
         button = DesktopInputService.NormalizeButton(button);
         clickCount = Math.Clamp(clickCount, 1, 3);
-        await RequireInputApprovalAsync($"{button} click x{clickCount} at ({x},{y}).", cancellationToken);
+        var summary = $"{button} click x{clickCount} at ({x},{y}).";
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.ClickMouse(x, y, button, clickCount);
         await audit.WriteAsync("desktop.input.mouse", $"click:{button}:{clickCount}@{x},{y}", "ok", cancellationToken);
         return "clicked";
@@ -57,7 +63,8 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
         using var lease = EnterActivity();
         button = DesktopInputService.NormalizeButton(button);
         durationMs = Math.Clamp(durationMs, 0, 5000);
-        await RequireInputApprovalAsync($"Drag {button} from ({fromX},{fromY}) to ({toX},{toY}) over {durationMs} ms.", cancellationToken);
+        var summary = $"Drag {button} from ({fromX},{fromY}) to ({toX},{toY}) over {durationMs} ms.";
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.DragMouse(fromX, fromY, toX, toY, button, durationMs);
         await audit.WriteAsync("desktop.input.mouse", $"drag:{button}:{fromX},{fromY}->{toX},{toY}", "ok", cancellationToken);
         return "dragged";
@@ -74,7 +81,8 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
     {
         using var lease = EnterActivity();
         if ((x is null) != (y is null)) throw new McpException("x and y must either both be supplied or both be omitted.");
-        await RequireInputApprovalAsync($"Scroll deltaX={deltaX}, deltaY={deltaY}" + (x is null ? "." : $" at ({x},{y})."), cancellationToken);
+        var summary = $"Scroll deltaX={deltaX}, deltaY={deltaY}" + (x is null ? "." : $" at ({x},{y}).");
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.ScrollMouse(deltaX, deltaY, x, y);
         await audit.WriteAsync("desktop.input.mouse", $"scroll:{deltaX},{deltaY}", "ok", cancellationToken);
         return "scrolled";
@@ -86,7 +94,8 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
     {
         using var lease = EnterActivity();
         ArgumentNullException.ThrowIfNull(text);
-        await RequireInputApprovalAsync($"Type {text.Length} literal characters into the focused control. Text is intentionally omitted from the approval/audit detail.", cancellationToken);
+        var summary = $"Type {text.Length} literal characters into the focused control. Text is intentionally omitted from the approval/audit detail.";
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.TypeText(text);
         await audit.WriteAsync("desktop.input.keyboard", "type", $"ok:length:{text.Length}", cancellationToken);
         return "typed";
@@ -98,7 +107,8 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
     {
         using var lease = EnterActivity();
         key = DesktopInputService.NormalizeKey(key);
-        await RequireInputApprovalAsync($"Press key {key}.", cancellationToken);
+        var summary = $"Press key {key}.";
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.PressKey(key);
         await audit.WriteAsync("desktop.input.keyboard", $"key:{key}", "ok", cancellationToken);
         return "pressed";
@@ -111,7 +121,8 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
         using var lease = EnterActivity();
         if (keys is null) throw new McpException("keys is required.");
         var normalized = keys.Select(DesktopInputService.NormalizeKey).ToArray();
-        await RequireInputApprovalAsync($"Press shortcut {string.Join('+', normalized)}.", cancellationToken);
+        var summary = $"Press shortcut {string.Join('+', normalized)}.";
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.PressShortcut(normalized);
         await audit.WriteAsync("desktop.input.keyboard", $"shortcut:{string.Join('+', normalized)}", "ok", cancellationToken);
         return "pressed";
@@ -122,17 +133,20 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
     public async Task<string> WindowFocus(string windowId, CancellationToken cancellationToken = default)
     {
         using var lease = EnterActivity();
+        EnsureComputerUseAvailable();
         var windows = await _vision.ListWindowsAsync(cancellationToken);
         var window = windows.FirstOrDefault(item => string.Equals(item.Id, windowId, StringComparison.OrdinalIgnoreCase))
             ?? throw new McpException($"Window '{windowId}' is no longer available. Call window_list again.");
-        await RequireInputApprovalAsync($"Activate window '{Trim(window.Title)}' owned by {Trim(window.Application)}.", cancellationToken);
+        var summary = $"Activate window '{Trim(window.Title)}' owned by {Trim(window.Application)}.";
+        await AuthorizeInputAsync(summary, cancellationToken);
         _input.FocusWindow(window.Id, window.ProcessId);
         await audit.WriteAsync("desktop.input.window", $"focus:{window.Application}:{window.Id}", "ok", cancellationToken);
         return "focused";
     }
 
-    private async Task RequireInputApprovalAsync(string summary, CancellationToken cancellationToken)
+    private async Task AuthorizeInputAsync(string summary, CancellationToken cancellationToken)
     {
+        EnsureComputerUseAvailable();
         var decision = await approvals.RequestAsync("desktop.input", "raw-input", summary, cancellationToken);
         if (decision == ApprovalDecision.Deny)
         {
@@ -144,6 +158,14 @@ public sealed class DesktopInputTools(ApprovalService approvals, AuditLog audit,
             await audit.WriteAsync("desktop.input", "raw-input", "denied:approval-timeout", CancellationToken.None);
             throw new McpException("Desktop input approval timed out.");
         }
+        try { _computerUse.Touch("input", summary); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
+    }
+
+    private void EnsureComputerUseAvailable()
+    {
+        try { _computerUse.EnsureAvailable(); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
     }
 
     private IDisposable EnterActivity()

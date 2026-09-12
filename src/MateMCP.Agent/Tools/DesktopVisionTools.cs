@@ -13,12 +13,15 @@ namespace MateMCP.Agent.Tools;
 public sealed class DesktopVisionTools(AuditLog audit, ApprovalService approvals)
 {
     private readonly DesktopVisionService _vision = new();
+    private readonly ComputerUseSessionManager _computerUse = ComputerUseSessionManager.Shared;
 
     [McpServerTool(Name = "screen_list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists displays available to the local MateMCP Agent, including logical bounds, scale factor, and primary-display status. Desktop visual inspection is privacy-sensitive and requires local approval unless an applicable session/persistent policy already exists.")]
     public async Task<IReadOnlyList<DesktopScreenInfo>> ListScreens(CancellationToken cancellationToken = default)
     {
+        EnsureComputerUseAvailable();
         await RequireViewApprovalAsync("Inspect the local display layout (screen identifiers, bounds, scale, and primary-display state).", cancellationToken);
+        _computerUse.Touch("view", "display layout");
         try
         {
             var screens = await _vision.ListScreensAsync(cancellationToken);
@@ -36,7 +39,9 @@ public sealed class DesktopVisionTools(AuditLog audit, ApprovalService approvals
     [Description("Lists visible top-level application windows available to the local MateMCP Agent. Window titles/application identities can be privacy-sensitive, so visual inspection requires local approval unless an applicable session/persistent policy already exists. Use the returned window id with screen_capture target=window.")]
     public async Task<IReadOnlyList<DesktopWindowInfo>> ListWindows(CancellationToken cancellationToken = default)
     {
+        EnsureComputerUseAvailable();
         await RequireViewApprovalAsync("Inspect visible local application windows, including titles, application identity, and geometry.", cancellationToken);
+        _computerUse.Touch("view", "visible windows");
         try
         {
             var windows = await _vision.ListWindowsAsync(cancellationToken);
@@ -61,6 +66,7 @@ public sealed class DesktopVisionTools(AuditLog audit, ApprovalService approvals
         [Description("Region height in global desktop logical coordinates; required only for target=region.")] int? height = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureComputerUseAvailable();
         var normalized = DesktopVisionService.NormalizeTarget(target);
         var targetSummary = normalized switch
         {
@@ -69,6 +75,7 @@ public sealed class DesktopVisionTools(AuditLog audit, ApprovalService approvals
             _ => $"Capture pixels from local display {id ?? "primary"}."
         };
         await RequireViewApprovalAsync(targetSummary, cancellationToken);
+        _computerUse.Touch("view", targetSummary);
 
         try
         {
@@ -112,5 +119,11 @@ public sealed class DesktopVisionTools(AuditLog audit, ApprovalService approvals
             await audit.WriteAsync("desktop.view", "visual-inspection", "denied:approval-timeout", CancellationToken.None);
             throw new McpException("Desktop visual inspection approval timed out.");
         }
+    }
+
+    private void EnsureComputerUseAvailable()
+    {
+        try { _computerUse.EnsureAvailable(); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
     }
 }
