@@ -22,7 +22,9 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
         CancellationToken cancellationToken = default)
     {
         await AuthorizeViewAsync($"Inspect the native accessibility tree for window id {windowId}.", cancellationToken);
-        var snapshot = await _semantic.SnapshotAsync(windowId, maxElements, cancellationToken);
+        UiSnapshot snapshot;
+        try { snapshot = await _semantic.SnapshotAsync(windowId, maxElements, cancellationToken); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
         _computerUse.Touch("semantic-view", $"window {windowId}");
         await audit.WriteAsync("desktop.semantic.snapshot", windowId, $"ok:{snapshot.Elements.Count}:truncated={snapshot.Truncated}", cancellationToken);
         return snapshot;
@@ -72,9 +74,14 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
         var selector = Selector(role, name, automationId, parentId, index);
         var action = expanded ? "expand" : "collapse";
         await AuthorizeActionAsync(action, windowId, selector, null, cancellationToken);
-        var result = OperatingSystem.IsMacOS()
-            ? await _macSemantic.ActAsync(windowId, selector, action, expanded: expanded, cancellationToken: cancellationToken)
-            : await _semantic.SetExpandedAsync(windowId, selector, expanded, cancellationToken);
+        UiElementInfo result;
+        try
+        {
+            result = OperatingSystem.IsMacOS()
+                ? await _macSemantic.ActAsync(windowId, selector, action, expanded: expanded, cancellationToken: cancellationToken)
+                : await _semantic.SetExpandedAsync(windowId, selector, expanded, cancellationToken);
+        }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
         return await RecordSuccessAsync(action, windowId, selector, result, cancellationToken);
     }
 
@@ -89,23 +96,27 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     {
         await AuthorizeActionAsync(action, windowId, selector, text, cancellationToken);
         UiElementInfo result;
-        if (OperatingSystem.IsMacOS())
+        try
         {
-            result = await _macSemantic.ActAsync(windowId, selector, action, text, cancellationToken: cancellationToken);
-        }
-        else
-        {
-            result = action switch
+            if (OperatingSystem.IsMacOS())
             {
-                "invoke" => await _semantic.ClickAsync(windowId, selector, cancellationToken),
-                "value" => await _semantic.TypeAsync(windowId, selector, text ?? string.Empty, cancellationToken),
-                "focus" => await _semantic.FocusAsync(windowId, selector, cancellationToken),
-                "toggle" => await _semantic.ToggleAsync(windowId, selector, cancellationToken),
-                "select" => await _semantic.SelectAsync(windowId, selector, cancellationToken),
-                "scroll" => await _semantic.ScrollIntoViewAsync(windowId, selector, cancellationToken),
-                _ => throw new ArgumentOutOfRangeException(nameof(action))
-            };
+                result = await _macSemantic.ActAsync(windowId, selector, action, text, cancellationToken: cancellationToken);
+            }
+            else
+            {
+                result = action switch
+                {
+                    "invoke" => await _semantic.ClickAsync(windowId, selector, cancellationToken),
+                    "value" => await _semantic.TypeAsync(windowId, selector, text ?? string.Empty, cancellationToken),
+                    "focus" => await _semantic.FocusAsync(windowId, selector, cancellationToken),
+                    "toggle" => await _semantic.ToggleAsync(windowId, selector, cancellationToken),
+                    "select" => await _semantic.SelectAsync(windowId, selector, cancellationToken),
+                    "scroll" => await _semantic.ScrollIntoViewAsync(windowId, selector, cancellationToken),
+                    _ => throw new ArgumentOutOfRangeException(nameof(action))
+                };
+            }
         }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
         return await RecordSuccessAsync(action, windowId, selector, result, cancellationToken);
     }
 
