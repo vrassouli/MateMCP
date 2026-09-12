@@ -1,10 +1,8 @@
 using System.Diagnostics;
-using System.Runtime.Versioning;
 using System.Text.Json;
 
 namespace MateMCP.Agent.Desktop;
 
-[SupportedOSPlatform("macos")]
 public sealed class MacSemanticUiActionService
 {
     private readonly DesktopVisionService _vision = new();
@@ -30,8 +28,6 @@ public sealed class MacSemanticUiActionService
         var script = BuildActionScript(window.ProcessId, window.Title, selected.Id, action, text, expanded);
         await RunScriptAsync(script, selected, action, cancellationToken);
 
-        // The AX path is usually stable and gives us a refreshed state without
-        // re-resolving a potentially changed semantic name after the action.
         try
         {
             var after = await _semantic.SnapshotAsync(windowId, 1000, cancellationToken);
@@ -40,9 +36,6 @@ public sealed class MacSemanticUiActionService
         }
         catch (InvalidOperationException)
         {
-            // Some successful actions close/destroy their source window. Do not
-            // report a false action failure merely because a post-action snapshot
-            // is no longer possible.
             return selected;
         }
     }
