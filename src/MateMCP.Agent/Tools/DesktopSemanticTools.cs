@@ -11,6 +11,7 @@ namespace MateMCP.Agent.Tools;
 public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog audit)
 {
     private readonly SemanticUiService _semantic = new();
+    private readonly MacSemanticUiActionService _macSemantic = new();
     private readonly ComputerUseSessionManager _computerUse = ComputerUseSessionManager.Shared;
 
     [McpServerTool(Name = "ui_snapshot", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
@@ -28,14 +29,14 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     }
 
     [McpServerTool(Name = "ui_click", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Invokes a uniquely matched native UI control by semantic selector. If the selector is ambiguous, nothing is invoked. If the control lacks a native invoke pattern, the tool fails and returns bounds for an explicit raw-input fallback when available.")]
+    [Description("Invokes a uniquely matched native UI control by semantic selector. If the selector is ambiguous, nothing is invoked. If the control lacks a native semantic action, the tool fails and returns bounds for an explicit raw-input fallback when available.")]
     public async Task<UiElementInfo> Click(
         string windowId, string? role = null, string? name = null, string? automationId = null,
         string? parentId = null, int? index = null, CancellationToken cancellationToken = default)
         => await ActAsync("invoke", windowId, Selector(role, name, automationId, parentId, index), null, cancellationToken);
 
     [McpServerTool(Name = "ui_type", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Replaces the value of a uniquely matched native editable control using its accessibility value pattern. Secure/password controls are refused. Literal text is not written to MateMCP approval/audit logs.")]
+    [Description("Replaces the value of a uniquely matched native editable control using the native accessibility value API. Secure/password controls are refused. Literal text is not written to MateMCP approval/audit logs.")]
     public async Task<UiElementInfo> Type(
         string windowId, string text, string? role = null, string? name = null, string? automationId = null,
         string? parentId = null, int? index = null, CancellationToken cancellationToken = default)
@@ -49,33 +50,36 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
         => await ActAsync("focus", windowId, Selector(role, name, automationId, parentId, index), null, cancellationToken);
 
     [McpServerTool(Name = "ui_toggle", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Toggles a uniquely matched native checkbox/toggle control using its accessibility toggle pattern.")]
+    [Description("Toggles a uniquely matched native checkbox/toggle control using its native accessibility action.")]
     public async Task<UiElementInfo> Toggle(
         string windowId, string? role = null, string? name = null, string? automationId = null,
         string? parentId = null, int? index = null, CancellationToken cancellationToken = default)
         => await ActAsync("toggle", windowId, Selector(role, name, automationId, parentId, index), null, cancellationToken);
 
     [McpServerTool(Name = "ui_select", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Selects a uniquely matched native list/tab/tree item using its accessibility selection pattern.")]
+    [Description("Selects a uniquely matched native list/tab/tree item using its native accessibility action.")]
     public async Task<UiElementInfo> Select(
         string windowId, string? role = null, string? name = null, string? automationId = null,
         string? parentId = null, int? index = null, CancellationToken cancellationToken = default)
         => await ActAsync("select", windowId, Selector(role, name, automationId, parentId, index), null, cancellationToken);
 
     [McpServerTool(Name = "ui_expand", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Expands or collapses a uniquely matched native control using its accessibility expand/collapse pattern.")]
+    [Description("Expands or collapses a uniquely matched native control using its accessibility expand/collapse capability.")]
     public async Task<UiElementInfo> Expand(
         string windowId, bool expanded = true, string? role = null, string? name = null, string? automationId = null,
         string? parentId = null, int? index = null, CancellationToken cancellationToken = default)
     {
         var selector = Selector(role, name, automationId, parentId, index);
-        await AuthorizeActionAsync(expanded ? "expand" : "collapse", windowId, selector, null, cancellationToken);
-        var result = await _semantic.SetExpandedAsync(windowId, selector, expanded, cancellationToken);
-        return await RecordSuccessAsync(expanded ? "expand" : "collapse", windowId, selector, result, cancellationToken);
+        var action = expanded ? "expand" : "collapse";
+        await AuthorizeActionAsync(action, windowId, selector, null, cancellationToken);
+        var result = OperatingSystem.IsMacOS()
+            ? await _macSemantic.ActAsync(windowId, selector, action, expanded: expanded, cancellationToken: cancellationToken)
+            : await _semantic.SetExpandedAsync(windowId, selector, expanded, cancellationToken);
+        return await RecordSuccessAsync(action, windowId, selector, result, cancellationToken);
     }
 
     [McpServerTool(Name = "ui_scroll_into_view", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Scrolls a uniquely matched native control into view using its accessibility scroll-item pattern.")]
+    [Description("Scrolls a uniquely matched native control into view using its native accessibility scroll capability.")]
     public async Task<UiElementInfo> ScrollIntoView(
         string windowId, string? role = null, string? name = null, string? automationId = null,
         string? parentId = null, int? index = null, CancellationToken cancellationToken = default)
@@ -84,16 +88,24 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     private async Task<UiElementInfo> ActAsync(string action, string windowId, UiSelector selector, string? text, CancellationToken cancellationToken)
     {
         await AuthorizeActionAsync(action, windowId, selector, text, cancellationToken);
-        UiElementInfo result = action switch
+        UiElementInfo result;
+        if (OperatingSystem.IsMacOS())
         {
-            "invoke" => await _semantic.ClickAsync(windowId, selector, cancellationToken),
-            "value" => await _semantic.TypeAsync(windowId, selector, text ?? string.Empty, cancellationToken),
-            "focus" => await _semantic.FocusAsync(windowId, selector, cancellationToken),
-            "toggle" => await _semantic.ToggleAsync(windowId, selector, cancellationToken),
-            "select" => await _semantic.SelectAsync(windowId, selector, cancellationToken),
-            "scroll" => await _semantic.ScrollIntoViewAsync(windowId, selector, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(action))
-        };
+            result = await _macSemantic.ActAsync(windowId, selector, action, text, cancellationToken: cancellationToken);
+        }
+        else
+        {
+            result = action switch
+            {
+                "invoke" => await _semantic.ClickAsync(windowId, selector, cancellationToken),
+                "value" => await _semantic.TypeAsync(windowId, selector, text ?? string.Empty, cancellationToken),
+                "focus" => await _semantic.FocusAsync(windowId, selector, cancellationToken),
+                "toggle" => await _semantic.ToggleAsync(windowId, selector, cancellationToken),
+                "select" => await _semantic.SelectAsync(windowId, selector, cancellationToken),
+                "scroll" => await _semantic.ScrollIntoViewAsync(windowId, selector, cancellationToken),
+                _ => throw new ArgumentOutOfRangeException(nameof(action))
+            };
+        }
         return await RecordSuccessAsync(action, windowId, selector, result, cancellationToken);
     }
 
