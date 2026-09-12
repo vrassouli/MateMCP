@@ -1,8 +1,6 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text.Json;
 
 namespace MateMCP.Agent.Desktop;
 
@@ -23,14 +21,16 @@ public sealed class SemanticUiService
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "focus", null);
-        throw new PlatformNotSupportedException("Semantic focus is not implemented on macOS yet; ui_snapshot is available and raw input remains an explicit fallback.");
+        if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "focus", null);
+        throw UnsupportedPlatform();
     }
 
     public async Task<UiElementInfo> ClickAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "invoke", null);
-        throw new PlatformNotSupportedException("Semantic invoke is not implemented on macOS yet; ui_snapshot is available and raw input remains an explicit fallback.");
+        if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "invoke", null);
+        throw UnsupportedPlatform();
     }
 
     public async Task<UiElementInfo> TypeAsync(string windowId, UiSelector selector, string text, CancellationToken cancellationToken = default)
@@ -39,35 +39,40 @@ public sealed class SemanticUiService
         if (text.Length > 20_000) throw new ArgumentOutOfRangeException(nameof(text), "Text entry is limited to 20,000 characters per call.");
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "value", text);
-        throw new PlatformNotSupportedException("Semantic value entry is not implemented on macOS yet; raw keyboard input remains an explicit fallback.");
+        if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "value", text);
+        throw UnsupportedPlatform();
     }
 
     public async Task<UiElementInfo> ToggleAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "toggle", null);
-        throw new PlatformNotSupportedException("Semantic toggle is not implemented on macOS yet.");
+        if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "toggle", null);
+        throw UnsupportedPlatform();
     }
 
     public async Task<UiElementInfo> SelectAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "select", null);
-        throw new PlatformNotSupportedException("Semantic selection is not implemented on macOS yet.");
+        if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "select", null);
+        throw UnsupportedPlatform();
     }
 
     public async Task<UiElementInfo> SetExpandedAsync(string windowId, UiSelector selector, bool expanded, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, expanded ? "expand" : "collapse", null);
-        throw new PlatformNotSupportedException("Semantic expand/collapse is not implemented on macOS yet.");
+        if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, expanded ? "expand" : "collapse", null, expanded);
+        throw UnsupportedPlatform();
     }
 
     public async Task<UiElementInfo> ScrollIntoViewAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "scroll", null);
-        throw new PlatformNotSupportedException("Semantic scroll-into-view is not implemented on macOS yet.");
+        if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "scroll", null);
+        throw UnsupportedPlatform();
     }
 
     private async Task<DesktopWindowInfo> ResolveWindowAsync(string windowId, CancellationToken cancellationToken)
@@ -388,113 +393,17 @@ public sealed class SemanticUiService
     [SupportedOSPlatform("macos")]
     private static class MacSemanticUi
     {
-        public static async Task<UiSnapshot> SnapshotAsync(DesktopWindowInfo window, int maxElements, CancellationToken cancellationToken)
+        public static Task<UiSnapshot> SnapshotAsync(DesktopWindowInfo window, int maxElements, CancellationToken cancellationToken)
         {
-            var script = BuildSnapshotScript(window.ProcessId, window.Title, maxElements);
-            var psi = new ProcessStartInfo("/usr/bin/osascript")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add("-l");
-            psi.ArgumentList.Add("JavaScript");
-            psi.ArgumentList.Add("-e");
-            psi.ArgumentList.Add(script);
-
-            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Could not start macOS accessibility inspection.");
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(12));
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(timeout.Token);
-            try { await process.WaitForExitAsync(timeout.Token); }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                throw new InvalidOperationException("macOS accessibility inspection timed out. Verify Accessibility permission for MateMCP.");
-            }
-
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException($"macOS Accessibility inspection failed. Grant Accessibility permission to MateMCP. {Trim(stderr, 500)}");
-
-            var envelope = JsonSerializer.Deserialize<MacSnapshotEnvelope>(stdout, new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                ?? throw new InvalidOperationException("macOS Accessibility returned an invalid snapshot.");
-            return new UiSnapshot(window.Id, "macos-ax-system-events", envelope.Truncated, envelope.Elements ?? []);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(MacAccessibility.Snapshot(window, maxElements));
         }
 
-        private static string BuildSnapshotScript(int processId, string title, int maxElements)
+        public static UiElementInfo Act(DesktopWindowInfo window, UiSelector selector, string action, string? text, bool? expanded = null)
         {
-            var titleJson = JsonSerializer.Serialize(title);
-            return $$"""
-            var se = Application('System Events');
-            var ps = se.processes.whose({unixId: {{processId}}})();
-            if (!ps || ps.length === 0) throw new Error('Target process is not available to Accessibility.');
-            var p = ps[0];
-            var wins = [];
-            try { wins = p.windows(); } catch (e) {}
-            if (!wins || wins.length === 0) throw new Error('Target process has no accessible windows.');
-            var wanted = {{titleJson}};
-            var root = null;
-            for (var wi = 0; wi < wins.length; wi++) {
-              var n = null; try { n = wins[wi].name(); } catch (e) {}
-              if (n === wanted) { root = wins[wi]; break; }
-            }
-            if (root === null) root = wins[0];
-            var max = {{maxElements}};
-            var out = [];
-            var truncated = false;
-            function safe(fn, fallback) { try { var v = fn(); return v === undefined ? fallback : v; } catch (e) { return fallback; } }
-            function roleName(role) {
-              switch (role) {
-                case 'AXButton': return 'button'; case 'AXCheckBox': return 'checkbox'; case 'AXComboBox': return 'combobox';
-                case 'AXTextField': return 'textbox'; case 'AXSecureTextField': return 'password'; case 'AXLink': return 'link';
-                case 'AXMenu': return 'menu'; case 'AXMenuBar': return 'menubar'; case 'AXMenuItem': return 'menuitem';
-                case 'AXRadioButton': return 'radiobutton'; case 'AXTabGroup': return 'tab'; case 'AXStaticText': return 'text';
-                case 'AXToolbar': return 'toolbar'; case 'AXOutline': return 'tree'; case 'AXRow': return 'row';
-                case 'AXGroup': return 'group'; case 'AXTable': return 'table'; case 'AXWindow': return 'window';
-                case 'AXScrollArea': return 'scrollarea'; default: return role ? role.replace(/^AX/, '').toLowerCase() : 'unknown';
-              }
-            }
-            function simpleValue(v) {
-              if (v === null || v === undefined) return null;
-              if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
-              return null;
-            }
-            function walk(e, parentId, path, depth) {
-              if (out.length >= max) { truncated = true; return; }
-              var axRole = safe(function(){ return e.role(); }, 'AXUnknown');
-              var secure = axRole === 'AXSecureTextField';
-              var pos = safe(function(){ return e.position(); }, null);
-              var size = safe(function(){ return e.size(); }, null);
-              var bounds = null;
-              if (pos && size && pos.length >= 2 && size.length >= 2) bounds = {x:Number(pos[0]), y:Number(pos[1]), width:Number(size[0]), height:Number(size[1])};
-              var acts = safe(function(){ return e.actions(); }, []);
-              var actionNames = [];
-              for (var ai = 0; ai < acts.length; ai++) actionNames.push(safe(function(){ return acts[ai].name(); }, 'action'));
-              var value = secure ? null : simpleValue(safe(function(){ return e.value(); }, null));
-              out.push({
-                id:'ax:' + path, parentId:parentId, role:roleName(axRole), name:safe(function(){ return e.name(); }, null),
-                automationId:null, value:value, protected:secure, enabled:!!safe(function(){ return e.enabled(); }, true),
-                focused:!!safe(function(){ return e.focused(); }, false), selected:safe(function(){ return !!e.selected(); }, null),
-                checked:null, expanded:safe(function(){ return !!e.expanded(); }, null), bounds:bounds, actions:actionNames
-              });
-              if (depth >= 12 || out.length >= max) { if (out.length >= max) truncated = true; return; }
-              var children = safe(function(){ return e.uiElements(); }, []);
-              for (var ci = 0; ci < children.length; ci++) {
-                if (out.length >= max) { truncated = true; break; }
-                walk(children[ci], 'ax:' + path, path + '/' + ci, depth + 1);
-              }
-            }
-            walk(root, null, '0', 0);
-            JSON.stringify({truncated:truncated, elements:out});
-            """;
+            var snapshot = MacAccessibility.Snapshot(window, 1000);
+            var selected = UiSelectorResolver.Resolve(snapshot.Elements, selector);
+            return MacAccessibility.Act(window, selected, action, text, expanded);
         }
-
-        private static string Trim(string value, int max) => value.Length <= max ? value.Trim() : value[..max].Trim() + "…";
-
-        private sealed record MacSnapshotEnvelope(bool Truncated, List<UiElementInfo>? Elements);
     }
 }

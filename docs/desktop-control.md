@@ -83,7 +83,7 @@ Windows uses Microsoft UI Automation through the native UIA COM API. Snapshot su
 
 #### macOS
 
-macOS semantic snapshots use the Accessibility surface through System Events/JXA and require Accessibility permission for MateMCP. Secure text fields are redacted. Native semantic actions on macOS are still under implementation; until they are validated, the Agent fails those semantic actions explicitly instead of pretending a coordinate fallback is semantic.
+macOS semantic snapshots and actions use the native Accessibility API through `AXUIElement` inside the Agent process and require Accessibility permission for the MateMCP Agent executable. Secure text fields are redacted/refused. Unsupported AX actions fail explicitly with bounds when available; MateMCP never silently converts them into coordinate input.
 
 ## Computer Use safety
 

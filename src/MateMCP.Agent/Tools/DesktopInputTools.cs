@@ -25,7 +25,7 @@ public sealed class DesktopInputTools(
         using var lease = EnterActivity();
         var summary = $"Move pointer to ({x},{y}).";
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.MoveMouse(x, y);
+        RunInput(() => _input.MoveMouse(x, y));
         await audit.WriteAsync("desktop.input.mouse", $"move:{x},{y}", "ok", cancellationToken);
         return "moved";
     }
@@ -44,7 +44,7 @@ public sealed class DesktopInputTools(
         clickCount = Math.Clamp(clickCount, 1, 3);
         var summary = $"{button} click x{clickCount} at ({x},{y}).";
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.ClickMouse(x, y, button, clickCount);
+        RunInput(() => _input.ClickMouse(x, y, button, clickCount));
         await audit.WriteAsync("desktop.input.mouse", $"click:{button}:{clickCount}@{x},{y}", "ok", cancellationToken);
         return "clicked";
     }
@@ -65,7 +65,7 @@ public sealed class DesktopInputTools(
         durationMs = Math.Clamp(durationMs, 0, 5000);
         var summary = $"Drag {button} from ({fromX},{fromY}) to ({toX},{toY}) over {durationMs} ms.";
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.DragMouse(fromX, fromY, toX, toY, button, durationMs);
+        RunInput(() => _input.DragMouse(fromX, fromY, toX, toY, button, durationMs));
         await audit.WriteAsync("desktop.input.mouse", $"drag:{button}:{fromX},{fromY}->{toX},{toY}", "ok", cancellationToken);
         return "dragged";
     }
@@ -83,7 +83,7 @@ public sealed class DesktopInputTools(
         if ((x is null) != (y is null)) throw new McpException("x and y must either both be supplied or both be omitted.");
         var summary = $"Scroll deltaX={deltaX}, deltaY={deltaY}" + (x is null ? "." : $" at ({x},{y}).");
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.ScrollMouse(deltaX, deltaY, x, y);
+        RunInput(() => _input.ScrollMouse(deltaX, deltaY, x, y));
         await audit.WriteAsync("desktop.input.mouse", $"scroll:{deltaX},{deltaY}", "ok", cancellationToken);
         return "scrolled";
     }
@@ -96,7 +96,7 @@ public sealed class DesktopInputTools(
         ArgumentNullException.ThrowIfNull(text);
         var summary = $"Type {text.Length} literal characters into the focused control. Text is intentionally omitted from the approval/audit detail.";
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.TypeText(text);
+        RunInput(() => _input.TypeText(text));
         await audit.WriteAsync("desktop.input.keyboard", "type", $"ok:length:{text.Length}", cancellationToken);
         return "typed";
     }
@@ -109,7 +109,7 @@ public sealed class DesktopInputTools(
         key = DesktopInputService.NormalizeKey(key);
         var summary = $"Press key {key}.";
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.PressKey(key);
+        RunInput(() => _input.PressKey(key));
         await audit.WriteAsync("desktop.input.keyboard", $"key:{key}", "ok", cancellationToken);
         return "pressed";
     }
@@ -123,7 +123,7 @@ public sealed class DesktopInputTools(
         var normalized = keys.Select(DesktopInputService.NormalizeKey).ToArray();
         var summary = $"Press shortcut {string.Join('+', normalized)}.";
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.PressShortcut(normalized);
+        RunInput(() => _input.PressShortcut(normalized));
         await audit.WriteAsync("desktop.input.keyboard", $"shortcut:{string.Join('+', normalized)}", "ok", cancellationToken);
         return "pressed";
     }
@@ -139,7 +139,7 @@ public sealed class DesktopInputTools(
             ?? throw new McpException($"Window '{windowId}' is no longer available. Call window_list again.");
         var summary = $"Activate window '{Trim(window.Title)}' owned by {Trim(window.Application)}.";
         await AuthorizeInputAsync(summary, cancellationToken);
-        _input.FocusWindow(window.Id, window.ProcessId);
+        RunInput(() => _input.FocusWindow(window.Id, window.ProcessId));
         await audit.WriteAsync("desktop.input.window", $"focus:{window.Application}:{window.Id}", "ok", cancellationToken);
         return "focused";
     }
@@ -165,6 +165,13 @@ public sealed class DesktopInputTools(
     private void EnsureComputerUseAvailable()
     {
         try { _computerUse.EnsureAvailable(); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
+    }
+
+
+    private static void RunInput(Action action)
+    {
+        try { action(); }
         catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
     }
 

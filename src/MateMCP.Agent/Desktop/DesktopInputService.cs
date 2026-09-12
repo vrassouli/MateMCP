@@ -350,10 +350,15 @@ public sealed class DesktopInputService
         private const uint ScrollUnitPixel = 0;
         private const uint MouseEventClickState = 1;
 
-        public static void MoveMouse(int x, int y) => PostMouse(MouseMoved, new CGPoint(x, y), 0, 1);
+        public static void MoveMouse(int x, int y)
+        {
+            MacAccessibility.EnsureTrusted();
+            PostMouse(MouseMoved, new CGPoint(x, y), 0, 1);
+        }
 
         public static void ClickMouse(int x, int y, string button, int clickCount)
         {
+            MacAccessibility.EnsureTrusted();
             var (down, up, mouseButton) = MouseTypes(button, dragging: false);
             var point = new CGPoint(x, y);
             for (var click = 1; click <= clickCount; click++)
@@ -366,6 +371,7 @@ public sealed class DesktopInputService
 
         public static void DragMouse(int fromX, int fromY, int toX, int toY, string button, int durationMs)
         {
+            MacAccessibility.EnsureTrusted();
             var (down, up, mouseButton) = MouseTypes(button, dragging: false);
             var (_, _, _) = MouseTypes(button, dragging: true);
             var dragType = button switch { "left" => LeftMouseDragged, "right" => RightMouseDragged, _ => OtherMouseDragged };
@@ -388,6 +394,7 @@ public sealed class DesktopInputService
 
         public static void ScrollMouse(int deltaX, int deltaY, int? x, int? y)
         {
+            MacAccessibility.EnsureTrusted();
             if (x is not null && y is not null) MoveMouse(x.Value, y.Value);
             var eventRef = CGEventCreateScrollWheelEvent(IntPtr.Zero, ScrollUnitPixel, 2, deltaY, deltaX);
             if (eventRef == IntPtr.Zero) throw new InvalidOperationException("macOS could not create a scroll event.");
@@ -397,6 +404,7 @@ public sealed class DesktopInputService
 
         public static void TypeText(string text)
         {
+            MacAccessibility.EnsureTrusted();
             foreach (var chunk in ChunkText(text, 64))
             {
                 PostUnicode(chunk, KeyDown);
@@ -406,6 +414,7 @@ public sealed class DesktopInputService
 
         public static void PressKey(string key)
         {
+            MacAccessibility.EnsureTrusted();
             var code = KeyCode(key);
             PostKey(code, KeyDown);
             PostKey(code, KeyUp);
@@ -413,6 +422,7 @@ public sealed class DesktopInputService
 
         public static void PressShortcut(IReadOnlyList<string> keys)
         {
+            MacAccessibility.EnsureTrusted();
             var codes = keys.Select(KeyCode).ToArray();
             try { foreach (var code in codes) PostKey(code, KeyDown); }
             finally { for (var index = codes.Length - 1; index >= 0; index--) PostKey(codes[index], KeyUp); }
