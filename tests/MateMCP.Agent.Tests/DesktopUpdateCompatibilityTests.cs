@@ -56,6 +56,11 @@ public sealed class DesktopUpdateCompatibilityTests
         Assert.Contains("/usr/bin/osascript", updater, StringComparison.Ordinal);
         Assert.Contains("schtasks.exe /Run /TN $TaskName", updater, StringComparison.Ordinal);
         Assert.Contains("install-desktop-windows.ps1", updater, StringComparison.Ordinal);
+        Assert.Contains("Wait-AgentHealth", updater, StringComparison.Ordinal);
+        Assert.Contains("http://127.0.0.1:45871/health", updater, StringComparison.Ordinal);
+        Assert.Contains("StartMacLaunchdJob", updater, StringComparison.Ordinal);
+        Assert.Contains("<key>KeepAlive</key><false/>", updater, StringComparison.Ordinal);
+        Assert.Contains("launchctl bootout", updater, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -69,6 +74,31 @@ public sealed class DesktopUpdateCompatibilityTests
         Assert.Contains("MATEMCP_MAC_USER_HOME", updater, StringComparison.Ordinal);
         Assert.Contains("configure-agent-mode-macos.sh", updater, StringComparison.Ordinal);
         Assert.Contains("schtasks.exe /Run /TN $TaskName", updater, StringComparison.Ordinal);
+        Assert.Contains("Wait-AgentHealth", updater, StringComparison.Ordinal);
+        Assert.Contains("wait_agent_health", updater, StringComparison.Ordinal);
+        Assert.Contains("http://127.0.0.1:45871/health", updater, StringComparison.Ordinal);
+        Assert.Contains("StartMacLaunchdJob", updater, StringComparison.Ordinal);
+        Assert.Contains("currentUid == 0 ? \"system\"", updater, StringComparison.Ordinal);
+        Assert.Contains("<key>KeepAlive</key><false/>", updater, StringComparison.Ordinal);
+        Assert.Contains("launchctl bootout", updater, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mac_installer_waits_for_old_agent_before_replacing_managed_payload()
+    {
+        var root = FindRepositoryRoot();
+        var installer = File.ReadAllText(Path.Combine(root, "scripts", "install-macos.sh"));
+
+        Assert.Contains("wait_pid_exit", installer, StringComparison.Ordinal);
+        Assert.Contains("launchctl bootout", installer, StringComparison.Ordinal);
+        Assert.Contains("did not stop before payload replacement", installer, StringComparison.Ordinal);
+        Assert.True(installer.IndexOf("wait_pid_exit \"$GUI_PID\"", StringComparison.Ordinal)
+            < installer.IndexOf("rm -rf \"$TARGET\"/*", StringComparison.Ordinal));
+
+        var windowsInstaller = File.ReadAllText(Path.Combine(root, "scripts", "install-windows.ps1"));
+        Assert.Contains("did not stop before payload replacement", windowsInstaller, StringComparison.Ordinal);
+        Assert.True(windowsInstaller.IndexOf("$stopDeadline", StringComparison.Ordinal)
+            < windowsInstaller.IndexOf("Get-ChildItem $Target", StringComparison.Ordinal));
     }
 
     private static string FindRepositoryRoot()

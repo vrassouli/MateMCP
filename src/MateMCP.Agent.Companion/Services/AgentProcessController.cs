@@ -11,6 +11,7 @@ public enum AgentExecutionMode
 
 public sealed class AgentProcessController
 {
+    private static readonly Uri AgentHealthUri = new((Environment.GetEnvironmentVariable("MATEMCP_COMPANION_AGENT_URL") ?? "http://127.0.0.1:45871/").TrimEnd('/') + "/health");
     private const string WindowsTaskName = "MateMCP Agent";
     private const string MacLaunchLabel = "com.matemcp.agent";
 
@@ -77,7 +78,7 @@ public sealed class AgentProcessController
             await process.WaitForExitAsync(ct);
             if (process.ExitCode != 0)
                 throw new InvalidOperationException($"Agent mode configurator exited with code {process.ExitCode}.");
-            await WaitForStateAsync(expectedRunning: true, ct);
+            await WaitForHealthyAsync(ct);
             return;
         }
 
@@ -91,7 +92,7 @@ public sealed class AgentProcessController
             var uid = GetUserId();
             var command = $"/usr/bin/env MATEMCP_TARGET_USER={ShellQuote(Environment.UserName)} MATEMCP_TARGET_UID={uid} MATEMCP_TARGET_HOME={ShellQuote(home)} {ShellQuote(script)} {mode}";
             await RunMacAdministratorCommandAsync(command, ct);
-            await WaitForStateAsync(expectedRunning: true, ct);
+            await WaitForHealthyAsync(ct);
             return;
         }
 
@@ -100,14 +101,21 @@ public sealed class AgentProcessController
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        if (IsRunning()) return;
+        if (await IsHealthyAsync(ct)) return;
+
+        if (IsRunning())
+        {
+            // A process can exist while the local management API is dead (for example after a failed update).
+            // Restart instead of reporting a false-positive Start success.
+            await StopAsync(ct);
+        }
 
         if (OperatingSystem.IsWindows())
         {
             if (GetConfiguredMode() == AgentExecutionMode.Elevated)
             {
                 await RunAsync("schtasks.exe", ["/Run", "/TN", WindowsTaskName], ct);
-                await WaitForStateAsync(expectedRunning: true, ct);
+                await WaitForHealthyAsync(ct);
                 return;
             }
 
@@ -123,7 +131,7 @@ public sealed class AgentProcessController
                 CreateNoWindow = true,
                 ArgumentList = { launcher }
             });
-            await WaitForStateAsync(expectedRunning: true, ct);
+            await WaitForHealthyAsync(ct);
             return;
         }
 
@@ -132,7 +140,7 @@ public sealed class AgentProcessController
             if (GetConfiguredMode() == AgentExecutionMode.Elevated)
             {
                 await RunMacAdministratorCommandAsync($"/bin/launchctl kickstart -k system/{MacLaunchLabel}", ct);
-                await WaitForStateAsync(expectedRunning: true, ct);
+                await WaitForHealthyAsync(ct);
                 return;
             }
 
@@ -144,7 +152,7 @@ public sealed class AgentProcessController
             var domain = $"gui/{GetUserId()}";
             await RunAsync("/bin/launchctl", ["bootstrap", domain, plist], ct, ignoreExitCode: true);
             await RunAsync("/bin/launchctl", ["kickstart", "-k", $"{domain}/{MacLaunchLabel}"], ct);
-            await WaitForStateAsync(expectedRunning: true, ct);
+            await WaitForHealthyAsync(ct);
             return;
         }
 
@@ -207,6 +215,32 @@ public sealed class AgentProcessController
         await StopAsync(ct);
         await Task.Delay(300, ct);
         await StartAsync(ct);
+    }
+
+    private static async Task<bool> IsHealthyAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
+            using var response = await client.GetAsync(AgentHealthUri, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            if (ct.IsCancellationRequested) throw;
+            return false;
+        }
+    }
+
+    private static async Task WaitForHealthyAsync(CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await IsHealthyAsync(ct)) return;
+            await Task.Delay(250, ct);
+        }
+        throw new TimeoutException($"MateMCP Agent process did not become healthy at {AgentHealthUri} in time.");
     }
 
     private async Task WaitForStateAsync(bool expectedRunning, CancellationToken ct)
