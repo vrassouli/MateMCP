@@ -50,7 +50,20 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await RefreshAsync();
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch
+        {
+            // Agent updates/restarts can briefly make the local management API unavailable.
+            // Treat that as an empty preview and let the background poll recover automatically
+            // instead of faulting the whole Blazor UI.
+            Preview = null;
+            FrameDataUrl = null;
+        }
+
         _pollLoop = PollAsync();
     }
 
