@@ -39,9 +39,50 @@ internal static class MacAccessibility
     public static void EnsureTrusted()
     {
         if (AXIsProcessTrusted()) return;
+
+        // Ask macOS to surface the standard Accessibility consent flow for the
+        // Agent process itself. This does not grant or bypass TCC; the user must
+        // still explicitly approve MateMCP in System Settings. Using the native
+        // prompt avoids forcing users to locate our hidden ~/.local executable
+        // manually in the Accessibility file picker.
+        RequestTrustPrompt();
+
         var path = Environment.ProcessPath ?? "MateMCP.Agent";
         throw new InvalidOperationException(
-            $"macOS Accessibility permission is required for MateMCP Agent. Enable '{path}' in System Settings → Privacy & Security → Accessibility, then restart the Agent. No input or semantic action was performed.");
+            $"macOS Accessibility permission is required for MateMCP Agent. A native Accessibility consent prompt was requested for '{path}'. Approve MateMCP in System Settings → Privacy & Security → Accessibility, then retry. No input or semantic action was performed.");
+    }
+
+    private static void RequestTrustPrompt()
+    {
+        using var key = CfString("AXTrustedCheckOptionPrompt");
+        var dictionary = CreateSingleValueDictionary(key.Handle, CfBoolean(true));
+        try
+        {
+            _ = AXIsProcessTrustedWithOptions(dictionary);
+        }
+        finally
+        {
+            CFRelease(dictionary);
+        }
+    }
+
+    private static IntPtr CreateSingleValueDictionary(IntPtr key, IntPtr value)
+    {
+        var coreFoundation = NativeLibrary.Load(CoreFoundation);
+        try
+        {
+            var keyCallbacks = NativeLibrary.GetExport(coreFoundation, "kCFTypeDictionaryKeyCallBacks");
+            var valueCallbacks = NativeLibrary.GetExport(coreFoundation, "kCFTypeDictionaryValueCallBacks");
+            var dictionary = CFDictionaryCreateMutable(IntPtr.Zero, 1, keyCallbacks, valueCallbacks);
+            if (dictionary == IntPtr.Zero)
+                throw new InvalidOperationException("Could not create the macOS Accessibility trust options dictionary.");
+            CFDictionarySetValue(dictionary, key, value);
+            return dictionary;
+        }
+        finally
+        {
+            NativeLibrary.Free(coreFoundation);
+        }
     }
 
     public static UiSnapshot Snapshot(DesktopWindowInfo window, int maxElements)
@@ -466,6 +507,7 @@ internal static class MacAccessibility
     private readonly struct CGSize(double width, double height) { public readonly double Width = width; public readonly double Height = height; }
 
     [DllImport(ApplicationServices)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool AXIsProcessTrusted();
+    [DllImport(ApplicationServices)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool AXIsProcessTrustedWithOptions(IntPtr options);
     [DllImport(ApplicationServices)] private static extern IntPtr AXUIElementCreateApplication(int pid);
     [DllImport(ApplicationServices)] private static extern nuint AXUIElementGetTypeID();
     [DllImport(ApplicationServices)] private static extern int AXUIElementCopyAttributeValue(IntPtr element, IntPtr attribute, out IntPtr value);
@@ -484,6 +526,8 @@ internal static class MacAccessibility
     [DllImport(CoreFoundation)] private static extern nint CFStringGetMaximumSizeForEncoding(nint length, uint encoding);
     [DllImport(CoreFoundation)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool CFStringGetCString(IntPtr text, IntPtr buffer, nint bufferSize, uint encoding);
     [DllImport(CoreFoundation)] private static extern nuint CFStringGetTypeID();
+    [DllImport(CoreFoundation)] private static extern IntPtr CFDictionaryCreateMutable(IntPtr allocator, nint capacity, IntPtr keyCallbacks, IntPtr valueCallbacks);
+    [DllImport(CoreFoundation)] private static extern void CFDictionarySetValue(IntPtr dictionary, IntPtr key, IntPtr value);
     [DllImport(CoreFoundation)] private static extern nuint CFBooleanGetTypeID();
     [DllImport(CoreFoundation)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool CFBooleanGetValue(IntPtr boolean);
     [DllImport(CoreFoundation)] private static extern nuint CFNumberGetTypeID();
