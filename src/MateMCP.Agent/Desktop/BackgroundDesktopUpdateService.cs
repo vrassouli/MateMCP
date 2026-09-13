@@ -254,16 +254,20 @@ public sealed class BackgroundDesktopUpdateService(
 
         if (OperatingSystem.IsMacOS())
         {
+            var home = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_HOME")
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var currentUid = GetUnixUid();
+            var targetUid = uint.TryParse(Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_UID"), out var configuredUid)
+                ? configuredUid
+                : currentUid;
+            var jobDomain = currentUid == 0 ? "system" : $"gui/{targetUid}";
+            var jobLabel = $"com.matemcp.desktop-update.{Guid.NewGuid():N}";
             var scriptPath = Path.Combine(tempRoot, "install-background-update.sh");
-            File.WriteAllText(scriptPath, BuildMacInstallScript(tempRoot, archivePath, marker, status, failure, assetId));
+            var plistPath = Path.Combine(tempRoot, "install-background-update.plist");
+            File.WriteAllText(scriptPath, BuildMacInstallScript(tempRoot, archivePath, marker, status, failure, assetId, jobLabel, jobDomain));
             try { File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch { }
-            var process = Process.Start(new ProcessStartInfo("/bin/sh")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                ArgumentList = { scriptPath }
-            });
-            if (process is null) throw new InvalidOperationException("Could not start the macOS background update installer.");
+            File.WriteAllText(plistPath, BuildMacLaunchdPlist(jobLabel, scriptPath, home));
+            StartMacLaunchdJob(jobDomain, plistPath);
             return;
         }
 
@@ -285,6 +289,17 @@ $HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
 $ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
 $TaskName = 'MateMCP Agent'
 $WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
+function Wait-AgentHealth {
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:45871/health' -TimeoutSec 1
+            if ($response.StatusCode -eq 200) { return }
+        } catch { }
+        Start-Sleep -Milliseconds 250
+    }
+    throw 'MateMCP Agent process did not become healthy after update.'
+}
 Start-Sleep -Seconds 2
 New-Item -ItemType Directory -Force -Path $Package, (Split-Path $Marker) | Out-Null
 try {
@@ -293,16 +308,17 @@ try {
     if (-not (Test-Path $Installer)) { throw 'Downloaded package does not contain install-desktop-windows.ps1' }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -NoStart
     if ($LASTEXITCODE -ne 0) { throw "MateMCP Desktop installer exited with code $LASTEXITCODE" }
-    $Now = [DateTimeOffset]::UtcNow.ToString('o')
-    [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
-    [IO.File]::WriteAllText($Status, "$Now|updated|MateMCP Desktop was updated automatically in the background.")
-    Remove-Item $Failure -Force -ErrorAction SilentlyContinue
     $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
     if ($AgentMode -eq 'Elevated') {
         & schtasks.exe /Run /TN $TaskName | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Desktop updated, but the elevated Agent task could not be started (schtasks exit $LASTEXITCODE)." }
     }
     elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
+    Wait-AgentHealth
+    $Now = [DateTimeOffset]::UtcNow.ToString('o')
+    [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
+    [IO.File]::WriteAllText($Status, "$Now|updated|MateMCP Desktop was updated automatically in the background.")
+    Remove-Item $Failure -Force -ErrorAction SilentlyContinue
 }
 catch {
     New-Item -ItemType Directory -Force -Path (Split-Path $Failure) | Out-Null
@@ -319,7 +335,61 @@ finally {
 """;
     }
 
-    private static string BuildMacInstallScript(string tempRoot, string archivePath, string markerPath, string statusPath, string failurePath, long assetId)
+    private static string BuildMacLaunchdPlist(string label, string scriptPath, string workingDirectory)
+    {
+        static string Xml(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
+        return $"""
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{Xml(label)}</string>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>{Xml(scriptPath)}</string></array>
+  <key>WorkingDirectory</key><string>{Xml(workingDirectory)}</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>ProcessType</key><string>Background</string>
+</dict></plist>
+""";
+    }
+
+    private static void StartMacLaunchdJob(string domain, string plistPath)
+    {
+        var start = new ProcessStartInfo("/bin/launchctl")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("bootstrap");
+        start.ArgumentList.Add(domain);
+        start.ArgumentList.Add(plistPath);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not submit the macOS background update job to launchd.");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Could not submit the macOS background update job to launchd (exit {process.ExitCode}): {(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim()}");
+    }
+
+    private static uint GetUnixUid()
+    {
+        var start = new ProcessStartInfo("/usr/bin/id")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("-u");
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not determine the current macOS user id.");
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return process.ExitCode == 0 && uint.TryParse(output.Trim(), out var uid)
+            ? uid
+            : throw new InvalidOperationException("Could not determine the current macOS user id.");
+    }
+
+    private static string BuildMacInstallScript(string tempRoot, string archivePath, string markerPath, string statusPath, string failurePath, long assetId, string jobLabel, string jobDomain)
     {
         var home = Environment.GetEnvironmentVariable("MATEMCP_MAC_USER_HOME")
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -343,6 +413,23 @@ TARGET_HOME={{ShellQuote(home)}}
 TARGET_USER={{ShellQuote(user)}}
 TARGET_UID={{ShellQuote(uid ?? string.Empty)}}
 [ -n "$TARGET_UID" ] || TARGET_UID="$(id -u)"
+UPDATE_JOB_LABEL={{ShellQuote(jobLabel)}}
+UPDATE_JOB_DOMAIN={{ShellQuote(jobDomain)}}
+cleanup_update_job() {
+    rm -rf "$TEMP_ROOT"
+    /bin/launchctl bootout "$UPDATE_JOB_DOMAIN/$UPDATE_JOB_LABEL" >/dev/null 2>&1 || true
+}
+trap cleanup_update_job EXIT
+cd "$TARGET_HOME" || exit 1
+wait_agent_health() {
+    attempt=0
+    while [ "$attempt" -lt 80 ]; do
+        if /usr/bin/curl -fsS --max-time 1 http://127.0.0.1:45871/health >/dev/null 2>&1; then return 0; fi
+        attempt=$((attempt + 1))
+        sleep 0.25
+    done
+    return 1
+}
 sleep 2
 mkdir -p "$PACKAGE" "$(dirname "$MARKER")"
 AGENT_MODE="Normal"
@@ -357,7 +444,8 @@ if tar -xzf "$ARCHIVE" -C "$PACKAGE" && \
    chmod +x "$PACKAGE/install-desktop-macos.sh" && \
    "$PACKAGE/install-desktop-macos.sh" --no-start --agent-mode "$AGENT_MODE" && \
    { [ "$AGENT_MODE" != "Elevated" ] || chown -R "$TARGET_USER" "$TARGET_HOME/Applications/MateMCP Agent Companion.app"; } && \
-   MATEMCP_TARGET_USER="$TARGET_USER" MATEMCP_TARGET_UID="$TARGET_UID" MATEMCP_TARGET_HOME="$TARGET_HOME" "$CONFIGURE_MODE" "$AGENT_MODE"; then
+   MATEMCP_TARGET_USER="$TARGET_USER" MATEMCP_TARGET_UID="$TARGET_UID" MATEMCP_TARGET_HOME="$TARGET_HOME" "$CONFIGURE_MODE" "$AGENT_MODE" && \
+   wait_agent_health; then
     printf '%s' '{{assetId.ToString(CultureInfo.InvariantCulture)}}' > "$MARKER"
     printf '%s|updated|%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 'MateMCP Desktop was updated automatically in the background.' > "$STATUS"
     rm -f "$FAILURE"
@@ -368,10 +456,8 @@ else
     if [ -x "$CONFIGURE_MODE" ]; then
         MATEMCP_TARGET_USER="$TARGET_USER" MATEMCP_TARGET_UID="$TARGET_UID" MATEMCP_TARGET_HOME="$TARGET_HOME" "$CONFIGURE_MODE" "$AGENT_MODE" >/dev/null 2>&1 || true
     fi
-    rm -rf "$TEMP_ROOT"
     exit "$code"
 fi
-rm -rf "$TEMP_ROOT"
 """;
     }
 

@@ -38,7 +38,13 @@ $ConfigureMode = Join-Path $Target 'configure-agent-mode-windows.ps1'
 if (-not (Test-Path (Join-Path $Source 'MateMCP.Agent.exe'))) { throw "MateMCP payload not found at: $Source" }
 
 New-Item -ItemType Directory -Force -Path $Target, $Bin | Out-Null
-Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+$agentProcesses = @(Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue)
+$agentProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+$stopDeadline = [DateTime]::UtcNow.AddSeconds(10)
+while (Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue) {
+    if ([DateTime]::UtcNow -ge $stopDeadline) { throw 'MateMCP Agent did not stop before payload replacement.' }
+    Start-Sleep -Milliseconds 100
+}
 
 # Agent and Companion intentionally share the MateMCP root. During an Agent-only
 # upgrade the Companion may still be running (for example after the user clicks

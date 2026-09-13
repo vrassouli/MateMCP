@@ -42,9 +42,39 @@ fi
 [[ "$AGENT_MODE" == "Elevated" || "$AGENT_MODE" == "Normal" ]] || { echo "Agent mode must be Normal or Elevated." >&2; exit 2; }
 
 mkdir -p "$TARGET" "$BIN" "$CONFIG"
-# Stop the user LaunchAgent before replacing files. Elevated updates normally run
-# from the already-root Agent, and the configurator handles the system daemon.
-launchctl bootout "gui/$(id -u)/com.matemcp.agent" >/dev/null 2>&1 || true
+# Stop every configured Agent job and wait for the old process to exit before
+# replacing managed assemblies. Updating a live .NET payload in place can leave
+# the runtime reading a mixture of old/new metadata and crash with BadImageFormat.
+LABEL="com.matemcp.agent"
+TARGET_UID="${MATEMCP_TARGET_UID:-$(id -u)}"
+GUI_DOMAIN="gui/$TARGET_UID"
+
+job_pid() {
+  launchctl print "$1/$LABEL" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }'
+}
+wait_pid_exit() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] || return 0
+  for _ in {1..50}; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  echo "MateMCP Agent process $pid did not stop before payload replacement." >&2
+  return 1
+}
+
+GUI_PID="$(job_pid "$GUI_DOMAIN" || true)"
+SYSTEM_PID=""
+if [[ "$EUID" -eq 0 ]]; then
+  SYSTEM_PID="$(job_pid system || true)"
+fi
+launchctl bootout "$GUI_DOMAIN/$LABEL" >/dev/null 2>&1 || true
+if [[ "$EUID" -eq 0 ]]; then
+  launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+fi
+wait_pid_exit "$GUI_PID"
+wait_pid_exit "$SYSTEM_PID"
+
 rm -rf "$TARGET"/*
 cp -R "$SOURCE"/* "$TARGET"/
 chmod +x "$TARGET/MateMCP.Agent"
