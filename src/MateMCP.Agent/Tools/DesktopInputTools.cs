@@ -139,7 +139,7 @@ public sealed class DesktopInputTools(
             ?? throw new McpException($"Window '{windowId}' is no longer available. Call window_list again.");
         var summary = $"Activate window '{Trim(window.Title)}' owned by {Trim(window.Application)}.";
         await AuthorizeInputAsync(summary, cancellationToken);
-        RunInput(() => _input.FocusWindow(window.Id, window.ProcessId));
+        RunInput(() => _input.FocusWindow(window.Id, window.ProcessId, window.Title));
         await audit.WriteAsync("desktop.input.window", $"focus:{window.Application}:{window.Id}", "ok", cancellationToken);
         return "focused";
     }
