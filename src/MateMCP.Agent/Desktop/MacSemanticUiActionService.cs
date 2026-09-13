@@ -37,6 +37,21 @@ public sealed class MacSemanticUiActionService
         }
     }
 
+
+    public async Task<UiElementInfo> ClickAtAsync(
+        string windowId,
+        double x,
+        double y,
+        CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsMacOS())
+            throw new PlatformNotSupportedException("Native isolated point actions are currently available on macOS; Windows UIA hit-testing is tracked in #147.");
+
+        var window = await ResolveWindowAsync(windowId, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return MacAccessibility.ClickAt(window, x, y);
+    }
+
     private async Task<DesktopWindowInfo> ResolveWindowAsync(string windowId, CancellationToken cancellationToken)
     {
         var windows = await _vision.ListWindowsAsync(cancellationToken);

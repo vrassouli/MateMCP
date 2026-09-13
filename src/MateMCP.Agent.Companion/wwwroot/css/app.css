@@ -410,3 +410,91 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     border-color: var(--colorStatusWarningBorder1, rgba(173, 110, 0, .32));
     background: var(--colorStatusWarningBackground1, var(--colorNeutralBackground1, #fff));
 }
+
+.computer-use-preview-card {
+    grid-column: span 2;
+}
+
+.computer-use-preview-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.computer-use-action-pill {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--colorBrandBackground2, rgba(0, 120, 212, .12));
+    color: var(--colorBrandForeground1, inherit);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.computer-use-preview-frame {
+    position: relative;
+    min-height: 180px;
+    max-height: 360px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--colorNeutralStroke1, rgba(0,0,0,.16));
+    border-radius: var(--borderRadiusLarge, 12px);
+    background: #111;
+}
+
+.computer-use-preview-frame img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    user-select: none;
+    pointer-events: none;
+}
+
+.computer-use-preview-placeholder {
+    padding: 32px;
+    color: #aaa;
+    text-align: center;
+}
+
+.computer-use-virtual-cursor {
+    position: absolute;
+    left: var(--cursor-x);
+    top: var(--cursor-y);
+    transform: translate(-5px, -5px) rotate(-40deg);
+    pointer-events: none;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.65));
+    z-index: 3;
+}
+
+.computer-use-cursor-arrow {
+    display: block;
+    font-size: 25px;
+    line-height: 1;
+    color: #fff;
+    -webkit-text-stroke: 2px #111;
+}
+
+.computer-use-cursor-label {
+    display: inline-block;
+    margin: 2px 0 0 14px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #111;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    transform: rotate(40deg);
+}
+
+.computer-use-preview-note { margin-top: 8px; }
+
+@media (max-width: 760px) {
+    .computer-use-preview-card { grid-column: auto; }
+    .computer-use-preview-frame { min-height: 140px; max-height: 260px; }
+    .computer-use-preview-frame img { max-height: 260px; }
+}

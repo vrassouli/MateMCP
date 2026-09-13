@@ -20,7 +20,8 @@ public sealed class AgentCompatibilityService : IDisposable
         "projects-stable-id",
         "skills-memory",
         "desktop-update",
-        "agent-logs"
+        "agent-logs",
+        "computer-use-preview"
     ];
 
     private readonly HttpClient _http;
@@ -125,7 +126,7 @@ public sealed class AgentCompatibilityService : IDisposable
 
     private async Task<string?> ProbeManagementApiAsync(CancellationToken ct)
     {
-        foreach (var endpoint in new[] { "skills-memory?includeDisabled=true", "projects", "desktop-update", "logs?limit=1" })
+        foreach (var endpoint in new[] { "skills-memory?includeDisabled=true", "projects", "desktop-update", "logs?limit=1", "computer-use/preview" })
         {
             using var response = await _http.GetAsync(endpoint, ct);
             if (!response.IsSuccessStatusCode)

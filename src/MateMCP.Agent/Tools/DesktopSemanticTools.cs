@@ -8,7 +8,7 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog audit)
+public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog audit, ComputerUsePreviewService preview)
 {
     private readonly SemanticUiService _semantic = new();
     private readonly MacSemanticUiActionService _macSemantic = new();
@@ -26,6 +26,7 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
         try { snapshot = await _semantic.SnapshotAsync(windowId, maxElements, cancellationToken); }
         catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
         _computerUse.Touch("semantic-view", $"window {windowId}");
+        await preview.TrackWindowAsync(windowId, action: "inspect", cancellationToken: cancellationToken);
         await audit.WriteAsync("desktop.semantic.snapshot", windowId, $"ok:{snapshot.Elements.Count}:truncated={snapshot.Truncated}", cancellationToken);
         return snapshot;
     }
@@ -85,6 +86,32 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
         return await RecordSuccessAsync(action, windowId, selector, result, cancellationToken);
     }
 
+    [McpServerTool(Name = "ui_click_at", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
+    [Description("Clicks by window-relative coordinates without moving the physical pointer. MateMCP hit-tests the native accessibility tree at the virtual cursor position and invokes the nearest actionable control. This is an isolated semantic fallback, not global raw mouse input.")]
+    public async Task<UiElementInfo> ClickAt(
+        [Description("Window id returned by window_list.")] string windowId,
+        [Description("X coordinate in logical points relative to the target window's left edge.")] double x,
+        [Description("Y coordinate in logical points relative to the target window's top edge.")] double y,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureComputerUseAvailable();
+        var summary = $"Isolated semantic click at window-relative point ({x:0.##},{y:0.##}) in window {windowId}; the physical pointer will not move.";
+        var decision = await approvals.RequestAsync("desktop.semantic", "semantic-action", summary, cancellationToken);
+        await EnsureApprovedAsync(decision, "Isolated semantic click", "desktop.semantic", "semantic-action", cancellationToken);
+
+        if (!OperatingSystem.IsMacOS())
+            throw new McpException("ui_click_at isolated hit-testing is currently implemented on macOS. Windows UIA ElementFromPoint support is tracked in #147; use selector-based semantic actions in the meantime.");
+
+        UiElementInfo result;
+        try { result = await _macSemantic.ClickAtAsync(windowId, x, y, cancellationToken); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
+
+        _computerUse.Touch("semantic-input", $"isolated-point-invoke:{result.Role}:{result.Name ?? result.AutomationId ?? result.Id}");
+        await preview.TrackWindowPointAsync(windowId, x, y, "point-invoke", cancellationToken);
+        await audit.WriteAsync("desktop.semantic.action", windowId, $"ok:isolated-point-invoke:x={x:0.##}:y={y:0.##}", cancellationToken);
+        return result;
+    }
+
     [McpServerTool(Name = "ui_scroll_into_view", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Scrolls a uniquely matched native control into view using its native accessibility scroll capability.")]
     public async Task<UiElementInfo> ScrollIntoView(
@@ -123,6 +150,7 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     private async Task<UiElementInfo> RecordSuccessAsync(string action, string windowId, UiSelector selector, UiElementInfo result, CancellationToken cancellationToken)
     {
         _computerUse.Touch("semantic-input", $"{action}:{result.Role}:{result.Name ?? result.AutomationId ?? result.Id}");
+        await preview.TrackWindowAsync(windowId, result.Bounds, action, cancellationToken);
         await audit.WriteAsync("desktop.semantic.action", windowId, $"ok:{action}:{Describe(selector)}", cancellationToken);
         return result;
     }

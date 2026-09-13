@@ -12,6 +12,7 @@ internal static class MacAccessibility
 
     private const string AxWindows = "AXWindows";
     private const string AxChildren = "AXChildren";
+    private const string AxParent = "AXParent";
     private const string AxRole = "AXRole";
     private const string AxSubrole = "AXSubrole";
     private const string AxTitle = "AXTitle";
@@ -132,6 +133,50 @@ internal static class MacAccessibility
             return new UiSnapshot(window.Id, "macos-axui-element", truncated, elements);
         }
         finally { CFRelease(root); }
+    }
+
+    public static UiElementInfo ClickAt(DesktopWindowInfo window, double x, double y)
+    {
+        EnsureTrusted();
+        if (x < 0 || y < 0 || x > window.Width || y > window.Height)
+            throw new ArgumentOutOfRangeException(nameof(x), "The isolated pointer position must be inside the target window bounds.");
+
+        var app = AXUIElementCreateApplication(window.ProcessId);
+        if (app == IntPtr.Zero)
+            throw new InvalidOperationException("macOS Accessibility could not create an application element for the target process.");
+
+        IntPtr current = IntPtr.Zero;
+        try
+        {
+            var error = AXUIElementCopyElementAtPosition(app, (float)(window.X + x), (float)(window.Y + y), out current);
+            if (error != AxSuccess || current == IntPtr.Zero)
+                throw new InvalidOperationException($"macOS Accessibility could not resolve an element at the isolated pointer position ({ErrorText(error)}). No physical pointer input was performed.");
+
+            for (var depth = 0; depth < 10 && current != IntPtr.Zero; depth++)
+            {
+                var info = BuildInfo(current, "ax:point", null);
+                if (info.Enabled && info.Actions.Contains(AxPress, StringComparer.Ordinal))
+                {
+                    Perform(current, AxPress, info, "isolated-point-invoke");
+                    return BuildInfo(current, "ax:point", null);
+                }
+
+                if (!TryCopyAttribute(current, AxParent, out var parent))
+                    break;
+                CFRelease(current);
+                current = parent;
+            }
+
+            var hit = current == IntPtr.Zero
+                ? new UiElementInfo("ax:point", null, "unknown", null, null, null, false, true, false, null, null, null, null, [])
+                : BuildInfo(current, "ax:point", null);
+            throw Unsupported(hit, "isolated-point-invoke", "The hit-tested element and its accessible ancestors expose no native AXPress action. The physical cursor was not moved.");
+        }
+        finally
+        {
+            if (current != IntPtr.Zero) CFRelease(current);
+            CFRelease(app);
+        }
     }
 
     public static UiElementInfo Act(
@@ -822,6 +867,7 @@ internal static class MacAccessibility
     [DllImport(ApplicationServices)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool AXIsProcessTrusted();
     [DllImport(ApplicationServices)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool AXIsProcessTrustedWithOptions(IntPtr options);
     [DllImport(ApplicationServices)] private static extern IntPtr AXUIElementCreateApplication(int pid);
+    [DllImport(ApplicationServices)] private static extern int AXUIElementCopyElementAtPosition(IntPtr application, float x, float y, out IntPtr element);
     [DllImport(ApplicationServices)] private static extern nuint AXUIElementGetTypeID();
     [DllImport(ApplicationServices)] private static extern int AXUIElementCopyAttributeValue(IntPtr element, IntPtr attribute, out IntPtr value);
     [DllImport(ApplicationServices)] private static extern int AXUIElementIsAttributeSettable(IntPtr element, IntPtr attribute, [MarshalAs(UnmanagedType.I1)] out bool settable);
