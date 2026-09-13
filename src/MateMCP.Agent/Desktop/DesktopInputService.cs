@@ -65,11 +65,11 @@ public sealed class DesktopInputService
         throw UnsupportedPlatform();
     }
 
-    public void FocusWindow(string windowId, int processId)
+    public void FocusWindow(string windowId, int processId, string? title = null)
     {
         if (string.IsNullOrWhiteSpace(windowId)) throw new ArgumentException("Window id is required.", nameof(windowId));
         if (OperatingSystem.IsWindows()) { WindowsInput.FocusWindow(windowId); return; }
-        if (OperatingSystem.IsMacOS()) { MacInput.FocusApplication(processId); return; }
+        if (OperatingSystem.IsMacOS()) { MacAccessibility.FocusApplicationWindow(processId, title ?? string.Empty); return; }
         throw UnsupportedPlatform();
     }
 
@@ -428,22 +428,6 @@ public sealed class DesktopInputService
             finally { for (var index = codes.Length - 1; index >= 0; index--) PostKey(codes[index], KeyUp); }
         }
 
-        public static void FocusApplication(int processId)
-        {
-            if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
-            var script = $"ObjC.import('AppKit'); const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier({processId}); if (!app) throw new Error('Application no longer exists'); if (!app.activateWithOptions(3)) throw new Error('macOS refused application activation');";
-            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/usr/bin/osascript")
-            {
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true,
-                ArgumentList = { "-l", "JavaScript", "-e", script }
-            }) ?? throw new InvalidOperationException("Failed to start macOS application activation helper.");
-            process.WaitForExit();
-            if (process.ExitCode != 0) throw new InvalidOperationException("macOS could not activate the selected application: " + process.StandardError.ReadToEnd().Trim());
-        }
-
         private static IEnumerable<string> ChunkText(string text, int length)
         {
             for (var offset = 0; offset < text.Length; offset += length)
@@ -456,8 +440,8 @@ public sealed class DesktopInputService
             if (eventRef == IntPtr.Zero) throw new InvalidOperationException("macOS could not create a keyboard event.");
             try
             {
-                var chars = text.ToCharArray();
-                CGEventKeyboardSetUnicodeString(eventRef, (nuint)chars.Length, chars);
+                var units = text.Select(character => (ushort)character).ToArray();
+                CGEventKeyboardSetUnicodeString(eventRef, (nuint)units.Length, units);
                 CGEventPost(HidEventTap, eventRef);
             }
             finally { CFRelease(eventRef); }
@@ -554,7 +538,7 @@ public sealed class DesktopInputService
         private static extern IntPtr CGEventCreateScrollWheelEvent(IntPtr source, uint units, uint wheelCount, int wheel1, int wheel2);
 
         [DllImport(ApplicationServices)]
-        private static extern void CGEventKeyboardSetUnicodeString(IntPtr eventRef, nuint length, [In] char[] unicodeString);
+        private static extern void CGEventKeyboardSetUnicodeString(IntPtr eventRef, nuint length, [In] ushort[] unicodeString);
 
         [DllImport(ApplicationServices)]
         private static extern void CGEventSetIntegerValueField(IntPtr eventRef, uint field, long value);

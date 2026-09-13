@@ -23,11 +23,14 @@ internal static class MacAccessibility
     private const string AxMaxValue = "AXMaxValue";
     private const string AxEnabled = "AXEnabled";
     private const string AxFocused = "AXFocused";
+    private const string AxFrontmost = "AXFrontmost";
+    private const string AxMain = "AXMain";
     private const string AxSelected = "AXSelected";
     private const string AxExpanded = "AXExpanded";
     private const string AxPosition = "AXPosition";
     private const string AxSize = "AXSize";
     private const string AxPress = "AXPress";
+    private const string AxRaise = "AXRaise";
     private const string AxScrollToVisible = "AXScrollToVisible";
     private const string AxScrollUpByPage = "AXScrollUpByPage";
     private const string AxScrollDownByPage = "AXScrollDownByPage";
@@ -88,6 +91,33 @@ internal static class MacAccessibility
         {
             NativeLibrary.Free(coreFoundation);
         }
+    }
+
+
+    public static void FocusApplicationWindow(int processId, string title)
+    {
+        EnsureTrusted();
+        if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
+
+        var app = AXUIElementCreateApplication(processId);
+        if (app == IntPtr.Zero)
+            throw new InvalidOperationException("macOS Accessibility could not create an application element for the target process.");
+        try
+        {
+            if (!TrySetBoolean(app, AxFrontmost, true, out var frontmostError))
+                throw new InvalidOperationException($"macOS Accessibility could not make the target application frontmost ({ErrorText(frontmostError)}). No input was performed.");
+        }
+        finally { CFRelease(app); }
+
+        var window = CopyWindow(processId, title);
+        try
+        {
+            _ = TrySetBoolean(window, AxMain, true, out _);
+            _ = TrySetBoolean(window, AxFocused, true, out _);
+            if (!TryPerform(window, AxRaise, out var raiseError))
+                throw new InvalidOperationException($"macOS Accessibility could not raise the selected window ({ErrorText(raiseError)}). No input was performed.");
+        }
+        finally { CFRelease(window); }
     }
 
     public static UiSnapshot Snapshot(DesktopWindowInfo window, int maxElements)
@@ -643,12 +673,23 @@ internal static class MacAccessibility
 
     private static void SetBoolean(IntPtr element, string attribute, bool value, UiElementInfo selected, string action)
     {
+        if (TrySetBoolean(element, attribute, value, out var error)) return;
+        var detail = error == AxErrorAttributeUnsupported
+            ? $"The selected control does not expose a writable {attribute} attribute."
+            : $"Setting {attribute} failed ({ErrorText(error)}).";
+        throw Unsupported(selected, action, detail);
+    }
+
+    private static bool TrySetBoolean(IntPtr element, string attribute, bool value, out int error)
+    {
         if (!IsAttributeSettable(element, attribute))
-            throw Unsupported(selected, action, $"The selected control does not expose a writable {attribute} attribute.");
+        {
+            error = AxErrorAttributeUnsupported;
+            return false;
+        }
         using var name = CfString(attribute);
-        var cfValue = CfBoolean(value);
-        var error = AXUIElementSetAttributeValue(element, name.Handle, cfValue);
-        if (error != AxSuccess) throw Unsupported(selected, action, $"Setting {attribute} failed ({ErrorText(error)}).");
+        error = AXUIElementSetAttributeValue(element, name.Handle, CfBoolean(value));
+        return error == AxSuccess;
     }
 
     private static void SetString(IntPtr element, string attribute, string value, UiElementInfo selected, string action)
