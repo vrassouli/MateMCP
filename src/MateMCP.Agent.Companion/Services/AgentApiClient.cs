@@ -54,6 +54,17 @@ public sealed class AgentApiClient : IDisposable
         return await response.Content.ReadFromJsonAsync<DesktopBackgroundUpdateStatus>(Json, ct);
     }
 
+    public async Task<ComputerUsePreviewState?> GetComputerUsePreviewAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<ComputerUsePreviewState>("computer-use/preview", Json, ct);
+
+    public async Task<byte[]?> GetComputerUsePreviewFrameAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.GetAsync("computer-use/preview/frame", ct);
+        if (response.StatusCode == HttpStatusCode.NoContent) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(ct);
+    }
+
     public async Task<AgentPowerStatus?> GetPowerStatusAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<AgentPowerStatus>("power", Json, ct);
 
@@ -210,3 +221,6 @@ public sealed record SkillMemoryEdit(string Title, string Type, string Scope, st
 
 public sealed record AgentLogEntry(long Id, DateTimeOffset Timestamp, int Level, string Category, string Message);
 public sealed record AgentLogBatch(IReadOnlyList<AgentLogEntry> Entries, long Cursor);
+public sealed record ComputerUsePreviewState(
+    bool Active, bool Blocked, string? WindowId, string? WindowTitle, string? Application, int? ProcessId,
+    double? CursorX, double? CursorY, string? LastAction, DateTimeOffset? UpdatedAt, long Revision);

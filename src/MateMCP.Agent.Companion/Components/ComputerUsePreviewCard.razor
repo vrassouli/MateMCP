@@ -1,0 +1,102 @@
+@implements IAsyncDisposable
+@inject AgentApiClient Api
+
+@if (Preview?.Active == true)
+{
+    <div class="panel dashboard-card computer-use-preview-card" aria-live="polite">
+        <div class="computer-use-preview-heading">
+            <div>
+                <div class="muted">AI workspace · Live preview</div>
+                <strong>@PreviewTitle</strong>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(Preview.LastAction))
+            {
+                <span class="computer-use-action-pill">@Preview.LastAction</span>
+            }
+        </div>
+
+        <div class="computer-use-preview-frame" title="MateMCP virtual Computer Use cursor; your physical mouse is independent during semantic actions.">
+            @if (!string.IsNullOrWhiteSpace(FrameDataUrl))
+            {
+                <img src="@FrameDataUrl" alt="Live preview of the window currently used by AI" />
+            }
+            else
+            {
+                <div class="computer-use-preview-placeholder">Waiting for the next window frame…</div>
+            }
+
+            @if (Preview.CursorX is { } cursorX && Preview.CursorY is { } cursorY)
+            {
+                <div class="computer-use-virtual-cursor"
+                     style="--cursor-x:@(Percent(cursorX)); --cursor-y:@(Percent(cursorY));"
+                     aria-label="AI cursor">
+                    <span class="computer-use-cursor-arrow">➤</span>
+                    <span class="computer-use-cursor-label">AI</span>
+                </div>
+            }
+        </div>
+        <div class="muted computer-use-preview-note">AI cursor is virtual. Semantic actions do not move your physical mouse.</div>
+    </div>
+}
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private Task? _pollLoop;
+    private ComputerUsePreviewState? Preview { get; set; }
+    private string? FrameDataUrl { get; set; }
+
+    private string PreviewTitle
+        => string.Join(" · ", new[] { Preview?.Application, Preview?.WindowTitle }.Where(x => !string.IsNullOrWhiteSpace(x))!);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _pollLoop = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        while (!_cts.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), _cts.Token);
+                await RefreshAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (OperationCanceledException) when (_cts.IsCancellationRequested) { break; }
+            catch
+            {
+                // Preview is best-effort. The Computer Use safety gate remains in the Agent.
+            }
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        Preview = await Api.GetComputerUsePreviewAsync(_cts.Token);
+        if (Preview?.Active != true)
+        {
+            FrameDataUrl = null;
+            return;
+        }
+
+        var bytes = await Api.GetComputerUsePreviewFrameAsync(_cts.Token);
+        FrameDataUrl = bytes is { Length: > 0 }
+            ? "data:image/png;base64," + Convert.ToBase64String(bytes)
+            : null;
+    }
+
+    private static string Percent(double value)
+        => (Math.Clamp(value, 0d, 1d) * 100d).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_pollLoop is not null)
+        {
+            try { await _pollLoop; } catch (OperationCanceledException) { }
+        }
+        _cts.Dispose();
+    }
+}

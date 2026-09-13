@@ -53,6 +53,7 @@ builder.Services.AddSingleton<LocalNotificationService>();
 builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddSingleton<IApprovalService>(sp => sp.GetRequiredService<ApprovalService>());
 builder.Services.AddSingleton<AgentActivityGate>();
+builder.Services.AddSingleton<ComputerUsePreviewService>();
 builder.Services.AddSingleton<AgentPowerSettingsStore>();
 builder.Services.AddSingleton<IPowerInhibitor, NativePowerInhibitor>();
 builder.Services.AddSingleton<AgentPowerInhibitionService>();
@@ -90,6 +91,19 @@ app.Use(async (context, next) =>
 app.MapGet("/", (HttpContext context) => IsLoopback(context) ? Results.Redirect("/ui", permanent: false) : Results.NotFound());
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP", status = "ok" }));
 app.MapGet("/ui", (HttpContext context) => IsLoopback(context) ? Results.Content(AgentUi.Html, "text/html; charset=utf-8") : Results.NotFound());
+app.MapGet("/computer-use/preview", (HttpContext context, ComputerUsePreviewService preview) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    return Results.Ok(preview.GetState());
+});
+app.MapGet("/computer-use/preview/frame", async (HttpContext context, ComputerUsePreviewService preview, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    var frame = await preview.CaptureFrameAsync(ct);
+    return frame is null
+        ? Results.NoContent()
+        : Results.File(frame.Bytes, frame.MimeType, enableRangeProcessing: false);
+});
 app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOptionsMonitor<MateOptions> currentOptions, ProjectRegistry projects, InteractiveShellSessionManager sessions, AgentActivityGate activity) =>
 {
     if (!IsLoopback(context)) return Results.NotFound(); var current = currentOptions.CurrentValue;
@@ -100,7 +114,7 @@ app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOption
         version = agentVersion,
         endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp",
         management = $"http://127.0.0.1:{current.Port}/ui",
-        managementApi = new { revision = 3, capabilities = new[] { "projects-stable-id", "skills-memory", "desktop-update", "agent-logs", "power-inhibition" } },
+        managementApi = new { revision = 4, capabilities = new[] { "projects-stable-id", "skills-memory", "desktop-update", "agent-logs", "power-inhibition", "computer-use-preview" } },
         configuration = userConfigPath,
         projects = projects.All.Select(p => p.Name).ToArray(),
         shellApproval = current.RequireShellApproval,
