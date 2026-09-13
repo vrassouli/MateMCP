@@ -10,6 +10,8 @@ public sealed record ComputerUsePreviewState(
     double? CursorX,
     double? CursorY,
     string? LastAction,
+    string CaptureBackend,
+    string? CaptureError,
     DateTimeOffset? UpdatedAt,
     long Revision);
 
@@ -18,11 +20,12 @@ public sealed record ComputerUsePreviewState(
 /// Cursor coordinates are normalized to the target window (0..1), so Companion can
 /// render an AI-only cursor without moving the physical OS pointer.
 /// </summary>
-public sealed class ComputerUsePreviewService
+public sealed class ComputerUsePreviewService : IDisposable
 {
     private readonly object _sync = new();
     private readonly DesktopVisionService _vision = new();
     private readonly ComputerUseSessionManager _computerUse = ComputerUseSessionManager.Shared;
+    private readonly MacScreenCaptureKitPreviewStream _macStream = new();
 
     private DesktopWindowInfo? _window;
     private double? _cursorX;
@@ -57,6 +60,8 @@ public sealed class ComputerUsePreviewService
             _updatedAt = DateTimeOffset.UtcNow;
             _revision++;
         }
+
+        if (OperatingSystem.IsMacOS()) _macStream.EnsureStarted(window.Id);
     }
 
     public async Task TrackWindowPointAsync(
@@ -80,6 +85,8 @@ public sealed class ComputerUsePreviewService
             _updatedAt = DateTimeOffset.UtcNow;
             _revision++;
         }
+
+        if (OperatingSystem.IsMacOS()) _macStream.EnsureStarted(window.Id);
     }
 
     internal static (double X, double Y) NormalizeCursor(DesktopWindowInfo window, UiRect bounds)
@@ -98,6 +105,7 @@ public sealed class ComputerUsePreviewService
         lock (_sync)
         {
             var active = use.Active && !use.Blocked && _window is not null;
+            if (!active && OperatingSystem.IsMacOS()) _macStream.Stop();
             return new ComputerUsePreviewState(
                 active,
                 use.Blocked,
@@ -108,6 +116,8 @@ public sealed class ComputerUsePreviewService
                 active ? _cursorX : null,
                 active ? _cursorY : null,
                 active ? _lastAction : null,
+                OperatingSystem.IsMacOS() ? _macStream.BackendName : "os-screenshot-fallback",
+                OperatingSystem.IsMacOS() ? _macStream.LastError : null,
                 _updatedAt,
                 _revision);
         }
@@ -118,6 +128,15 @@ public sealed class ComputerUsePreviewService
         var state = GetState();
         if (!state.Active || string.IsNullOrWhiteSpace(state.WindowId)) return null;
 
+        if (OperatingSystem.IsMacOS() && _macStream.Available)
+        {
+            var native = await _macStream.WaitForFrameAsync(
+                state.WindowId,
+                TimeSpan.FromMilliseconds(350),
+                cancellationToken);
+            if (native is not null) return native;
+        }
+
         try
         {
             return await _vision.CaptureAsync("window", state.WindowId, cancellationToken: cancellationToken);
@@ -127,4 +146,6 @@ public sealed class ComputerUsePreviewService
             return null;
         }
     }
+
+    public void Dispose() => _macStream.Dispose();
 }

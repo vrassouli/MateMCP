@@ -3,16 +3,28 @@
 
 @if (Preview?.Active == true)
 {
-    <div class="panel dashboard-card computer-use-preview-card" aria-live="polite">
+    <div class="@DockClass" aria-live="polite">
         <div class="computer-use-preview-heading">
-            <div>
-                <div class="muted">AI workspace · Live preview</div>
-                <strong>@PreviewTitle</strong>
+            <div class="computer-use-preview-title-wrap">
+                <div class="computer-use-live-line">
+                    <span class="computer-use-live-dot" aria-hidden="true"></span>
+                    <span>AI workspace · Live</span>
+                </div>
+                <strong title="@PreviewTitle">@PreviewTitle</strong>
             </div>
-            @if (!string.IsNullOrWhiteSpace(Preview.LastAction))
-            {
-                <span class="computer-use-action-pill">@Preview.LastAction</span>
-            }
+            <div class="computer-use-preview-heading-actions">
+                @if (!string.IsNullOrWhiteSpace(Preview.LastAction))
+                {
+                    <span class="computer-use-action-pill">@Preview.LastAction</span>
+                }
+                <button type="button"
+                        class="computer-use-preview-size-button"
+                        @onclick="ToggleExpanded"
+                        title="@(Expanded ? "Make preview compact" : "Expand preview")"
+                        aria-label="@(Expanded ? "Make preview compact" : "Expand preview")">
+                    @(Expanded ? "↙" : "↗")
+                </button>
+            </div>
         </div>
 
         <div class="computer-use-preview-frame" title="MateMCP virtual Computer Use cursor; your physical mouse is independent during semantic actions.">
@@ -35,7 +47,18 @@
                 </div>
             }
         </div>
-        <div class="muted computer-use-preview-note">AI cursor is virtual. Semantic actions do not move your physical mouse.</div>
+
+        @if (Expanded)
+        {
+            <div class="computer-use-preview-footer">
+                <span class="muted">@CaptureBackendLabel</span>
+                <span class="muted">Your physical pointer stays independent for semantic actions.</span>
+                @if (!string.IsNullOrWhiteSpace(Preview.CaptureError))
+                {
+                    <span class="computer-use-preview-warning" title="@Preview.CaptureError">Capture fallback active</span>
+                }
+            </div>
+        }
     </div>
 }
 
@@ -44,9 +67,20 @@
     private Task? _pollLoop;
     private ComputerUsePreviewState? Preview { get; set; }
     private string? FrameDataUrl { get; set; }
+    private bool Expanded { get; set; }
+
+    private string DockClass
+        => $"panel computer-use-preview-card {(Expanded ? "expanded" : "compact")}";
 
     private string PreviewTitle
         => string.Join(" · ", new[] { Preview?.Application, Preview?.WindowTitle }.Where(x => !string.IsNullOrWhiteSpace(x))!);
+
+    private string CaptureBackendLabel
+        => Preview?.CaptureBackend == "macos-screencapturekit-stream"
+            ? "Native ScreenCaptureKit"
+            : Preview?.CaptureBackend == "windows-graphics-capture-stream"
+                ? "Native Windows Graphics Capture"
+                : "Compatibility capture";
 
     protected override async Task OnInitializedAsync()
     {
@@ -57,9 +91,6 @@
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch
         {
-            // Agent updates/restarts can briefly make the local management API unavailable.
-            // Treat that as an empty preview and let the background poll recover automatically
-            // instead of faulting the whole Blazor UI.
             Preview = null;
             FrameDataUrl = null;
         }
@@ -73,14 +104,15 @@
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), _cts.Token);
+                await Task.Delay(TimeSpan.FromMilliseconds(300), _cts.Token);
                 await RefreshAsync();
                 await InvokeAsync(StateHasChanged);
             }
             catch (OperationCanceledException) when (_cts.IsCancellationRequested) { break; }
             catch
             {
-                // Preview is best-effort. The Computer Use safety gate remains in the Agent.
+                // Preview is best-effort. Agent update/restart or capture fallback must
+                // never fault the Companion UI or weaken the Computer Use safety gate.
             }
         }
     }
@@ -94,11 +126,13 @@
             return;
         }
 
-        var bytes = await Api.GetComputerUsePreviewFrameAsync(_cts.Token);
-        FrameDataUrl = bytes is { Length: > 0 }
-            ? "data:image/png;base64," + Convert.ToBase64String(bytes)
+        var frame = await Api.GetComputerUsePreviewFrameAsync(_cts.Token);
+        FrameDataUrl = frame is { Bytes.Length: > 0 }
+            ? $"data:{frame.MimeType};base64," + Convert.ToBase64String(frame.Bytes)
             : null;
     }
+
+    private void ToggleExpanded() => Expanded = !Expanded;
 
     private static string Percent(double value)
         => (Math.Clamp(value, 0d, 1d) * 100d).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";

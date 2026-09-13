@@ -8,6 +8,7 @@ on:
       - 'src/MateMCP.Agent.Companion/**'
       - 'src/MateMCP.Agent/**'
       - 'scripts/bootstrap-macos.sh'
+      - 'scripts/build-screen-capture-kit-macos.sh'
       - 'scripts/bootstrap-windows.ps1'
       - 'scripts/configure-agent-mode-macos.sh'
       - 'scripts/configure-agent-mode-windows.ps1'
@@ -31,6 +32,7 @@ on:
       - 'src/MateMCP.Agent.Companion/**'
       - 'src/MateMCP.Agent/**'
       - 'scripts/bootstrap-macos.sh'
+      - 'scripts/build-screen-capture-kit-macos.sh'
       - 'scripts/bootstrap-windows.ps1'
       - 'scripts/configure-agent-mode-macos.sh'
       - 'scripts/configure-agent-mode-windows.ps1'
@@ -74,6 +76,8 @@ jobs:
         run: bash -n scripts/bootstrap-macos.sh scripts/configure-agent-mode-macos.sh scripts/install-macos.sh scripts/install-desktop-macos.sh scripts/uninstall-macos.sh
       - name: Verify Xcode
         run: xcodebuild -version
+      - name: Build ScreenCaptureKit preview helper
+        run: scripts/build-screen-capture-kit-macos.sh /tmp/MateMCP.ScreenCaptureKitHelper osx-arm64
       - name: Install .NET MAUI workload
         run: dotnet workload install maui
       - name: Restore Companion
@@ -83,6 +87,9 @@ jobs:
       - name: Publish Agent
         if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r osx-arm64 --self-contained true -o package/agent-payload
+      - name: Stage ScreenCaptureKit preview helper
+        if: github.event_name != 'pull_request'
+        run: cp /tmp/MateMCP.ScreenCaptureKitHelper package/agent-payload/MateMCP.ScreenCaptureKitHelper
       - name: Publish Mac Catalyst Companion app bundle
         if: github.event_name != 'pull_request'
         run: |
@@ -107,12 +114,13 @@ jobs:
           cp scripts/uninstall-companion-macos.sh package/uninstall-companion-macos.sh
           cp scripts/install-desktop-macos.sh package/install-desktop-macos.sh
           cp scripts/uninstall-desktop-macos.sh package/uninstall-desktop-macos.sh
-          chmod +x package/*.sh package/agent-payload/MateMCP.Agent
+          chmod +x package/*.sh package/agent-payload/MateMCP.Agent package/agent-payload/MateMCP.ScreenCaptureKitHelper
       - name: Smoke test unified macOS installer
         if: github.event_name != 'pull_request'
         run: |
           package/install-desktop-macos.sh --no-start
           test -x "$HOME/.local/share/matemcp/MateMCP.Agent"
+          test -x "$HOME/.local/share/matemcp/MateMCP.ScreenCaptureKitHelper"
           test -x "$HOME/.local/share/matemcp/configure-agent-mode-macos.sh"
           test -d "$HOME/Applications/MateMCP Agent Companion.app"
           test -f "$HOME/Library/LaunchAgents/com.matemcp.agent.plist"

@@ -8,6 +8,7 @@ on:
       - 'src/MateMCP.Agent/**'
       - 'src/MateMCP.Relay/**'
       - 'scripts/bootstrap-macos.sh'
+      - 'scripts/build-screen-capture-kit-macos.sh'
       - 'scripts/bootstrap-windows.ps1'
       - 'scripts/configure-agent-mode-macos.sh'
       - 'scripts/configure-agent-mode-windows.ps1'
@@ -73,6 +74,8 @@ jobs:
         run: dotnet test tests/MateMCP.Relay.Tests/MateMCP.Relay.Tests.csproj -c Release --no-build
       - name: Publish self-contained agent
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
+      - name: Build ScreenCaptureKit preview helper
+        run: scripts/build-screen-capture-kit-macos.sh package/payload/MateMCP.ScreenCaptureKitHelper ${{ matrix.rid }}
       - name: Smoke test packaged local management surface
         shell: bash
         run: |
@@ -100,7 +103,7 @@ jobs:
           cp scripts/install-macos.sh package/install-macos.sh
           cp scripts/uninstall-macos.sh package/uninstall-macos.sh
           cp scripts/prepare-external-test-macos.sh package/prepare-external-test-macos.sh
-          chmod +x package/configure-agent-mode-macos.sh package/install-macos.sh package/uninstall-macos.sh package/prepare-external-test-macos.sh package/payload/MateMCP.Agent
+          chmod +x package/configure-agent-mode-macos.sh package/install-macos.sh package/uninstall-macos.sh package/prepare-external-test-macos.sh package/payload/MateMCP.Agent package/payload/MateMCP.ScreenCaptureKitHelper
           tar -czf MateMCP-${{ matrix.rid }}.tar.gz -C package .
       - uses: actions/upload-artifact@v4
         with:
