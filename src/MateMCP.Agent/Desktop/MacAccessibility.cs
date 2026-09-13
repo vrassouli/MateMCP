@@ -19,6 +19,8 @@ internal static class MacAccessibility
     private const string AxHelp = "AXHelp";
     private const string AxIdentifier = "AXIdentifier";
     private const string AxValue = "AXValue";
+    private const string AxMinValue = "AXMinValue";
+    private const string AxMaxValue = "AXMaxValue";
     private const string AxEnabled = "AXEnabled";
     private const string AxFocused = "AXFocused";
     private const string AxSelected = "AXSelected";
@@ -27,6 +29,9 @@ internal static class MacAccessibility
     private const string AxSize = "AXSize";
     private const string AxPress = "AXPress";
     private const string AxScrollToVisible = "AXScrollToVisible";
+    private const string AxScrollUpByPage = "AXScrollUpByPage";
+    private const string AxScrollDownByPage = "AXScrollDownByPage";
+    private const string NsOutlineDisclosureIdentifier = "NSOutlineViewDisclosureButtonKey";
 
     private const int AxSuccess = 0;
     private const int AxErrorAttributeUnsupported = -25205;
@@ -137,10 +142,18 @@ internal static class MacAccessibility
                 case "expand":
                 case "collapse":
                     if (expanded is null) throw new ArgumentException("expanded is required for expand/collapse.", nameof(expanded));
-                    SetBoolean(element, AxExpanded, expanded.Value, selected, action);
+                    if (IsAttributeSettable(element, AxExpanded))
+                    {
+                        SetBoolean(element, AxExpanded, expanded.Value, selected, action);
+                    }
+                    else if (!TrySetOutlineDisclosureState(element, expanded.Value, out var expandDetail))
+                    {
+                        throw Unsupported(selected, action, expandDetail);
+                    }
                     break;
                 case "scroll":
-                    Perform(element, AxScrollToVisible, selected, "scroll-into-view");
+                    if (!TryPerform(element, AxScrollToVisible, out var scrollError))
+                        ScrollIntoViewWithAncestor(root, element, selected, scrollError);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown macOS semantic action.");
@@ -201,6 +214,8 @@ internal static class MacAccessibility
         var focused = BoolAttribute(element, AxFocused) ?? false;
         var selected = BoolAttribute(element, AxSelected);
         var expanded = BoolAttribute(element, AxExpanded);
+        if (expanded is null && role == "row")
+            expanded = OutlineDisclosureState(element);
         bool? check = role is "checkbox" or "radiobutton" ? BoolLikeAttribute(element, AxValue) : null;
         var bounds = Bounds(element);
         var actions = ActionNames(element);
@@ -361,6 +376,263 @@ internal static class MacAccessibility
     }
 
     private static bool? BoolLikeAttribute(IntPtr element, string attribute) => BoolAttribute(element, attribute);
+
+    private static bool? OutlineDisclosureState(IntPtr element)
+    {
+        var disclosure = FindDescendantByIdentifier(element, NsOutlineDisclosureIdentifier, maxDepth: 3);
+        if (disclosure == IntPtr.Zero) return null;
+        try { return BoolLikeAttribute(disclosure, AxValue); }
+        finally { CFRelease(disclosure); }
+    }
+
+    private static bool TrySetOutlineDisclosureState(IntPtr element, bool desired, out string detail)
+    {
+        var disclosure = FindDescendantByIdentifier(element, NsOutlineDisclosureIdentifier, maxDepth: 3);
+        if (disclosure == IntPtr.Zero)
+        {
+            detail = "The selected control does not expose a writable AXExpanded attribute or a native outline disclosure button.";
+            return false;
+        }
+
+        try
+        {
+            var current = BoolLikeAttribute(disclosure, AxValue);
+            if (current == desired)
+            {
+                detail = string.Empty;
+                return true;
+            }
+
+            if (!TryPerform(disclosure, AxPress, out var error))
+            {
+                detail = $"The native outline disclosure button could not perform AXPress ({ErrorText(error)}).";
+                return false;
+            }
+
+            var updated = BoolLikeAttribute(disclosure, AxValue);
+            if (updated is not null && updated != desired)
+            {
+                detail = $"The native outline disclosure button was pressed but its expanded state remained {(updated.Value ? "expanded" : "collapsed")}.";
+                return false;
+            }
+
+            detail = string.Empty;
+            return true;
+        }
+        finally { CFRelease(disclosure); }
+    }
+
+    private static IntPtr FindDescendantByIdentifier(IntPtr element, string identifier, int maxDepth)
+    {
+        if (maxDepth < 0 || !TryCopyAttribute(element, AxChildren, out var children)) return IntPtr.Zero;
+        try
+        {
+            if (CFGetTypeID(children) != CFArrayGetTypeID()) return IntPtr.Zero;
+            var count = CFArrayGetCount(children);
+            for (nint i = 0; i < count; i++)
+            {
+                var child = CFArrayGetValueAtIndex(children, i);
+                if (child == IntPtr.Zero || CFGetTypeID(child) != AXUIElementGetTypeID()) continue;
+                if (string.Equals(StringAttribute(child, AxIdentifier), identifier, StringComparison.Ordinal))
+                    return CFRetain(child);
+                if (maxDepth == 0) continue;
+                var nested = FindDescendantByIdentifier(child, identifier, maxDepth - 1);
+                if (nested != IntPtr.Zero) return nested;
+            }
+            return IntPtr.Zero;
+        }
+        finally { CFRelease(children); }
+    }
+
+    private static void ScrollIntoViewWithAncestor(IntPtr root, IntPtr element, UiElementInfo selected, int directError)
+    {
+        var ancestorId = selected.ParentId;
+        while (!string.IsNullOrWhiteSpace(ancestorId))
+        {
+            var ancestor = ResolvePath(root, ancestorId);
+            try
+            {
+                var role = Role(StringAttribute(ancestor, AxRole), StringAttribute(ancestor, AxSubrole));
+                if (role == "scrollarea")
+                {
+                    ScrollByPageUntilVisible(ancestor, element, selected, directError);
+                    return;
+                }
+            }
+            finally { CFRelease(ancestor); }
+            ancestorId = ParentElementId(ancestorId);
+        }
+
+        throw Unsupported(selected, "scroll-into-view",
+            $"Native {AxScrollToVisible} is unavailable ({ErrorText(directError)}) and no accessible scroll-area ancestor was found.");
+    }
+
+    private static void ScrollByPageUntilVisible(IntPtr scrollArea, IntPtr element, UiElementInfo selected, int directError)
+    {
+        var viewport = Bounds(scrollArea);
+        if (viewport is null)
+            throw Unsupported(selected, "scroll-into-view",
+                $"Native {AxScrollToVisible} is unavailable ({ErrorText(directError)}) and the scroll-area bounds are unavailable.");
+
+        double? previousY = null;
+        for (var attempt = 0; attempt < 32; attempt++)
+        {
+            var target = Bounds(element);
+            if (target is null)
+                throw Unsupported(selected, "scroll-into-view", "The target bounds became unavailable while scrolling through Accessibility.");
+
+            if (IsFullyVisibleVertically(target, viewport)) return;
+
+            var action = target.Y < viewport.Y ? AxScrollUpByPage : AxScrollDownByPage;
+            if (!TryPerform(scrollArea, action, out var error))
+            {
+                if (TryScrollWithVerticalScrollbar(scrollArea, element, viewport, out var scrollbarDetail)) return;
+                throw Unsupported(selected, "scroll-into-view",
+                    $"Native {AxScrollToVisible} is unavailable ({ErrorText(directError)}), ancestor {action} failed ({ErrorText(error)}), and native scrollbar fallback failed: {scrollbarDetail}");
+            }
+
+            Thread.Sleep(15);
+            var after = Bounds(element);
+            if (after is null) continue;
+            if (previousY is not null && Math.Abs(after.Y - previousY.Value) < 0.5)
+                throw Unsupported(selected, "scroll-into-view",
+                    $"The accessible scroll area accepted {action}, but the target stopped moving before it became visible.");
+            previousY = after.Y;
+        }
+
+        throw Unsupported(selected, "scroll-into-view",
+            "The accessible scroll area did not bring the target into view within the bounded native page-scroll limit.");
+    }
+
+    private static bool TryScrollWithVerticalScrollbar(IntPtr scrollArea, IntPtr element, UiRect viewport, out string detail)
+    {
+        var scrollbar = FindVerticalScrollbar(scrollArea);
+        if (scrollbar == IntPtr.Zero)
+        {
+            detail = "no vertical AXScrollBar descendant was exposed";
+            return false;
+        }
+
+        try
+        {
+            if (!IsAttributeSettable(scrollbar, AxValue))
+            {
+                detail = "the vertical AXScrollBar AXValue is not writable";
+                return false;
+            }
+
+            var minimum = DoubleAttribute(scrollbar, AxMinValue) ?? 0d;
+            var maximum = DoubleAttribute(scrollbar, AxMaxValue) ?? 1d;
+            var current = DoubleAttribute(scrollbar, AxValue);
+            if (current is null || maximum <= minimum)
+            {
+                detail = "the vertical AXScrollBar did not expose a usable numeric value range";
+                return false;
+            }
+
+            var step = Math.Max((maximum - minimum) / 8d, 0.01d);
+            for (var attempt = 0; attempt < 24; attempt++)
+            {
+                var target = Bounds(element);
+                if (target is null)
+                {
+                    detail = "the target bounds became unavailable while adjusting the AXScrollBar";
+                    return false;
+                }
+                if (IsFullyVisibleVertically(target, viewport))
+                {
+                    detail = string.Empty;
+                    return true;
+                }
+
+                var next = target.Y < viewport.Y
+                    ? Math.Max(minimum, current.Value - step)
+                    : Math.Min(maximum, current.Value + step);
+                if (Math.Abs(next - current.Value) < 0.0001d)
+                {
+                    detail = "the vertical AXScrollBar reached its range boundary before the target became visible";
+                    return false;
+                }
+
+                if (!TrySetNumber(scrollbar, AxValue, next, out var error))
+                {
+                    detail = $"setting the vertical AXScrollBar AXValue failed ({ErrorText(error)})";
+                    return false;
+                }
+
+                Thread.Sleep(15);
+                current = DoubleAttribute(scrollbar, AxValue) ?? next;
+            }
+
+            detail = "the vertical AXScrollBar did not bring the target into view within the bounded semantic-scroll limit";
+            return false;
+        }
+        finally { CFRelease(scrollbar); }
+    }
+
+    private static IntPtr FindVerticalScrollbar(IntPtr scrollArea)
+    {
+        if (!TryCopyAttribute(scrollArea, AxChildren, out var children)) return IntPtr.Zero;
+        try
+        {
+            if (CFGetTypeID(children) != CFArrayGetTypeID()) return IntPtr.Zero;
+            var count = CFArrayGetCount(children);
+            for (nint i = 0; i < count; i++)
+            {
+                var child = CFArrayGetValueAtIndex(children, i);
+                if (child == IntPtr.Zero || CFGetTypeID(child) != AXUIElementGetTypeID()) continue;
+                if (!string.Equals(StringAttribute(child, AxRole), "AXScrollBar", StringComparison.Ordinal)) continue;
+                var bounds = Bounds(child);
+                if (bounds is null || bounds.Height < bounds.Width) continue;
+                return CFRetain(child);
+            }
+            return IntPtr.Zero;
+        }
+        finally { CFRelease(children); }
+    }
+
+    private static double? DoubleAttribute(IntPtr element, string attribute)
+    {
+        if (!TryCopyAttribute(element, attribute, out var value)) return null;
+        try
+        {
+            if (CFGetTypeID(value) != CFNumberGetTypeID()) return null;
+            return CFNumberGetValue(value, CfNumberDouble, out var number) ? number : null;
+        }
+        finally { CFRelease(value); }
+    }
+
+    private static bool TrySetNumber(IntPtr element, string attribute, double value, out int error)
+    {
+        if (!IsAttributeSettable(element, attribute))
+        {
+            error = AxErrorAttributeUnsupported;
+            return false;
+        }
+        using var name = CfString(attribute);
+        var number = CFNumberCreate(IntPtr.Zero, CfNumberDouble, ref value);
+        if (number == IntPtr.Zero)
+        {
+            error = AxErrorNoValue;
+            return false;
+        }
+        try
+        {
+            error = AXUIElementSetAttributeValue(element, name.Handle, number);
+            return error == AxSuccess;
+        }
+        finally { CFRelease(number); }
+    }
+
+    internal static string? ParentElementId(string? elementId)
+    {
+        if (string.IsNullOrWhiteSpace(elementId) || string.Equals(elementId, "ax:0", StringComparison.Ordinal)) return null;
+        var slash = elementId.LastIndexOf('/');
+        return slash < 0 ? null : elementId[..slash];
+    }
+
+    internal static bool IsFullyVisibleVertically(UiRect target, UiRect viewport)
+        => target.Y >= viewport.Y && target.Y + target.Height <= viewport.Y + viewport.Height;
 
     private static bool IsAttributeSettable(IntPtr element, string attribute)
     {
@@ -531,6 +803,7 @@ internal static class MacAccessibility
     [DllImport(CoreFoundation)] private static extern nuint CFBooleanGetTypeID();
     [DllImport(CoreFoundation)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool CFBooleanGetValue(IntPtr boolean);
     [DllImport(CoreFoundation)] private static extern nuint CFNumberGetTypeID();
+    [DllImport(CoreFoundation)] private static extern IntPtr CFNumberCreate(IntPtr allocator, int type, ref double value);
     [DllImport(CoreFoundation)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool CFNumberGetValue(IntPtr number, int type, out double value);
     [DllImport(CoreFoundation)] private static extern nuint CFArrayGetTypeID();
     [DllImport(CoreFoundation)] private static extern nint CFArrayGetCount(IntPtr array);
