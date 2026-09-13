@@ -83,7 +83,7 @@ Windows uses Microsoft UI Automation through the native UIA COM API. Snapshot su
 
 #### macOS
 
-macOS semantic snapshots and actions use the native Accessibility API through `AXUIElement` inside the Agent process and require Accessibility permission for the MateMCP Agent executable. Secure text fields are redacted/refused. Unsupported AX actions fail explicitly with bounds when available; MateMCP never silently converts them into coordinate input.
+macOS semantic snapshots and actions use the native Accessibility API through `AXUIElement` inside the Agent process and require Accessibility permission for the MateMCP Agent executable. When that trust is missing, MateMCP requests the native macOS Accessibility consent prompt for the Agent process; approval remains a local user decision. Secure text fields are redacted/refused. Unsupported AX actions fail explicitly with bounds when available; MateMCP never silently converts them into coordinate input.
 
 ## Computer Use safety
 

@@ -13,4 +13,4 @@ Supported macOS actions:
 
 MateMCP never silently falls back to screen coordinates. When a native semantic action is unavailable, the operation fails and reports element bounds when available so raw input can be chosen explicitly.
 
-Accessibility permission for the MateMCP Agent executable is required on macOS. Semantic inspection/actions run directly through `AXUIElement`; `/usr/bin/osascript` does not need Accessibility permission. Raw CGEvent input uses the same Agent Accessibility trust preflight. Typed text is omitted from approval and audit details, and secure-text values remain redacted.
+Accessibility permission for the MateMCP Agent executable is required on macOS. If the Agent is not trusted, the first semantic/raw input attempt requests the native macOS Accessibility consent flow for the Agent process; the user must still approve it in System Settings. Semantic inspection/actions run directly through `AXUIElement`; `/usr/bin/osascript` does not need Accessibility permission. Raw CGEvent input uses the same Agent Accessibility trust preflight. Typed text is omitted from approval and audit details, and secure-text values remain redacted.
