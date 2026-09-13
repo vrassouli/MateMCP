@@ -411,54 +411,130 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     background: var(--colorStatusWarningBackground1, var(--colorNeutralBackground1, #fff));
 }
 
+
 .computer-use-preview-card {
-    grid-column: span 2;
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 1200;
+    width: min(340px, calc(100vw - 32px));
+    padding: 10px;
+    border-radius: 14px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, .24);
+    backdrop-filter: blur(18px);
+    transition: width .18s ease, box-shadow .18s ease;
+}
+
+.computer-use-preview-card.expanded {
+    width: min(620px, calc(100vw - 32px));
+    box-shadow: 0 16px 48px rgba(0, 0, 0, .3);
 }
 
 .computer-use-preview-heading {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    margin-bottom: 10px;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.computer-use-preview-title-wrap {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.computer-use-preview-title-wrap strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+.computer-use-live-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--colorNeutralForeground3, #666);
+    font-size: 11px;
+}
+
+.computer-use-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--colorPaletteGreenForeground1, #107c10);
+    box-shadow: 0 0 0 3px rgba(16, 124, 16, .12);
+}
+
+.computer-use-preview-heading-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .computer-use-action-pill {
-    flex: 0 0 auto;
-    padding: 3px 8px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 3px 7px;
     border-radius: 999px;
     background: var(--colorBrandBackground2, rgba(0, 120, 212, .12));
     color: var(--colorBrandForeground1, inherit);
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 600;
+}
+
+.computer-use-preview-size-button {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--colorNeutralStroke1, rgba(0,0,0,.16));
+    border-radius: 8px;
+    background: var(--colorNeutralBackground1, #fff);
+    color: inherit;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+}
+
+.computer-use-preview-size-button:hover {
+    background: var(--colorNeutralBackground1Hover, rgba(0,0,0,.05));
 }
 
 .computer-use-preview-frame {
     position: relative;
-    min-height: 180px;
-    max-height: 360px;
+    height: 178px;
     overflow: hidden;
     display: grid;
     place-items: center;
     border: 1px solid var(--colorNeutralStroke1, rgba(0,0,0,.16));
-    border-radius: var(--borderRadiusLarge, 12px);
+    border-radius: 10px;
     background: #111;
+    transition: height .18s ease;
+}
+
+.computer-use-preview-card.expanded .computer-use-preview-frame {
+    height: min(460px, calc(100vh - 180px));
 }
 
 .computer-use-preview-frame img {
     display: block;
     width: 100%;
     height: 100%;
-    max-height: 360px;
     object-fit: contain;
     user-select: none;
     pointer-events: none;
 }
 
 .computer-use-preview-placeholder {
-    padding: 32px;
+    padding: 24px;
     color: #aaa;
     text-align: center;
+    font-size: 12px;
 }
 
 .computer-use-virtual-cursor {
@@ -469,11 +545,13 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     pointer-events: none;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,.65));
     z-index: 3;
+    transition: left .16s ease-out, top .16s ease-out;
+    will-change: left, top;
 }
 
 .computer-use-cursor-arrow {
     display: block;
-    font-size: 25px;
+    font-size: 24px;
     line-height: 1;
     color: #fff;
     -webkit-text-stroke: 2px #111;
@@ -481,20 +559,41 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 .computer-use-cursor-label {
     display: inline-block;
-    margin: 2px 0 0 14px;
+    margin: 1px 0 0 13px;
     padding: 2px 6px;
     border-radius: 999px;
     background: #111;
     color: #fff;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     transform: rotate(40deg);
 }
 
-.computer-use-preview-note { margin-top: 8px; }
+.computer-use-preview-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+    margin-top: 8px;
+    font-size: 11px;
+}
+
+.computer-use-preview-warning {
+    color: var(--colorStatusWarningForeground1, #8a5d00);
+    font-weight: 600;
+}
 
 @media (max-width: 760px) {
-    .computer-use-preview-card { grid-column: auto; }
-    .computer-use-preview-frame { min-height: 140px; max-height: 260px; }
-    .computer-use-preview-frame img { max-height: 260px; }
+    .computer-use-preview-card {
+        right: 10px;
+        bottom: 10px;
+        width: min(310px, calc(100vw - 20px));
+    }
+    .computer-use-preview-card.expanded {
+        width: calc(100vw - 20px);
+    }
+    .computer-use-preview-frame { height: 150px; }
+    .computer-use-preview-card.expanded .computer-use-preview-frame { height: min(360px, calc(100vh - 150px)); }
+    .computer-use-action-pill { display: none; }
 }
