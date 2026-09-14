@@ -7,12 +7,13 @@ namespace MateMCP.Agent.Desktop;
 public sealed class SemanticUiService
 {
     private readonly DesktopVisionService _vision = new();
+    private readonly WindowsSemanticUiHelper _windows = new();
 
     public async Task<UiSnapshot> SnapshotAsync(string windowId, int maxElements = 400, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         maxElements = Math.Clamp(maxElements, 1, 1000);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Snapshot(window, maxElements);
+        if (OperatingSystem.IsWindows()) return await _windows.SnapshotAsync(window.Id, maxElements, cancellationToken);
         if (OperatingSystem.IsMacOS()) return await MacSemanticUi.SnapshotAsync(window, maxElements, cancellationToken);
         throw UnsupportedPlatform();
     }
@@ -20,7 +21,7 @@ public sealed class SemanticUiService
     public async Task<UiElementInfo> FocusAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "focus", null);
+        if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, "focus", null, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "focus", null);
         throw UnsupportedPlatform();
     }
@@ -28,7 +29,7 @@ public sealed class SemanticUiService
     public async Task<UiElementInfo> ClickAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "invoke", null);
+        if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, "invoke", null, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "invoke", null);
         throw UnsupportedPlatform();
     }
@@ -38,7 +39,7 @@ public sealed class SemanticUiService
         ArgumentNullException.ThrowIfNull(text);
         if (text.Length > 20_000) throw new ArgumentOutOfRangeException(nameof(text), "Text entry is limited to 20,000 characters per call.");
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "value", text);
+        if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, "value", text, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "value", text);
         throw UnsupportedPlatform();
     }
@@ -46,7 +47,7 @@ public sealed class SemanticUiService
     public async Task<UiElementInfo> ToggleAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "toggle", null);
+        if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, "toggle", null, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "toggle", null);
         throw UnsupportedPlatform();
     }
@@ -54,7 +55,7 @@ public sealed class SemanticUiService
     public async Task<UiElementInfo> SelectAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "select", null);
+        if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, "select", null, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "select", null);
         throw UnsupportedPlatform();
     }
@@ -62,7 +63,7 @@ public sealed class SemanticUiService
     public async Task<UiElementInfo> SetExpandedAsync(string windowId, UiSelector selector, bool expanded, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, expanded ? "expand" : "collapse", null);
+        if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, expanded ? "expand" : "collapse", null, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, expanded ? "expand" : "collapse", null, expanded);
         throw UnsupportedPlatform();
     }
@@ -70,7 +71,7 @@ public sealed class SemanticUiService
     public async Task<UiElementInfo> ScrollIntoViewAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.Act(window, selector, "scroll", null);
+        if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, "scroll", null, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "scroll", null);
         throw UnsupportedPlatform();
     }
@@ -78,7 +79,7 @@ public sealed class SemanticUiService
     public async Task<UiElementInfo> ClickAtAsync(string windowId, double x, double y, CancellationToken cancellationToken = default)
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
-        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.ClickAt(window, x, y);
+        if (OperatingSystem.IsWindows()) return await _windows.ClickAtAsync(window.Id, x, y, cancellationToken);
         throw new PlatformNotSupportedException("Window-relative semantic hit-testing through SemanticUiService is currently supported on Windows.");
     }
 

@@ -159,9 +159,15 @@ jobs:
         run: dotnet restore src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -r win-x64
       - name: Build Windows Companion
         run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore
+      - name: Build Windows desktop helper
+        run: dotnet build src/MateMCP.WindowsDesktopHelper/MateMCP.WindowsDesktopHelper.csproj -c Release
       - name: Publish Agent
         if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r win-x64 --self-contained true -o package/agent-payload
+      - name: Stage Windows desktop helper
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: Copy-Item src/MateMCP.WindowsDesktopHelper/bin/Release/net48/MateMCP.WindowsDesktopHelper.exe package/agent-payload/MateMCP.WindowsDesktopHelper.exe
       - name: Publish Windows Companion
         if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --self-contained true -p:WindowsPackageType=None -p:PublishReadyToRun=false --no-restore -o package/companion-payload
@@ -170,6 +176,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path package/agent-payload/MateMCP.Agent.exe)) { throw 'Agent publish output missing.' }
+          if (-not (Test-Path package/agent-payload/MateMCP.WindowsDesktopHelper.exe)) { throw 'Windows desktop helper missing.' }
           if (-not (Test-Path package/companion-payload/MateMCP.Agent.Companion.exe)) { throw 'Companion publish output missing.' }
           Copy-Item scripts/configure-agent-mode-windows.ps1 package/configure-agent-mode-windows.ps1
           Copy-Item scripts/install-windows.ps1 package/install-windows.ps1
@@ -187,6 +194,7 @@ jobs:
           $startup = [Environment]::GetFolderPath('Startup')
           $programs = [Environment]::GetFolderPath('Programs')
           if (-not (Test-Path (Join-Path $root 'MateMCP.Agent.exe'))) { throw 'Installed Agent missing.' }
+          if (-not (Test-Path (Join-Path $root 'MateMCP.WindowsDesktopHelper.exe'))) { throw 'Installed Windows desktop helper missing.' }
           if (-not (Test-Path (Join-Path $root 'configure-agent-mode-windows.ps1'))) { throw 'Agent mode configurator missing.' }
           if (-not (Test-Path (Join-Path $root 'Companion\MateMCP.Agent.Companion.exe'))) { throw 'Installed Companion missing.' }
           if (-not (Test-Path (Join-Path $root 'start-agent-hidden.vbs'))) { throw 'Hidden Agent launcher missing.' }
