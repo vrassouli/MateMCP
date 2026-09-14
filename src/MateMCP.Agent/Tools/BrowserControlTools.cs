@@ -106,6 +106,61 @@ public sealed class BrowserControlTools(ApprovalService approvals, AuditLog audi
         return result;
     }
 
+    [McpServerTool(Name = "browser_press", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
+    [Description("Presses one browser key with optional CTRL/ALT/SHIFT/CMD(META) modifiers using Chrome DevTools input events. Literal character content is omitted from approval and audit details.")]
+    public async Task<string> Press(
+        string key,
+        [Description("Optional modifiers: CTRL, ALT/OPTION, SHIFT, CMD/META/WIN.")] IReadOnlyList<string>? modifiers = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedKey = BrowserAutomationService.NormalizeBrowserKey(key, allowModifier: false);
+        var normalizedModifiers = (modifiers ?? []).Select(value => BrowserAutomationService.NormalizeBrowserKey(value)).ToArray();
+        var safeKey = normalizedKey.Length == 1 ? "character" : normalizedKey;
+        var modifierSummary = normalizedModifiers.Length == 0 ? string.Empty : $" with {string.Join('+', normalizedModifiers)}";
+        await RequireApprovalAsync("browser.input", "keyboard", $"Press browser {safeKey}{modifierSummary}.", cancellationToken);
+        EnsureComputerUseAvailable();
+        await _browser.PressAsync(normalizedKey, normalizedModifiers, cancellationToken);
+        _computerUse.Touch("browser-input", $"key:{safeKey}");
+        await audit.WriteAsync("browser.press", "keyboard", $"ok:{safeKey}:modifiers={string.Join('+', normalizedModifiers)}", cancellationToken);
+        return "pressed";
+    }
+
+    [McpServerTool(Name = "browser_check", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = true)]
+    [Description("Sets exactly one semantic checkbox to the requested checked state. Radio controls may be checked but are not directly unchecked. Ambiguous selectors fail without changing state.")]
+    public async Task<BrowserActionResult> Check(
+        bool @checked,
+        [Description("Role must be checkbox or radio; defaults to checkbox.")] string role = "checkbox",
+        string? name = null,
+        string? label = null,
+        string? testId = null,
+        int? index = null,
+        CancellationToken cancellationToken = default)
+    {
+        role = NormalizeCheckRole(role);
+        if (role == "radio" && !@checked)
+            throw new ArgumentException("Radio controls cannot be unchecked directly; select another radio instead.", nameof(@checked));
+        var selector = new BrowserSelector(null, role, name, null, label, testId, index);
+        ValidateSemanticSelector(selector);
+        await RequireApprovalAsync(
+            "browser.input",
+            "semantic-check",
+            $"Set browser {role} selected by {Describe(selector)} to checked={@checked}.",
+            cancellationToken);
+        EnsureComputerUseAvailable();
+        var result = await _browser.CheckAsync(selector, @checked, cancellationToken);
+        _computerUse.Touch("browser-input", $"check:{result.Role}:{result.Name}:{result.Checked}");
+        await audit.WriteAsync("browser.check", Describe(selector), $"ok:checked={result.Checked}", cancellationToken);
+        return result;
+    }
+
+    public static string NormalizeCheckRole(string? role)
+        => (role ?? "checkbox").Trim().ToLowerInvariant() switch
+        {
+            "checkbox" => "checkbox",
+            "radio" => "radio",
+            _ => throw new ArgumentException("Browser check role must be checkbox or radio.", nameof(role))
+        };
+
     public static string NormalizeWaitState(string? state)
         => (state ?? "visible").Trim().ToLowerInvariant() switch
         {

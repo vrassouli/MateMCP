@@ -29,6 +29,17 @@ public sealed class BrowserControlTests
     public void Select_refuses_non_select_roles()
         => Assert.Throws<ArgumentException>(() => BrowserControlTools.NormalizeSelectRole("textbox"));
 
+    [Theory]
+    [InlineData("checkbox", "checkbox")]
+    [InlineData(" CHECKBOX ", "checkbox")]
+    [InlineData("radio", "radio")]
+    public void Check_roles_are_normalized(string input, string expected)
+        => Assert.Equal(expected, BrowserControlTools.NormalizeCheckRole(input));
+
+    [Fact]
+    public void Check_refuses_non_checkable_roles()
+        => Assert.Throws<ArgumentException>(() => BrowserControlTools.NormalizeCheckRole("button"));
+
     [Fact]
     public void Semantic_matching_is_case_insensitive_and_exact()
     {
@@ -51,6 +62,8 @@ public sealed class BrowserControlTests
     {
         Assert.Contains("browser_wait_for", McpToolCatalog.Names);
         Assert.Contains("browser_select", McpToolCatalog.Names);
+        Assert.Contains("browser_press", McpToolCatalog.Names);
+        Assert.Contains("browser_check", McpToolCatalog.Names);
     }
 
     private static BrowserElementInfo Element(string role, string name, string label, string testId)

@@ -35,6 +35,21 @@ public sealed class BrowserAutomationTests
     public void Unsafe_or_non_http_urls_are_rejected(string value)
         => Assert.Throws<ArgumentException>(() => BrowserAutomationService.ValidateUrl(value));
 
+    [Theory]
+    [InlineData("return", "ENTER")]
+    [InlineData("escape", "ESC")]
+    [InlineData("command", "META")]
+    [InlineData("win", "META")]
+    [InlineData("ArrowLeft", "LEFT")]
+    [InlineData("f12", "F12")]
+    [InlineData("a", "A")]
+    public void Browser_keys_are_normalized(string input, string expected)
+        => Assert.Equal(expected, BrowserAutomationService.NormalizeBrowserKey(input));
+
+    [Fact]
+    public void Unsupported_browser_key_is_rejected()
+        => Assert.Throws<ArgumentException>(() => BrowserAutomationService.NormalizeBrowserKey("MAGIC_KEY"));
+
     [Fact]
     public void Browser_tools_are_published_in_the_MCP_catalog()
     {
@@ -47,6 +62,9 @@ public sealed class BrowserAutomationTests
             "browser_screenshot",
             "browser_set_viewport",
             "browser_reload",
+            "browser_back",
+            "browser_forward",
+            "browser_diagnostics",
             "browser_close"
         };
 
