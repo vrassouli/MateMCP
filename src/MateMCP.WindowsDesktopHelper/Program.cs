@@ -80,30 +80,52 @@ namespace MateMCP.WindowsDesktopHelper
                 throw new ArgumentException("The requested window-relative point is outside the target window.");
 
             GetWindowThreadProcessId(hwnd, out var targetPid);
-            var element = AutomationElement.FromPoint(new Point(rect.Left + request.X, rect.Top + request.Y));
-            Element initial = null;
-            for (var depth = 0; depth < 32 && element != null; depth++)
-            {
-                var pid = Safe(() => element.Current.ProcessId, 0);
-                if (pid != 0 && targetPid != 0 && pid != unchecked((int)targetPid))
+            var screenX = rect.Left + request.X;
+            var screenY = rect.Top + request.Y;
+            var root = ResolveRoot(request.WindowId);
+            var candidates = new List<AutomationElement> { root };
+            var descendants = root.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+            for (var i = 0; i < descendants.Count; i++) candidates.Add(descendants[i]);
+
+            var hit = candidates
+                .Where(element =>
                 {
-                    if (depth == 0) throw new InvalidOperationException("Windows UI Automation hit-testing resolved to a different process; no action was performed.");
-                    break;
-                }
-                var info = BuildInfo(element, depth == 0 ? "uia:point" : "uia:point-parent:" + depth, null);
-                if (initial == null) initial = info;
+                    var pid = Safe(() => element.Current.ProcessId, 0);
+                    if (pid != 0 && targetPid != 0 && pid != unchecked((int)targetPid)) return false;
+                    var bounds = Safe(() => element.Current.BoundingRectangle, Rect.Empty);
+                    return bounds != Rect.Empty && bounds.Contains(new Point(screenX, screenY));
+                })
+                .OrderBy(element =>
+                {
+                    var bounds = Safe(() => element.Current.BoundingRectangle, Rect.Empty);
+                    return bounds == Rect.Empty ? double.MaxValue : bounds.Width * bounds.Height;
+                })
+                .FirstOrDefault();
+
+            if (hit == null)
+                throw new InvalidOperationException("No target-window UI Automation element exists at the requested point.");
+
+            var elementAtPoint = hit;
+            for (var depth = 0; depth < 32 && elementAtPoint != null; depth++)
+            {
+                var info = BuildInfo(elementAtPoint, depth == 0 ? "uia:point" : "uia:point-parent:" + depth, null);
                 if (info.Enabled)
                 {
                     InvokePattern invoke; TogglePattern toggle; SelectionItemPattern select; ExpandCollapsePattern expand;
-                    if (TryPattern(element, InvokePattern.Pattern, out invoke)) { invoke.Invoke(); return BuildInfo(element, info.Id, null); }
-                    if (TryPattern(element, TogglePattern.Pattern, out toggle)) { toggle.Toggle(); return BuildInfo(element, info.Id, null); }
-                    if (TryPattern(element, SelectionItemPattern.Pattern, out select)) { select.Select(); return BuildInfo(element, info.Id, null); }
-                    if (TryPattern(element, ExpandCollapsePattern.Pattern, out expand))
-                    { if (expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) expand.Collapse(); else expand.Expand(); return BuildInfo(element, info.Id, null); }
+                    if (TryPattern(elementAtPoint, InvokePattern.Pattern, out invoke)) { invoke.Invoke(); return BuildInfo(elementAtPoint, info.Id, null); }
+                    if (TryPattern(elementAtPoint, TogglePattern.Pattern, out toggle)) { toggle.Toggle(); return BuildInfo(elementAtPoint, info.Id, null); }
+                    if (TryPattern(elementAtPoint, SelectionItemPattern.Pattern, out select)) { select.Select(); return BuildInfo(elementAtPoint, info.Id, null); }
+                    if (TryPattern(elementAtPoint, ExpandCollapsePattern.Pattern, out expand))
+                    { if (expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) expand.Collapse(); else expand.Expand(); return BuildInfo(elementAtPoint, info.Id, null); }
                 }
-                element = Safe(() => Walker.GetParent(element), (AutomationElement)null);
+                elementAtPoint = Safe(() => Walker.GetParent(elementAtPoint), (AutomationElement)null);
+                if (elementAtPoint != null)
+                {
+                    var pid = Safe(() => elementAtPoint.Current.ProcessId, 0);
+                    if (pid != 0 && targetPid != 0 && pid != unchecked((int)targetPid)) break;
+                }
             }
-            throw new InvalidOperationException("No actionable Windows UI Automation control was found at the requested point or in its accessible ancestors.");
+            throw new InvalidOperationException("No actionable Windows UI Automation control was found at the requested point or in its target-window ancestors.");
         }
 
         private static AutomationElement ResolveRoot(string windowId) => AutomationElement.FromHandle(ParseWindow(windowId)) ?? throw new InvalidOperationException("Windows UI Automation could not resolve the target window.");
