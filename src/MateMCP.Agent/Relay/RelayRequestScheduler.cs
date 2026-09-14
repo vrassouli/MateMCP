@@ -131,5 +131,5 @@ internal sealed class RelayRequestScheduler : IAsyncDisposable
     }
 }
 
-internal sealed record RelayRequest(string Id, string Method, string Path, Dictionary<string, string[]> Headers, string? BodyBase64);
+internal sealed record RelayRequest(string Id, string Method, string Path, Dictionary<string, string[]> Headers, string? BodyBase64, string? OperationId = null);
 internal sealed record RelayResponse(string Id, int StatusCode, Dictionary<string, string[]> Headers, string? BodyBase64, string? Error);
