@@ -367,7 +367,7 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
         for (var i = 1; i < tokens.Count; i++)
         {
             var token = tokens[i];
-            if (token.StartsWith('-', StringComparison.Ordinal))
+            if (token.StartsWith("-", StringComparison.Ordinal))
             {
                 if ((token is "-u" or "-g" or "-h" or "-p" or "-r" or "-t" or "-c") && i + 1 < tokens.Count) i++;
                 continue;
