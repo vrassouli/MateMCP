@@ -31,6 +31,63 @@ public sealed class AgentRegistry
 
     public int Count => _agents.Count;
 
+    public int TotalPendingRequestCount
+    {
+        get
+        {
+            var total = 0;
+            foreach (var session in _agents.Values)
+            {
+                lock (session.Gate)
+                    total += session.Connection?.PendingRequestCount ?? 0;
+            }
+            return total;
+        }
+    }
+
+    public int BeginShutdownDrain()
+    {
+        var draining = 0;
+        foreach (var session in _agents.Values)
+        {
+            lock (session.Gate)
+            {
+                if (session.Connection is null) continue;
+                session.Connection.BeginDrain();
+                draining++;
+            }
+        }
+        return draining;
+    }
+
+    public int AbortConnectionsForShutdown()
+    {
+        var connections = new List<AgentConnection>();
+        foreach (var session in _agents.Values)
+        {
+            lock (session.Gate)
+            {
+                if (session.Connection is not null)
+                    connections.Add(session.Connection);
+            }
+        }
+
+        foreach (var connection in connections)
+        {
+            connection.Disconnect();
+            try { connection.Socket.Abort(); }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "Relay shutdown could not abort Agent socket: device={DeviceId}; connection={ConnectionId}",
+                    connection.DeviceId,
+                    connection.ConnectionId);
+            }
+        }
+
+        return connections.Count;
+    }
+
     public bool TryRegister(string deviceId, WebSocket socket, string? requestedConnectionId, CancellationToken connectionLifetime, out AgentConnection connection)
     {
         connection = new AgentConnection(
@@ -282,6 +339,7 @@ public sealed class AgentConnection : IDisposable
     private readonly int _maxPendingRequests;
     private readonly ILogger? _logger;
     private int _admittedRequests;
+    private int _draining;
     private int _disposed;
 
     public AgentConnection(
@@ -307,10 +365,20 @@ public sealed class AgentConnection : IDisposable
     public DateTimeOffset ConnectedAt { get; }
     public int PendingRequestCount => Volatile.Read(ref _admittedRequests);
     public int PendingRequestCapacity => _maxPendingRequests;
+    public bool IsDraining => Volatile.Read(ref _draining) != 0;
+
+    public bool BeginDrain() => Interlocked.Exchange(ref _draining, 1) == 0;
 
     public async Task<RelayResponse> SendAsync(RelayRequest request, TimeSpan timeout, CancellationToken requestCancellation)
     {
+        if (IsDraining) return DrainingResponse(request);
+
         var admitted = Interlocked.Increment(ref _admittedRequests);
+        if (IsDraining)
+        {
+            Interlocked.Decrement(ref _admittedRequests);
+            return DrainingResponse(request);
+        }
         if (admitted > _maxPendingRequests)
         {
             Interlocked.Decrement(ref _admittedRequests);
@@ -386,6 +454,33 @@ public sealed class AgentConnection : IDisposable
             },
             Convert.ToBase64String(Encoding.UTF8.GetBytes(body)),
             "agent_busy");
+    }
+
+    private RelayResponse DrainingResponse(RelayRequest request)
+    {
+        var pending = PendingRequestCount;
+        _logger?.LogInformation(
+            "Relay shutdown drain rejected new request: device={DeviceId}; connection={ConnectionId}; session={SessionId}; operation={OperationId}; relayRequestId={RelayRequestId}; pending={PendingRequests}",
+            DeviceId,
+            ConnectionId,
+            request.SessionId,
+            request.OperationId ?? request.Id,
+            request.Id,
+            pending);
+
+        var body = FormattableString.Invariant($"{{\"error\":\"relay_draining\",\"pending\":{pending},\"retryAfterSeconds\":2}}");
+        return new RelayResponse(
+            request.Id,
+            StatusCodes.Status503ServiceUnavailable,
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Content-Type"] = ["application/json"],
+                ["Retry-After"] = ["2"],
+                ["X-MateMCP-Relay-State"] = ["draining"],
+                ["Mcp-Session-Id"] = [request.SessionId]
+            },
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(body)),
+            "relay_draining");
     }
 
     public bool Complete(RelayResponse response)
