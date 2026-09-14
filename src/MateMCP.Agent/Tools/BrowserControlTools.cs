@@ -32,9 +32,11 @@ public sealed class BrowserControlTools(ApprovalService approvals, AuditLog audi
         state = NormalizeWaitState(state);
         timeoutMs = Math.Clamp(timeoutMs, 250, 30_000);
 
-        await RequireApprovalAsync(
+        await RequireRiskApprovalAsync(
             "browser.view",
             "dom-wait",
+            "view",
+            selector,
             $"Wait up to {timeoutMs} ms for browser element selected by {Describe(selector)} to become {state}.",
             cancellationToken);
         EnsureComputerUseAvailable();
@@ -93,10 +95,12 @@ public sealed class BrowserControlTools(ApprovalService approvals, AuditLog audi
         var selector = new BrowserSelector(null, role, name, null, label, testId, index);
         ValidateSemanticSelector(selector);
 
-        await RequireApprovalAsync(
+        await RequireRiskApprovalAsync(
             "browser.input",
             "semantic-select",
-            $"Set browser {role} selected by {Describe(selector)} to value '{Trim(value)}'.",
+            "fill",
+            selector,
+            $"Set browser {role} selected by {Describe(selector)} to a selected value (literal value omitted from risk classification).",
             cancellationToken);
         EnsureComputerUseAvailable();
 
@@ -117,7 +121,7 @@ public sealed class BrowserControlTools(ApprovalService approvals, AuditLog audi
         var normalizedModifiers = (modifiers ?? []).Select(value => BrowserAutomationService.NormalizeBrowserKey(value)).ToArray();
         var safeKey = normalizedKey.Length == 1 ? "character" : normalizedKey;
         var modifierSummary = normalizedModifiers.Length == 0 ? string.Empty : $" with {string.Join('+', normalizedModifiers)}";
-        await RequireApprovalAsync("browser.input", "keyboard", $"Press browser {safeKey}{modifierSummary}.", cancellationToken);
+        await RequireRawApprovalAsync("browser.input", "keyboard", "keyboard", $"Press browser {safeKey}{modifierSummary}.", cancellationToken);
         EnsureComputerUseAvailable();
         await _browser.PressAsync(normalizedKey, normalizedModifiers, cancellationToken);
         _computerUse.Touch("browser-input", $"key:{safeKey}");
@@ -141,9 +145,11 @@ public sealed class BrowserControlTools(ApprovalService approvals, AuditLog audi
             throw new ArgumentException("Radio controls cannot be unchecked directly; select another radio instead.", nameof(@checked));
         var selector = new BrowserSelector(null, role, name, null, label, testId, index);
         ValidateSemanticSelector(selector);
-        await RequireApprovalAsync(
+        await RequireRiskApprovalAsync(
             "browser.input",
             "semantic-check",
+            "toggle",
+            selector,
             $"Set browser {role} selected by {Describe(selector)} to checked={@checked}.",
             cancellationToken);
         EnsureComputerUseAvailable();
@@ -226,9 +232,42 @@ public sealed class BrowserControlTools(ApprovalService approvals, AuditLog audi
             throw new ArgumentException("Browser selector index must be zero or greater.", nameof(selector));
     }
 
-    private async Task RequireApprovalAsync(string capability, string target, string summary, CancellationToken cancellationToken)
+    private async Task RequireRiskApprovalAsync(
+        string capability,
+        string baseTarget,
+        string action,
+        BrowserSelector selector,
+        string summary,
+        CancellationToken cancellationToken)
     {
-        var decision = await approvals.RequestAsync(capability, target, summary, cancellationToken);
+        var semanticTarget = Describe(selector);
+        var assessment = ComputerUseRiskClassifier.AssessSemantic(
+            action,
+            selector.Role,
+            selector.Name ?? selector.Label ?? selector.Text,
+            selector.TestId);
+        var target = ComputerUseRiskClassifier.PolicyTarget(baseTarget, action, semanticTarget, assessment);
+        await EnsureApprovedAsync(
+            await approvals.RequestComputerUseAsync(capability, target, summary, assessment, cancellationToken),
+            capability, target, cancellationToken);
+    }
+
+    private async Task RequireRawApprovalAsync(
+        string capability,
+        string baseTarget,
+        string action,
+        string summary,
+        CancellationToken cancellationToken)
+    {
+        var assessment = ComputerUseRiskClassifier.AssessRaw(action);
+        var target = ComputerUseRiskClassifier.PolicyTarget(baseTarget, action, baseTarget, assessment);
+        await EnsureApprovedAsync(
+            await approvals.RequestComputerUseAsync(capability, target, summary, assessment, cancellationToken),
+            capability, target, cancellationToken);
+    }
+
+    private async Task EnsureApprovedAsync(ApprovalDecision decision, string capability, string target, CancellationToken cancellationToken)
+    {
         if (decision == ApprovalDecision.Deny)
         {
             await audit.WriteAsync(capability, target, "denied:approval", cancellationToken);

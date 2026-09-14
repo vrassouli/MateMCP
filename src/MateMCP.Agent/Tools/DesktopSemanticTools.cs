@@ -96,8 +96,10 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     {
         EnsureComputerUseAvailable();
         var summary = $"Isolated semantic click at window-relative point ({x:0.##},{y:0.##}) in window {windowId}; the physical pointer will not move.";
-        var decision = await approvals.RequestAsync("desktop.semantic", "semantic-action", summary, cancellationToken);
-        await EnsureApprovedAsync(decision, "Isolated semantic click", "desktop.semantic", "semantic-action", cancellationToken);
+        var assessment = ComputerUseRiskClassifier.AssessRaw("point-click");
+        var policyTarget = $"isolated-point:{assessment.Label.ToLowerInvariant()}:{windowId}:{x:0.##},{y:0.##}";
+        var decision = await approvals.RequestComputerUseAsync("desktop.semantic", policyTarget, summary, assessment, cancellationToken);
+        await EnsureApprovedAsync(decision, "Isolated semantic click", "desktop.semantic", policyTarget, cancellationToken);
 
         UiElementInfo result;
         try
@@ -162,17 +164,21 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     private async Task AuthorizeViewAsync(string summary, CancellationToken cancellationToken)
     {
         EnsureComputerUseAvailable();
-        var decision = await approvals.RequestAsync("desktop.view", "semantic-inspection", summary, cancellationToken);
-        await EnsureApprovedAsync(decision, "Semantic UI inspection", "desktop.view", "semantic-inspection", cancellationToken);
+        var assessment = ComputerUseRiskClassifier.AssessSemantic("view");
+        var decision = await approvals.RequestComputerUseAsync("desktop.view", "semantic-inspection:low", summary, assessment, cancellationToken);
+        await EnsureApprovedAsync(decision, "Semantic UI inspection", "desktop.view", "semantic-inspection:low", cancellationToken);
     }
 
     private async Task AuthorizeActionAsync(string action, string windowId, UiSelector selector, string? text, CancellationToken cancellationToken)
     {
         EnsureComputerUseAvailable();
+        var selectorDescription = Describe(selector);
         var textDetail = action == "value" ? $"; replace with {text?.Length ?? 0} characters (text omitted)" : string.Empty;
-        var summary = $"Semantic UI action '{action}' in window {windowId}: {Describe(selector)}{textDetail}.";
-        var decision = await approvals.RequestAsync("desktop.semantic", "semantic-action", summary, cancellationToken);
-        await EnsureApprovedAsync(decision, "Semantic UI action", "desktop.semantic", "semantic-action", cancellationToken);
+        var summary = $"Semantic UI action '{action}' in window {windowId}: {selectorDescription}{textDetail}.";
+        var assessment = ComputerUseRiskClassifier.AssessSemantic(action, selector.Role, selector.Name, selector.AutomationId);
+        var policyTarget = ComputerUseRiskClassifier.PolicyTarget("semantic-action", action, selectorDescription, assessment);
+        var decision = await approvals.RequestComputerUseAsync("desktop.semantic", policyTarget, summary, assessment, cancellationToken);
+        await EnsureApprovedAsync(decision, "Semantic UI action", "desktop.semantic", policyTarget, cancellationToken);
     }
 
     private async Task EnsureApprovedAsync(ApprovalDecision decision, string label, string capability, string target, CancellationToken cancellationToken)

@@ -24,7 +24,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         CancellationToken cancellationToken = default)
     {
         var uri = BrowserAutomationService.ValidateUrl(url);
-        await RequireApprovalAsync("browser.navigate", "navigation", $"Open or navigate the dedicated browser to {uri.AbsoluteUri}.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.navigate", "navigation", "navigate", null, $"Open or navigate the dedicated browser to {uri.AbsoluteUri}.", cancellationToken);
         EnsureComputerUseAvailable();
         var status = await _browser.OpenAsync(uri.AbsoluteUri, channel, cancellationToken);
         _computerUse.Touch("browser-navigation", status.Url);
@@ -38,7 +38,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         [Description("Maximum elements returned, clamped to 1..1500.")] int maxElements = 500,
         CancellationToken cancellationToken = default)
     {
-        await RequireApprovalAsync("browser.view", "dom-inspection", "Inspect the active browser DOM, accessible names, geometry, selected styles, and non-password form values.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.view", "dom-inspection", "view", null, "Inspect the active browser DOM, accessible names, geometry, selected styles, and non-password form values.", cancellationToken);
         EnsureComputerUseAvailable();
         var snapshot = await _browser.SnapshotAsync(maxElements, cancellationToken);
         _computerUse.Touch("browser-view", snapshot.Url);
@@ -54,7 +54,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         CancellationToken cancellationToken = default)
     {
         var selector = Selector(css, role, name, text, label, testId, index);
-        await RequireApprovalAsync("browser.input", "semantic-action", $"Click browser element selected by {Describe(selector)}.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.input", "semantic-action", "invoke", selector, $"Click browser element selected by {Describe(selector)}.", cancellationToken);
         EnsureComputerUseAvailable();
         var result = await _browser.ClickAsync(selector, cancellationToken);
         _computerUse.Touch("browser-input", $"click:{result.Role}:{result.Name}");
@@ -72,7 +72,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
     {
         ArgumentNullException.ThrowIfNull(value);
         var selector = Selector(css, role, name, text, label, testId, index);
-        await RequireApprovalAsync("browser.input", "semantic-action", $"Fill browser element selected by {Describe(selector)} with {value.Length} characters (text omitted).", cancellationToken);
+        await RequireRiskApprovalAsync("browser.input", "semantic-action", "fill", selector, $"Fill browser element selected by {Describe(selector)} with {value.Length} characters (text omitted).", cancellationToken);
         EnsureComputerUseAvailable();
         var result = await _browser.FillAsync(selector, value, cancellationToken);
         _computerUse.Touch("browser-input", $"fill:{result.Role}:{result.Name}");
@@ -86,7 +86,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         [Description("Capture beyond the current viewport where Chromium supports it.")] bool fullPage = false,
         CancellationToken cancellationToken = default)
     {
-        await RequireApprovalAsync("browser.view", "visual-inspection", $"Capture {(fullPage ? "the full browser page" : "the browser viewport")} as pixels.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.view", "visual-inspection", "view", null, $"Capture {(fullPage ? "the full browser page" : "the browser viewport")} as pixels.", cancellationToken);
         EnsureComputerUseAvailable();
         var shot = await _browser.ScreenshotAsync(fullPage, cancellationToken);
         _computerUse.Touch("browser-view", shot.Url);
@@ -116,7 +116,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         double deviceScaleFactor = 1,
         CancellationToken cancellationToken = default)
     {
-        await RequireApprovalAsync("browser.input", "viewport", $"Set browser viewport to {width}x{height} at device scale {deviceScaleFactor:0.##}.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.input", "viewport", "view", null, $"Set browser viewport to {width}x{height} at device scale {deviceScaleFactor:0.##}.", cancellationToken);
         EnsureComputerUseAvailable();
         var status = await _browser.SetViewportAsync(width, height, deviceScaleFactor, cancellationToken);
         _computerUse.Touch("browser-layout", $"{status.Viewport?.Width}x{status.Viewport?.Height}");
@@ -128,7 +128,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
     [Description("Reloads the current page in MateMCP's dedicated browser session and waits until the DOM is interactive.")]
     public async Task<BrowserSessionStatus> Reload(CancellationToken cancellationToken = default)
     {
-        await RequireApprovalAsync("browser.navigate", "navigation", "Reload the active browser page.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.navigate", "navigation", "reload", null, "Reload the active browser page.", cancellationToken);
         EnsureComputerUseAvailable();
         var status = await _browser.ReloadAsync(cancellationToken);
         _computerUse.Touch("browser-navigation", status.Url);
@@ -140,7 +140,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
     [Description("Navigates the dedicated browser to the previous history entry and waits for the page to become interactive.")]
     public async Task<BrowserSessionStatus> Back(CancellationToken cancellationToken = default)
     {
-        await RequireApprovalAsync("browser.navigate", "navigation", "Navigate the dedicated browser back one history entry.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.navigate", "navigation", "back", null, "Navigate the dedicated browser back one history entry.", cancellationToken);
         EnsureComputerUseAvailable();
         var status = await _browser.BackAsync(cancellationToken);
         _computerUse.Touch("browser-navigation", status.Url);
@@ -152,7 +152,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
     [Description("Navigates the dedicated browser to the next history entry and waits for the page to become interactive.")]
     public async Task<BrowserSessionStatus> Forward(CancellationToken cancellationToken = default)
     {
-        await RequireApprovalAsync("browser.navigate", "navigation", "Navigate the dedicated browser forward one history entry.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.navigate", "navigation", "forward", null, "Navigate the dedicated browser forward one history entry.", cancellationToken);
         EnsureComputerUseAvailable();
         var status = await _browser.ForwardAsync(cancellationToken);
         _computerUse.Touch("browser-navigation", status.Url);
@@ -168,7 +168,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         bool clear = true,
         CancellationToken cancellationToken = default)
     {
-        await RequireApprovalAsync("browser.view", "browser-diagnostics", "Read recent browser console/page diagnostics. Diagnostic text will not be persisted in the audit log.", cancellationToken);
+        await RequireRiskApprovalAsync("browser.view", "browser-diagnostics", "view", null, "Read recent browser console/page diagnostics. Diagnostic text will not be persisted in the audit log.", cancellationToken);
         EnsureComputerUseAvailable();
         var result = await _browser.GetDiagnosticsAsync(maxEntries, includeInfo, clear, cancellationToken);
         _computerUse.Touch("browser-view", "diagnostics");
@@ -188,9 +188,24 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
     private static BrowserSelector Selector(string? css, string? role, string? name, string? text, string? label, string? testId, int? index)
         => new(css, role, name, text, label, testId, index);
 
-    private async Task RequireApprovalAsync(string capability, string target, string summary, CancellationToken cancellationToken)
+    private async Task RequireRiskApprovalAsync(
+        string capability,
+        string baseTarget,
+        string action,
+        BrowserSelector? selector,
+        string summary,
+        CancellationToken cancellationToken)
     {
-        var decision = await approvals.RequestAsync(capability, target, summary, cancellationToken);
+        var semanticTarget = selector is null ? baseTarget : Describe(selector);
+        var assessment = selector is null
+            ? ComputerUseRiskClassifier.AssessSemantic(action)
+            : ComputerUseRiskClassifier.AssessSemantic(
+                action,
+                selector.Role,
+                selector.Name ?? selector.Label ?? selector.Text,
+                selector.TestId ?? selector.Css);
+        var target = ComputerUseRiskClassifier.PolicyTarget(baseTarget, action, semanticTarget, assessment);
+        var decision = await approvals.RequestComputerUseAsync(capability, target, summary, assessment, cancellationToken);
         if (decision == ApprovalDecision.Deny)
         {
             await audit.WriteAsync(capability, target, "denied:approval", cancellationToken);

@@ -108,6 +108,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
     {
         await InitializeAsync();
         if (!IsAvailable) return;
+        var approvalBody = ApprovalBody(approval);
 
 #if WINDOWS
         if (_useCompatToasts)
@@ -115,7 +116,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
             new ToastContentBuilder()
                 .AddText("MateMCP approval required")
                 .AddText($"{approval.Capability}: {approval.Target}")
-                .AddText(approval.Summary)
+                .AddText(approvalBody)
                 .AddButton(new ToastButton()
                     .SetContent("Approve")
                     .AddArgument("approvalId", approval.Id)
@@ -140,7 +141,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
             .AddArgument("approvalId", approval.Id)
             .AddText("MateMCP approval required")
             .AddText($"{approval.Capability}: {approval.Target}")
-            .AddText(approval.Summary)
+            .AddText(approvalBody)
             .AddButton(new AppNotificationButton("Approve")
                 .AddArgument("approvalId", approval.Id)
                 .AddArgument("decision", "allow"))
@@ -160,7 +161,7 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
         {
             Title = "MateMCP approval required",
             Subtitle = $"{approval.Capability}: {approval.Target}",
-            Body = approval.Summary,
+            Body = approvalBody,
             CategoryIdentifier = "matemcp.approval",
             Sound = UNNotificationSound.Default
         };
@@ -169,6 +170,14 @@ public sealed class NativeApprovalNotifier(AgentApiClient api) : IDisposable
 #else
         await Task.CompletedTask;
 #endif
+    }
+
+    internal static string ApprovalBody(PendingApproval approval)
+    {
+        var lines = new List<string> { approval.Summary };
+        if (!string.IsNullOrWhiteSpace(approval.Risk)) lines.Add($"Risk: {approval.Risk}");
+        if (!string.IsNullOrWhiteSpace(approval.Effect)) lines.Add($"Expected effect: {approval.Effect}");
+        return string.Join(Environment.NewLine, lines);
     }
 
     private async Task DecideFromNotificationAsync(string approvalId, string decision)

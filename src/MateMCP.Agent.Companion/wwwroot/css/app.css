@@ -220,6 +220,42 @@ html, body {
 
 .row:last-child { border-bottom: 0; }
 
+.approval-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.approval-risk {
+    display: inline-flex;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--colorNeutralStroke2, rgba(0, 0, 0, .12));
+}
+
+.approval-risk-high {
+    color: var(--colorStatusDangerForeground1, #b10e1c);
+    background: var(--colorStatusDangerBackground1, rgba(177, 14, 28, .08));
+}
+
+.approval-risk-sensitive {
+    color: var(--colorStatusWarningForeground1, #8a4b00);
+    background: var(--colorStatusWarningBackground1, rgba(138, 75, 0, .08));
+}
+
+.approval-risk-low {
+    color: var(--colorStatusSuccessForeground1, #107c10);
+    background: var(--colorStatusSuccessBackground1, rgba(16, 124, 16, .08));
+}
+
+.approval-effect {
+    margin-top: 4px;
+    font-size: 13px;
+}
+
 .actions {
     display: flex;
     flex-wrap: wrap;
