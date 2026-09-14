@@ -1,121 +1,192 @@
 # MateMCP
 
-MateMCP gives an AI client controlled, project-scoped access to a user's computer through a local Agent, Relay, and OAuth Control Plane.
+**Give AI useful access to your computer without handing it an unrestricted machine.**
 
-## User flow
+MateMCP connects MCP-capable AI clients to a local Agent running on your Windows or macOS computer. The Agent can work with project files, shells, browsers, desktop applications, attachments, secrets, and durable project context while MateMCP keeps access scoped, authenticated, observable, and approval-aware.
 
-1. Install MateMCP Desktop. The installer installs or upgrades both the local Agent and the native Companion UI.
-2. The Agent opens MateMCP in the browser and shows a short device code when enrollment is required.
-3. Sign in with a personal MateMCP account and approve adding the device.
-4. The Agent stores its private credential in the operating system's secure credential store and appears in the account dashboard.
-5. Copy that Agent's unique MCP URL, for example `https://relay.matemcp.com/mcp/agt_...`, into ChatGPT.
-6. Complete OAuth using the same personal account.
-7. Sensitive operations can be allowed or denied from the native Agent Companion or the web dashboard on a phone.
+The normal user experience is simple: install MateMCP Desktop, enroll the device, copy its MCP URL into your AI client, and authorize it with OAuth. You do not copy Agent credentials or expose local ports to the Internet.
 
-There are no Agent tokens to copy and no shared admin account in the normal user flow. Each user can own multiple independently revocable Agents. OAuth tokens are accepted only when their user, Agent, resource, and scopes all match.
+## What can MateMCP do?
 
-> **After an Agent upgrade that adds or changes MCP tools:** ChatGPT may keep the previously approved tool snapshot instead of discovering the new actions automatically. See [ChatGPT MCP tool refresh after Agent updates](docs/chatgpt-tool-refresh.md) to compare the live Agent toolset with ChatGPT and refresh/recreate the app actions when needed.
+- **Project-scoped filesystem access** — read and modify files only inside configured projects.
+- **Shell and interactive terminal sessions** — run commands, keep long-lived shells, resume output after transient reconnects, and inject approved secrets without revealing them to the AI.
+- **Computer Use** — inspect screenshots, interact with browser/native UI, click, type, scroll, and use semantic accessibility actions where supported.
+- **Browser automation and visual QA** — navigate applications, inspect responsive layouts, capture screenshots, and support frontend/desktop verification workflows.
+- **Secure attachment transfer** — upload conversation files to a selected Agent using bounded, resumable, integrity-checked transfers.
+- **Approvals** — require local or remote approval for sensitive actions and keep decisions auditable.
+- **Secret Manager** — keep user-managed credentials in the operating system credential store instead of model context or project files.
+- **Activity, audit, and diagnostics** — see what the Agent is doing, inspect approval/credential activity, and diagnose connectivity or execution failures.
+- **Skills & Memory** — maintain reusable project knowledge and workflow guidance across sessions.
+- **Multi-device access** — enroll multiple independently revocable Agents under one account.
+- **Resilient connectivity** — logical sessions survive short Agent/Relay disconnects, operations use stable identities, and supported streams/transfers can resume safely.
 
-## Install / upgrade on macOS
+## How it fits together
 
-For Apple Silicon Macs, this single command downloads the latest stable MateMCP Desktop package, extracts it, upgrades any existing Agent installation, installs the native Companion, starts the Agent, opens Companion for the interactive install, and cleans up the temporary files:
+```mermaid
+flowchart LR
+    AI[AI client\nChatGPT / MCP client]
+    Relay[MateMCP Relay]
+    API[OAuth Control Plane]
+    Agent[Local MateMCP Agent]
+    Companion[Companion]
+    Machine[Projects · Shell · Browser · Desktop · Secrets]
+
+    AI -->|OAuth + MCP| Relay
+    AI -->|Authorize| API
+    Relay <-->|resilient Agent channel| Agent
+    Agent --> Machine
+    Companion <-->|local management| Agent
+    Companion -->|approvals / status / logs| Machine
+    Relay -->|authorization checks| API
+```
+
+The **Relay** carries remote MCP traffic to the correct online Agent. The **Control Plane** handles accounts, Agent ownership, OAuth, authorization, and remote approval coordination. The **Agent** performs work locally. The **Companion** gives the user a native view of status, approvals, shells, secrets, activity, diagnostics, updates, and Agent lifecycle controls.
+
+## Trust and security model
+
+MateMCP is designed to be a boundary between an AI and the user's computer, not a tunnel around local security.
+
+- Every Agent has a random public ID and a separate high-entropy private credential.
+- Agent credentials and user-managed secrets are stored in **macOS Keychain** or **Windows Credential Manager**.
+- The MCP URL identifies an Agent; it is not itself the Agent's secret credential.
+- OAuth tokens are bound to the user, Agent/resource, and granted scopes. Access tokens can be refreshed without repeatedly asking the user to reconnect.
+- Filesystem access stays inside configured project roots.
+- `mcp:read`, `mcp:write`, and `mcp:shell` capabilities are enforced rather than inferred from the URL.
+- Sensitive actions can require explicit approval; approvals and credential use are auditable.
+- The Relay never needs the user's OS secrets.
+- Attachment transfers are approved, bounded, resumable, and optionally SHA-256 verified.
+- Agent and Relay reconnects use stable session/operation identities to reduce duplicate side effects after transient failures.
+
+See [`docs/security.md`](docs/security.md) and [`docs/approval.md`](docs/approval.md) for the detailed model.
+
+## Quick start
+
+1. **Install MateMCP Desktop** for your computer using one of the commands below.
+2. Open Companion and finish **device enrollment** if prompted.
+3. Copy the Agent's unique MCP URL, for example `https://relay.matemcp.com/mcp/agt_...`.
+4. Add that URL to an MCP-capable AI client. ChatGPT is the primary field-tested client today.
+5. Complete OAuth with the same MateMCP account that owns the Agent.
+6. Try a safe first task, such as asking the AI to list a configured project or inspect a file.
+7. Review approvals in Companion when a sensitive operation requires consent.
+
+> **After an Agent update that adds or changes MCP tools:** some clients can retain a previous tool snapshot. For ChatGPT, see [ChatGPT MCP tool refresh after Agent updates](docs/chatgpt-tool-refresh.md).
+
+## Install / upgrade MateMCP Desktop
+
+### macOS
+
+For Apple Silicon Macs:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-macos.sh | bash
 ```
 
-**No manual uninstall is required when upgrading.** Existing configuration, enrollment identity, and Keychain-backed credentials/secrets are preserved.
+The bootstrap installs or upgrades **Agent + Companion** in place, starts the Agent, opens Companion for interactive setup when needed, and preserves existing configuration and secure credentials.
 
-Prefer a manual download instead? Use the stable Desktop asset:
+Manual package: [MateMCP Desktop for macOS Apple Silicon](https://github.com/vrassouli/MateMCP/releases/download/agent-latest/MateMCP-Desktop-macos-arm64.tar.gz) · [latest stable release](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest)
 
-- [Download MateMCP Desktop for macOS Apple Silicon](https://github.com/vrassouli/MateMCP/releases/download/agent-latest/MateMCP-Desktop-macos-arm64.tar.gz)
-- [View the latest stable release](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest)
+The Agent runs as a per-user LaunchAgent. Companion is installed under `~/Applications/MateMCP Agent Companion.app`. Private configuration lives under `~/Library/Application Support/MateMCP`; credentials and secrets use macOS Keychain.
 
-After extracting the archive, run `./install-macos.sh`. In a Desktop package that entry point installs **both Agent + Companion**. The lower-level Agent installer automatically delegates to the Desktop installer when the Companion payload is present.
+Computer Use requires the relevant macOS Accessibility and Screen Recording permissions. Production signing/TCC identity hardening is still being improved, so development/ad-hoc builds may require permissions to be granted again after some updates.
 
-The Agent runs in the background as a per-user LaunchAgent. The native Companion is installed in `~/Applications/MateMCP Agent Companion.app` but does **not** automatically open after future sign-ins. Open it when you want to manage the Agent, approvals, secrets, interactive sessions, or updates. Private configuration is stored at `~/Library/Application Support/MateMCP/appsettings.json`; enrolled Agent credentials and user-managed secrets are stored in macOS Keychain.
+### Windows
 
-From Companion you can monitor whether the Agent is running and Start, Stop, or Restart it without using Terminal. On Apple Silicon, Companion also checks the moving `agent-latest` Desktop release in the background, provides **Check for updates** / **Update now**, and has an opt-in **Auto Update** mode. Desktop updates always upgrade Agent + Companion together through the same official bootstrap installer.
-
-Intel Macs continue to receive the Agent-only package through the same bootstrap command until the native Companion is published for Intel Mac.
-
-## Install / upgrade on Windows
-
-Run this from PowerShell:
+Run from PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/vrassouli/MateMCP/main/scripts/bootstrap-windows.ps1 | iex
 ```
 
-On Windows x64, the bootstrap automatically downloads the latest stable **MateMCP Desktop (Agent + Companion)** package, extracts it to a temporary directory, upgrades the existing installation in place, starts the background Agent and opens Companion for the interactive install, and removes the downloaded temporary files. No manual ZIP download, extraction, or previous-version uninstall is required.
+On Windows x64 the bootstrap installs or upgrades **Agent + Companion**, starts the background Agent, opens Companion when interactive setup is needed, and preserves the user-scoped configuration and credentials.
 
-Prefer a manual download instead? Use the stable Desktop asset:
+Manual package: [MateMCP Desktop for Windows x64](https://github.com/vrassouli/MateMCP/releases/download/agent-latest/MateMCP-Desktop-win-x64.zip) · [latest stable release](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest)
 
-- [Download MateMCP Desktop for Windows x64](https://github.com/vrassouli/MateMCP/releases/download/agent-latest/MateMCP-Desktop-win-x64.zip)
-- [View the latest stable release](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest)
+Private configuration lives under `%APPDATA%\MateMCP`; enrolled credentials and secrets use Windows Credential Manager.
 
-After extracting the ZIP, run:
+## Platform status
 
-```powershell
-.\install-windows.ps1
-```
+| Platform | Agent | Native Companion | Computer Use / visual support | Notes |
+| --- | --- | --- | --- | --- |
+| macOS Apple Silicon | ✅ | ✅ | ✅ | Native desktop semantic actions and visual workflows; macOS permissions required. |
+| macOS Intel | ✅ | Agent-only package | Partial | Companion is not currently published for Intel Mac. |
+| Windows x64 | ✅ | ✅ | ✅ | Native Windows Graphics Capture preview plus screenshot fallback. |
+| Windows ARM64 | ✅ | Agent-only package | Partial | Native WGC helper is not yet shipped for ARM64; screenshot fallback remains available. |
 
-In a Desktop package that entry point installs **both Agent + Companion**. You do not need to choose between component-specific scripts.
+ChatGPT is the primary end-to-end tested remote MCP client. MateMCP uses standards-based MCP/OAuth interfaces and is intended to work with other compatible clients, but interoperability can vary between providers; client-specific compatibility is tracked and tested separately.
 
-The Agent starts at sign-in as a hidden per-user background process while the existing user-scoped Windows Credential Manager security model is retained. A migration to a real Windows Service is tracked separately. Companion does **not** auto-open at sign-in; use its **MateMCP Agent Companion** Start Menu shortcut when you want the UI. Private configuration is stored under `%APPDATA%\MateMCP`; enrolled Agent credentials and user-managed secrets are stored in Windows Credential Manager. Normal upgrades preserve configuration, credentials, and enrolled device identity.
+## Companion at a glance
 
-From Companion you can monitor whether the Agent is running and Start, Stop, or Restart it without PowerShell. On Windows x64, Companion also checks the moving `agent-latest` Desktop release in the background, provides **Check for updates** / **Update now**, and has an opt-in **Auto Update** mode. Desktop updates always upgrade Agent + Companion together through the same official bootstrap installer.
+Companion is the user's local control surface. Current functionality includes:
 
-Windows ARM64 continues to receive the Agent-only package through the same bootstrap command until the native Companion package is published for that architecture.
+- Agent **Start / Stop / Restart** and status.
+- MCP endpoint visibility and copy actions.
+- Pending **Approvals** and policy management.
+- **Interactive Shell** sessions.
+- **Secret Manager** backed by the OS credential store.
+- **Activity & Audit** history.
+- **Agent Logs** and diagnostics.
+- **Skills & Memory** inspection and management.
+- **Computer Use** preview/status.
+- **Prevent Sleep While Using** controls.
+- Manual update checks and optional automatic Desktop updates on supported platforms.
 
-The supported Agent capability matrix and the checklist for keeping platforms aligned are documented in [`docs/agent-feature-parity.md`](docs/agent-feature-parity.md).
+## Self-host API + Relay
 
-Browser-based responsive visual regression workflows are documented in [`docs/browser-visual-qa.md`](docs/browser-visual-qa.md).
-
-The complete browser/native Computer Use development workflow, security model, coordinate fallback rules, and E2E field-test commands are documented in [`docs/computer-use.md`](docs/computer-use.md).
-
-## API / Control Plane
-
-For the usual single-server deployment, install the API and Relay together:
+For the usual single-server deployment there is one canonical install/update command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/install.sh | sudo bash
 ```
 
-The combined installer asks for the public URLs once, configures the database, shares the private internal key automatically, and verifies both services. Use the component installers below only when API and Relay run on different servers or need to be managed independently.
+The installer is update-safe: it preserves existing configuration, asks only for missing setup values, refreshes the current Compose definitions, pulls/recreates the server components, keeps the private API↔Relay credential synchronized, and health-checks both services before reporting success. On supported Debian/Ubuntu hosts it can bootstrap Docker Engine + Compose when needed.
+
+Use component installers only for advanced deployments where API and Relay are managed separately:
 
 ```bash
+# API / Control Plane
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/api/install.sh | sudo bash
-```
 
-The installer asks for public API and Relay URLs and a database provider:
-
-- `sqlite`: persistent local Docker volume, suitable for a small single-server deployment.
-- `sqlserver`: asks for host, port, database, username, password, encryption, and certificate trust settings. The connection string is passed base64-encoded so special characters in passwords are preserved. Startup validates connectivity while creating the schema.
-
-It also creates a private internal API key used between Relay and Control Plane. Copy that value from `/opt/matemcp-api/.env` only into the Relay installer prompt; end users never see it.
-
-## Relay
-
-```bash
+# Relay
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/relay/install.sh | sudo bash
 ```
 
-The Relay installer asks for its public URL, the public/internal Control Plane URLs, and the Control Plane internal API key. It does not generate shared Agent or Client tokens.
+The API supports SQLite for a small single-server deployment and SQL Server for external database deployments. API and Relay should sit behind HTTPS reverse proxies; their container ports should not be exposed directly to the Internet.
 
-Both services must sit behind HTTPS reverse proxies. Their container ports (`8080` and `8081`) should not be exposed directly to the Internet.
+Relay reverse-proxy guidance is in [`deploy/relay/README.md`](deploy/relay/README.md), including the example Nginx configuration and graceful-drain settings.
 
-## Security boundaries
+## Documentation
 
-- Users can authorize only Agents they own.
-- Every Agent has a random public ID and a separate high-entropy credential stored in macOS Keychain or Windows Credential Manager.
-- The unique MCP URL is an identifier, not a secret.
-- OAuth resource and `agent_id` claims must match the requested URL.
-- `mcp:read`, `mcp:write`, and `mcp:shell` are enforced per JSON-RPC tool call by Relay and constrained by the Agent's allowed scopes.
-- Filesystem paths remain confined to configured project roots.
-- Shell execution retains explicit approval and audit logging.
-- Remote approvals are owner-bound, operation-hashed, one-use decisions with expiration; local approval remains available if Control Plane is unreachable.
+| Topic | Documentation |
+| --- | --- |
+| Architecture | [`docs/architecture.md`](docs/architecture.md) |
+| Security model | [`docs/security.md`](docs/security.md) |
+| Approvals | [`docs/approval.md`](docs/approval.md) |
+| Agent/platform parity | [`docs/agent-feature-parity.md`](docs/agent-feature-parity.md) |
+| Computer Use | [`docs/computer-use.md`](docs/computer-use.md) |
+| Desktop control | [`docs/desktop-control.md`](docs/desktop-control.md) |
+| macOS semantic actions | [`docs/macos-semantic-actions.md`](docs/macos-semantic-actions.md) |
+| Browser visual QA | [`docs/browser-visual-qa.md`](docs/browser-visual-qa.md) |
+| Attachment transfer | [`docs/attachment-transfer.md`](docs/attachment-transfer.md) |
+| Interactive shell secrets | [`docs/interactive-shell-secrets.md`](docs/interactive-shell-secrets.md) |
+| Credential injection | [`docs/credential-injection.md`](docs/credential-injection.md) |
+| Connectivity / chaos coverage | [`docs/connectivity-chaos-testing.md`](docs/connectivity-chaos-testing.md) |
+| ChatGPT tool refresh | [`docs/chatgpt-tool-refresh.md`](docs/chatgpt-tool-refresh.md) |
+| Development workflow | [`docs/development-workflow.md`](docs/development-workflow.md) |
+| Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
+
+## Current limitations and active work
+
+MateMCP is under active development. Some areas intentionally remain conservative or are still being hardened:
+
+- Native Companion packaging is currently focused on Windows x64 and macOS Apple Silicon.
+- Windows ARM64 uses screenshot fallback rather than the native WGC preview helper.
+- macOS production signing/TCC identity still needs hardening so permissions survive every production update reliably.
+- Skills & Memory exists today, but proactive automatic context use across different AI clients is still evolving.
+- Third-party MCP/OAuth clients can have provider-specific interoperability differences and need real external validation.
+- Safe & Informed Approvals is being expanded so approval dialogs explain consequences and risk rather than relying only on raw command syntax.
 
 ## Releases
 
-`main` is the source of truth for stable development. The moving `agent-latest` release contains the latest stable Agent packages plus the native Desktop packages for supported desktop architectures. Version tags such as `v0.1.0` publish versioned release assets.
+`main` is the source of truth for stable development. The moving [`agent-latest`](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest) release contains current stable Agent packages and native Desktop packages for supported architectures. Version tags such as `v0.1.0` publish versioned release assets.
+
+Contributions and field-test reports are welcome through GitHub Issues and Pull Requests.
