@@ -72,6 +72,8 @@ The supported Agent capability matrix and the checklist for keeping platforms al
 
 Browser-based responsive visual regression workflows are documented in [`docs/browser-visual-qa.md`](docs/browser-visual-qa.md).
 
+The complete browser/native Computer Use development workflow, security model, coordinate fallback rules, and E2E field-test commands are documented in [`docs/computer-use.md`](docs/computer-use.md).
+
 ## API / Control Plane
 
 For the usual single-server deployment, install the API and Relay together:

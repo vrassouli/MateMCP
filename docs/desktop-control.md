@@ -2,7 +2,7 @@
 
 Desktop control remains independently permissioned from filesystem and shell access.
 
-The implementation is tracked by Epic #125. Phase 1 (#126) provides read-only visual inspection; Phase 2 (#127) adds raw mouse/keyboard/window input as an explicitly approval-gated fallback; Phase 3 (#128) adds semantic accessibility/UI automation.
+The implementation is tracked by Epic #125. Phases 1-5 (#126-#131) provide visual inspection, raw input, semantic accessibility/UI automation, browser automation, responsive visual QA, and risk/session controls. Phase 6 (#132) validates the complete workflow end to end.
 
 ## Vision foundation
 
@@ -111,6 +111,7 @@ Window capture in the Phase 1 implementation represents the currently rendered w
 - browser/DOM automation — Phase 4 (#129)
 - responsive and before/after visual QA — Phase 5 (#131)
 - cross-cutting risk/session/revoke UX — #130
+- end-to-end visual development workflow — Phase 6 (#132)
 - clipboard access — future scoped capability, independently permissioned
 
 Preferred interaction order:

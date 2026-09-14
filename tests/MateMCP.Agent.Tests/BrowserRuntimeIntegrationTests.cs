@@ -5,6 +5,7 @@ using MateMCP.Agent.Browser;
 
 namespace MateMCP.Agent.Tests;
 
+[Collection("Browser runtime serial")]
 public sealed class BrowserRuntimeIntegrationTests
 {
     [Fact]
