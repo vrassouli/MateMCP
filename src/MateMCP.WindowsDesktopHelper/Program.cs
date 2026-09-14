@@ -57,11 +57,15 @@ namespace MateMCP.WindowsDesktopHelper
             switch ((request.Action ?? "").Trim().ToLowerInvariant())
             {
                 case "focus": element.SetFocus(); break;
-                case "invoke": Pattern<InvokePattern>(element, InvokePattern.Pattern, "invoke", selected.Info).Invoke(); break;
+                case "invoke":
+                    if (!TryBackgroundClick(element)) Pattern<InvokePattern>(element, InvokePattern.Pattern, "invoke", selected.Info).Invoke();
+                    break;
                 case "value":
                     if (selected.Info.Protected) throw new ProtectedException("MateMCP refuses to read or replace protected/secure-text values through semantic UI automation.");
                     Pattern<ValuePattern>(element, ValuePattern.Pattern, "set-value", selected.Info).SetValue(request.Text ?? ""); break;
-                case "toggle": Pattern<TogglePattern>(element, TogglePattern.Pattern, "toggle", selected.Info).Toggle(); break;
+                case "toggle":
+                    if (!TryBackgroundClick(element)) Pattern<TogglePattern>(element, TogglePattern.Pattern, "toggle", selected.Info).Toggle();
+                    break;
                 case "select": Pattern<SelectionItemPattern>(element, SelectionItemPattern.Pattern, "select", selected.Info).Select(); break;
                 case "expand": Pattern<ExpandCollapsePattern>(element, ExpandCollapsePattern.Pattern, "expand", selected.Info).Expand(); break;
                 case "collapse": Pattern<ExpandCollapsePattern>(element, ExpandCollapsePattern.Pattern, "collapse", selected.Info).Collapse(); break;
@@ -112,11 +116,14 @@ namespace MateMCP.WindowsDesktopHelper
                 if (info.Enabled)
                 {
                     InvokePattern invoke; TogglePattern toggle; SelectionItemPattern select; ExpandCollapsePattern expand;
-                    if (TryPattern(elementAtPoint, InvokePattern.Pattern, out invoke)) { invoke.Invoke(); return BuildInfo(elementAtPoint, info.Id, null); }
-                    if (TryPattern(elementAtPoint, TogglePattern.Pattern, out toggle)) { toggle.Toggle(); return BuildInfo(elementAtPoint, info.Id, null); }
-                    if (TryPattern(elementAtPoint, SelectionItemPattern.Pattern, out select)) { select.Select(); return BuildInfo(elementAtPoint, info.Id, null); }
-                    if (TryPattern(elementAtPoint, ExpandCollapsePattern.Pattern, out expand))
-                    { if (expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) expand.Collapse(); else expand.Expand(); return BuildInfo(elementAtPoint, info.Id, null); }
+                    if (TryPattern(elementAtPoint, InvokePattern.Pattern, out invoke) || TryPattern(elementAtPoint, TogglePattern.Pattern, out toggle))
+                    {
+                        if (!TryBackgroundClick(elementAtPoint))
+                            throw new InvalidOperationException("The target control has no background-safe native click path; isolated click-at refused to steal foreground focus.");
+                        return BuildInfo(elementAtPoint, info.Id, null);
+                    }
+                    if (TryPattern(elementAtPoint, SelectionItemPattern.Pattern, out select) || TryPattern(elementAtPoint, ExpandCollapsePattern.Pattern, out expand))
+                        throw new InvalidOperationException("The target control requires a UI Automation action that may steal foreground focus; isolated click-at refused the action.");
                 }
                 elementAtPoint = Safe(() => Walker.GetParent(elementAtPoint), (AutomationElement)null);
                 if (elementAtPoint != null)
@@ -189,6 +196,20 @@ namespace MateMCP.WindowsDesktopHelper
             if (TryPattern(element, ScrollItemPattern.Pattern, out scroll)) item.Actions.Add("scroll-into-view");
             return item;
         }
+        private static bool TryBackgroundClick(AutomationElement element)
+        {
+            try
+            {
+                var type = element.Current.ControlType;
+                if (type != ControlType.Button && type != ControlType.CheckBox && type != ControlType.RadioButton) return false;
+                var hwnd = element.Current.NativeWindowHandle;
+                if (hwnd == 0) return false;
+                UIntPtr result;
+                return SendMessageTimeout(new IntPtr(hwnd), BmClick, UIntPtr.Zero, IntPtr.Zero, SmtoAbortIfHung, 2000, out result) != IntPtr.Zero;
+            }
+            catch { return false; }
+        }
+
         private static T Pattern<T>(AutomationElement e, AutomationPattern p, string action, Element info) where T:class
         { T value; if (TryPattern(e,p,out value)) return value; throw new InvalidOperationException("The selected " + info.Role + " does not expose the native '"+action+"' pattern."); }
         private static bool TryPattern<T>(AutomationElement e, AutomationPattern p, out T typed) where T:class
@@ -221,6 +242,9 @@ namespace MateMCP.WindowsDesktopHelper
             if(t==ControlType.Table)return "table"; if(t==ControlType.TitleBar)return "titlebar"; if(t==ControlType.Separator)return "separator"; return "control-"+t.Id;
         }
 
+        private const uint BmClick = 0x00F5;
+        private const uint SmtoAbortIfHung = 0x0002;
+        [DllImport("user32.dll", SetLastError=true)] private static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint msg,UIntPtr wParam,IntPtr lParam,uint flags,uint timeout,out UIntPtr result);
         [DllImport("user32.dll")][return:MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd,out NativeRect rect);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint processId);
         [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left,Top,Right,Bottom; }
