@@ -1,8 +1,30 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using MateMCP.Agent.Security;
 
 namespace MateMCP.Agent.Audit;
+
+public sealed record AuditAssessmentContributor(string Source, string Kind, bool Authoritative);
+
+public sealed record AuditImpactAssessment(
+    string Risk,
+    string Confidence,
+    string IntentCategory,
+    string Effect,
+    IReadOnlyList<string> AffectedResources,
+    string Scope,
+    bool Destructive,
+    string Reversibility,
+    bool RequiresElevation,
+    bool CredentialExposure,
+    bool NetworkEffect,
+    bool PersistenceEffect,
+    bool ProductionLikelihood,
+    IReadOnlyList<string> Reasons,
+    string? SaferAlternative = null,
+    string? Preview = null,
+    IReadOnlyList<AuditAssessmentContributor>? Contributors = null);
 
 public sealed record AuditEntry(
     DateTimeOffset Timestamp,
@@ -10,7 +32,9 @@ public sealed record AuditEntry(
     string Target,
     string Result,
     string? Credential = null,
-    string? Tool = null);
+    string? Tool = null,
+    string? ProposedAction = null,
+    AuditImpactAssessment? Assessment = null);
 
 public sealed class AuditLog
 {
@@ -30,6 +54,24 @@ public sealed class AuditLog
     public async Task WriteCredentialUsageAsync(string credential, string tool, string target, string result,
         CancellationToken cancellationToken = default)
         => await AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, "secret.use", target, result, credential, tool), cancellationToken);
+
+    public async Task WriteApprovalAsync(
+        string capability,
+        string target,
+        string proposedAction,
+        string result,
+        ActionImpactAssessment? assessment,
+        CancellationToken cancellationToken = default)
+    {
+        var safeAction = ActionImpactAssessment.Bound(ActionImpactAssessment.RedactRemoteSummary(proposedAction), 1_200);
+        await AppendAsync(new AuditEntry(
+            DateTimeOffset.UtcNow,
+            capability,
+            ActionImpactAssessment.Bound(target, 300),
+            ActionImpactAssessment.Bound(result, 1_000),
+            ProposedAction: safeAction,
+            Assessment: ToAuditAssessment(assessment)), cancellationToken);
+    }
 
     public Task<IReadOnlyList<AuditEntry>> ReadAsync(int limit = 200, CancellationToken cancellationToken = default)
         => ReadMatchingAsync(limit, null, null, static _ => true, cancellationToken);
@@ -185,6 +227,32 @@ public sealed class AuditLog
         Array.Reverse(bytes);
         var line = Encoding.UTF8.GetString(bytes);
         return line.EndsWith('\r') ? line[..^1] : line;
+    }
+
+    private static AuditImpactAssessment? ToAuditAssessment(ActionImpactAssessment? assessment)
+    {
+        if (assessment is null) return null;
+        return new AuditImpactAssessment(
+            assessment.RiskLabel,
+            assessment.ConfidenceLabel,
+            ActionImpactAssessment.Bound(assessment.IntentCategory, 80),
+            ActionImpactAssessment.Bound(assessment.Effect, 600),
+            assessment.AffectedResources.Take(8).Select(x => ActionImpactAssessment.Bound(x, 300)).ToArray(),
+            ActionImpactAssessment.Bound(assessment.Scope, 300),
+            assessment.Destructive,
+            assessment.ReversibilityLabel,
+            assessment.RequiresElevation,
+            assessment.CredentialExposure,
+            assessment.NetworkEffect,
+            assessment.PersistenceEffect,
+            assessment.ProductionLikelihood,
+            assessment.Reasons.Take(8).Select(x => ActionImpactAssessment.Bound(x, 300)).ToArray(),
+            string.IsNullOrWhiteSpace(assessment.SaferAlternative) ? null : ActionImpactAssessment.Bound(assessment.SaferAlternative, 600),
+            string.IsNullOrWhiteSpace(assessment.Preview) ? null : ActionImpactAssessment.Bound(assessment.Preview, 2_000),
+            assessment.Contributors?.Take(8).Select(x => new AuditAssessmentContributor(
+                ActionImpactAssessment.Bound(x.Source, 100),
+                ActionImpactAssessment.Bound(x.Kind, 80),
+                x.Authoritative)).ToArray());
     }
 
     private async Task AppendAsync(AuditEntry entry, CancellationToken cancellationToken)

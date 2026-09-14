@@ -65,8 +65,13 @@ public sealed class ComputerUseSecurityEndToEndTests
             Assert.Contains("decision:allowonce", approval.Result, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("risk=high", approval.Result, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(privateSentinel, approval.Target, StringComparison.Ordinal);
-            var auditText = await File.ReadAllTextAsync(auditPath);
-            Assert.DoesNotContain(privateSentinel, auditText, StringComparison.Ordinal);
+
+            var analyzed = Assert.Single(entries, entry => entry.Capability == "approval.assessment");
+            Assert.NotNull(analyzed.ProposedAction);
+            Assert.Contains(privateSentinel, analyzed.ProposedAction, StringComparison.Ordinal);
+            Assert.NotNull(analyzed.Assessment);
+            Assert.Equal("High", analyzed.Assessment.Risk);
+            Assert.Equal(assessment.Effect, analyzed.Assessment.Effect);
 
             var sessions = new ComputerUseSessionManager(Path.Combine(root, "computer-use"));
             var active = sessions.Touch("semantic-input", "Delete device");
