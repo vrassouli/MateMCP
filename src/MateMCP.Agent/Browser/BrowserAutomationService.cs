@@ -214,6 +214,7 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         try
         {
             var cdp = RequireCdp();
+            await cdp.SendAsync("Page.bringToFront", new { }, cancellationToken);
             var held = new List<string>();
             try
             {
