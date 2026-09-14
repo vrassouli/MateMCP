@@ -10,4 +10,5 @@ public sealed class RelayOptions
     public string[] OAuthScopes { get; set; } = ["mcp:read", "mcp:write", "mcp:shell"];
     public int MaxBodyBytes { get; set; } = 4 * 1024 * 1024;
     public int RequestTimeoutSeconds { get; set; } = 120;
+    public int AgentReconnectGraceSeconds { get; set; } = 20;
 }
