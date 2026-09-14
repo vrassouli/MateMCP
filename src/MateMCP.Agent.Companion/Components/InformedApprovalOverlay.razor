@@ -98,6 +98,18 @@
                     <dt>Target</dt><dd>@_current.Target</dd>
                 </dl>
                 <pre>@_current.Summary</pre>
+                @if (_current.Contributors?.Count > 0)
+                {
+                    <div class="impact-section">
+                        <strong>Analysis provenance</strong>
+                        <ul>
+                            @foreach (var contributor in _current.Contributors.Take(8))
+                            {
+                                <li>@contributor.Source · @contributor.Kind · @(contributor.Authoritative ? "authoritative" : "non-authoritative")</li>
+                            }
+                        </ul>
+                    </div>
+                }
             </details>
 
             @if (!string.IsNullOrWhiteSpace(_error))
@@ -109,14 +121,27 @@
                 <Button Text="Deny" OnClick='() => DecideAsync("deny")' />
                 <Button Text="Approve once" OnClick='() => DecideAsync("allow")' />
             </div>
-            <details class="approval-more">
-                <summary>More approval choices</summary>
-                <div class="approval-actions secondary-actions">
-                    <Button Text="Approve for session" OnClick='() => DecideAsync("allow-session")' />
-                    <Button Text="Always allow this target" OnClick='() => DecideAsync("allow-always")' />
-                </div>
-                <div class="muted-note">Session and persistent approval rules reduce future prompts for the same capability/target. Use them only when you trust that scope.</div>
-            </details>
+            @if (_current.CanAllowSession || _current.CanAllowAlways)
+            {
+                <details class="approval-more">
+                    <summary>More approval choices</summary>
+                    <div class="approval-actions secondary-actions">
+                        @if (_current.CanAllowSession)
+                        {
+                            <Button Text="Approve for session" OnClick='() => DecideAsync("allow-session")' />
+                        }
+                        @if (_current.CanAllowAlways)
+                        {
+                            <Button Text="Always allow this target" OnClick='() => DecideAsync("allow-always")' />
+                        }
+                    </div>
+                    <div class="muted-note">Session and persistent approval rules reduce future prompts for the same capability/target. Use them only when you trust that scope.</div>
+                </details>
+            }
+            else
+            {
+                <div class="muted-note">Current risk policy requires a fresh decision for this risk level; broad session/persistent trust is disabled.</div>
+            }
 
             @if (_pending.Count > 1)
             {
@@ -238,6 +263,8 @@
         _stop.Dispose();
     }
 
+    private sealed record ContributorView(string Source, string Kind, bool Authoritative, string? Detail = null);
+
     private sealed record ApprovalView(
         string Id,
         DateTimeOffset CreatedAt,
@@ -258,5 +285,8 @@
         IReadOnlyList<string>? AffectedResources = null,
         IReadOnlyList<string>? Reasons = null,
         string? SaferAlternative = null,
-        string? Preview = null);
+        string? Preview = null,
+        bool CanAllowSession = true,
+        bool CanAllowAlways = true,
+        IReadOnlyList<ContributorView>? Contributors = null);
 }
