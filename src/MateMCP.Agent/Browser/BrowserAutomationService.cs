@@ -968,7 +968,7 @@ JSON.stringify((() => {
   const role = roleOf(el);
   const result = {ok:true,error:null,matchCount:count,role,name:nameOf(el)||null,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},checked:(role==='checkbox'||role==='radio')?!!el.checked:null};
   el.scrollIntoView({block:'center',inline:'center'});
-  if (action === 'click') { el.focus({preventScroll:true}); el.click(); return result; }
+  if (action === 'click') { el.focus({preventScroll:true}); el.click(); if (document.activeElement !== el) el.focus({preventScroll:true}); return result; }
   if (action === 'check') {
     if (role !== 'checkbox' && role !== 'radio') return {...result,ok:false,error:'Selected element is not a checkbox or radio control.'};
     const desired = text === 'true';
