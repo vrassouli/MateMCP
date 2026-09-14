@@ -43,7 +43,18 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
 
         if (options.Value.RequireShellApproval)
         {
-            var decision = await approvals.RequestAsync("shell.exec", scope, Trim(command), cancellationToken);
+            var decision = await approvals.RequestAsync(
+                new ActionAssessmentContext(
+                    "shell.exec",
+                    scope,
+                    Trim(command),
+                    ActionType: "shell",
+                    Arguments: new Dictionary<string, string?>
+                    {
+                        ["workingDirectory"] = workingDirectory,
+                        ["project"] = hasProject ? project : null
+                    }),
+                cancellationToken);
             if (decision == ApprovalDecision.Deny)
             {
                 await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "denied:approval", cancellationToken);
