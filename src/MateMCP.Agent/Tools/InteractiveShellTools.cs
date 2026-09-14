@@ -41,7 +41,18 @@ public sealed class InteractiveShellTools(
         var (workingDirectory, scope) = ResolveWorkingDirectory(project);
         if (options.Value.RequireShellApproval)
         {
-            var decision = await approvals.RequestAsync("shell.exec", scope, Trim(command), cancellationToken);
+            var decision = await approvals.RequestAsync(
+                new ActionAssessmentContext(
+                    "shell.exec",
+                    scope,
+                    Trim(command),
+                    ActionType: "shell",
+                    Arguments: new Dictionary<string, string?>
+                    {
+                        ["workingDirectory"] = workingDirectory,
+                        ["project"] = project
+                    }),
+                cancellationToken);
             if (decision == ApprovalDecision.Deny)
             {
                 await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", "denied:approval", cancellationToken);
