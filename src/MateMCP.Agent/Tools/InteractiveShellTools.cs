@@ -14,14 +14,14 @@ namespace MateMCP.Agent.Tools;
 [McpServerToolType]
 public sealed class InteractiveShellTools(
     ProjectRegistry projects,
-    SkillMemoryStore memory,
     AuditLog audit,
     IApprovalService approvals,
     IOptions<MateOptions> options,
     InteractiveShellSessionManager sessions,
     ICredentialStore secrets,
     CredentialInjectionRateLimiter injectionRateLimiter,
-    AgentActivityGate? activity = null)
+    AgentActivityGate? activity = null,
+    SkillMemoryStore? memory = null)
 {
     private const string SendSecretTool = UserSecretInfo.ShellSessionSendSecretTool;
     private readonly AgentActivityGate _activity = activity ?? new AgentActivityGate();
@@ -71,7 +71,9 @@ public sealed class InteractiveShellTools(
         {
             var result = await sessions.StartAsync(command, workingDirectory, cancellationToken);
             await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", $"started:{result.SessionId}", cancellationToken);
-            var memoryContext = await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_session_start", project, command, options.Value.ProactiveMemory, cancellationToken);
+            var memoryContext = memory is null
+                ? null
+                : await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_session_start", project, command, options.Value.ProactiveMemory, cancellationToken);
             return new
             {
                 result.SessionId,
