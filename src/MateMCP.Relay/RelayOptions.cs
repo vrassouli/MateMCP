@@ -11,4 +11,5 @@ public sealed class RelayOptions
     public int MaxBodyBytes { get; set; } = 4 * 1024 * 1024;
     public int RequestTimeoutSeconds { get; set; } = 120;
     public int AgentReconnectGraceSeconds { get; set; } = 20;
+    public int MaxPendingRequestsPerAgent { get; set; } = 32;
 }
