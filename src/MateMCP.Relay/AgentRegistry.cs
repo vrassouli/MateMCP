@@ -97,6 +97,37 @@ public sealed class AgentRegistry
         }
     }
 
+    public async Task<AgentConnection?> WaitForOnlineAsync(
+        string deviceId,
+        string previousConnectionId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        if (timeout <= TimeSpan.Zero) return null;
+        var deadline = DateTimeOffset.UtcNow + timeout;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (TryGet(deviceId, out var current) &&
+                !string.Equals(current.ConnectionId, previousConnectionId, StringComparison.Ordinal))
+                return current;
+
+            var now = DateTimeOffset.UtcNow;
+            if (now >= deadline) return null;
+
+            var snapshot = Snapshot(deviceId);
+            if (snapshot.State is null) return null;
+            if (snapshot.State == AgentPresenceState.Reconnecting && snapshot.ReconnectUntil is not null && snapshot.ReconnectUntil <= now)
+                return null;
+
+            var delay = deadline - now;
+            if (delay > TimeSpan.FromMilliseconds(100)) delay = TimeSpan.FromMilliseconds(100);
+            await Task.Delay(delay, cancellationToken);
+        }
+
+        return null;
+    }
+
     public bool Remove(string deviceId, AgentConnection connection)
     {
         if (!_agents.TryGetValue(deviceId, out var session))
@@ -264,10 +295,15 @@ public sealed class AgentConnection : IDisposable
                 if (Socket.State != WebSocketState.Open)
                     throw new WebSocketException(WebSocketError.InvalidState, $"Agent socket is {Socket.State}.");
 
-                // A single MCP client's cancellation must not cancel the shared Agent WebSocket transport.
-                // Only the Agent connection lifetime is allowed to cancel an in-progress socket write.
                 var payload = JsonSerializer.SerializeToUtf8Bytes(request, RelayJsonContext.Default.RelayRequest);
-                await Socket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, _transportLifetime.Token);
+                try
+                {
+                    await Socket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, _transportLifetime.Token);
+                }
+                catch (OperationCanceledException ex) when (_transportLifetime.IsCancellationRequested && !requestCancellation.IsCancellationRequested)
+                {
+                    throw new AgentTransportLostException(DeviceId, ConnectionId, ex);
+                }
             }
             finally
             {
@@ -287,8 +323,11 @@ public sealed class AgentConnection : IDisposable
 
     public void Disconnect()
     {
-        if (!_transportLifetime.IsCancellationRequested)
-            _transportLifetime.Cancel();
+        if (_transportLifetime.IsCancellationRequested) return;
+        _transportLifetime.Cancel();
+        var failure = new AgentTransportLostException(DeviceId, ConnectionId);
+        foreach (var completion in _pending.Values)
+            completion.TrySetException(failure);
     }
 
     public void Dispose()
@@ -300,7 +339,13 @@ public sealed class AgentConnection : IDisposable
     }
 }
 
-public sealed record RelayRequest(string Id, string Method, string Path, Dictionary<string, string[]> Headers, string? BodyBase64);
+public sealed class AgentTransportLostException : IOException
+{
+    public AgentTransportLostException(string deviceId, string connectionId, Exception? innerException = null)
+        : base($"Agent transport was lost for device '{deviceId}' connection '{connectionId}'.", innerException) { }
+}
+
+public sealed record RelayRequest(string Id, string Method, string Path, Dictionary<string, string[]> Headers, string? BodyBase64, string? OperationId = null);
 public sealed record RelayResponse(string Id, int StatusCode, Dictionary<string, string[]> Headers, string? BodyBase64, string? Error);
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(RelayRequest))]
