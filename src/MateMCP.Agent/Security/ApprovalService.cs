@@ -55,14 +55,20 @@ public sealed class ApprovalService(
     public Task<IReadOnlyList<ApprovalPolicy>> GetPoliciesAsync(CancellationToken cancellationToken = default) => policies.GetAlwaysAsync(cancellationToken);
     public Task<bool> RemovePolicyAsync(string capability, string target, CancellationToken cancellationToken = default) => policies.RemoveAlwaysAsync(capability, target, cancellationToken);
 
-    public Task<ApprovalDecision> RequestAsync(string capability, string target, string summary, CancellationToken cancellationToken)
+    public async Task<ApprovalDecision> RequestAsync(string capability, string target, string summary, CancellationToken cancellationToken)
     {
         var context = new ActionAssessmentContext(capability, target, summary);
-        return RequestCoreAsync(capability, target, summary, ActionImpactAnalyzer.Default.Assess(context), cancellationToken);
+        var assessment = ActionImpactAnalyzer.Default.Assess(context);
+        assessment = await ActionContextPreflightAnalyzer.Default.EnrichAsync(context, assessment, cancellationToken);
+        return await RequestCoreAsync(capability, target, summary, assessment, cancellationToken);
     }
 
-    public Task<ApprovalDecision> RequestAsync(ActionAssessmentContext context, CancellationToken cancellationToken)
-        => RequestCoreAsync(context.Capability, context.Target, context.Summary, ActionImpactAnalyzer.Default.Assess(context), cancellationToken);
+    public async Task<ApprovalDecision> RequestAsync(ActionAssessmentContext context, CancellationToken cancellationToken)
+    {
+        var assessment = ActionImpactAnalyzer.Default.Assess(context);
+        assessment = await ActionContextPreflightAnalyzer.Default.EnrichAsync(context, assessment, cancellationToken);
+        return await RequestCoreAsync(context.Capability, context.Target, context.Summary, assessment, cancellationToken);
+    }
 
     public Task<ApprovalDecision> RequestComputerUseAsync(
         string capability,
