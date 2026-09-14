@@ -43,10 +43,18 @@ public sealed class BrowserRuntimeIntegrationTests
             Assert.Contains(initial.Elements, element => element.Role == "heading" && element.Name == "Count 0");
 
             Mark("diagnostics");
-            await Task.Delay(100);
-            var diagnostics = await browser.GetDiagnosticsAsync(100, includeInfo: true, clear: true);
+            BrowserDiagnostics diagnostics = new([], false);
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                diagnostics = await browser.GetDiagnosticsAsync(100, includeInfo: true, clear: false);
+                var hasConsole = diagnostics.Entries.Any(entry => entry.Text.Contains("MateMCP diagnostic error", StringComparison.Ordinal));
+                var hasException = diagnostics.Entries.Any(entry => entry.Text.Contains("MateMCP page exception", StringComparison.Ordinal));
+                if (hasConsole && hasException) break;
+                await Task.Delay(100);
+            }
             Assert.Contains(diagnostics.Entries, entry => entry.Text.Contains("MateMCP diagnostic error", StringComparison.Ordinal));
             Assert.Contains(diagnostics.Entries, entry => entry.Text.Contains("MateMCP page exception", StringComparison.Ordinal));
+            _ = await browser.GetDiagnosticsAsync(100, includeInfo: true, clear: true);
 
             Mark("fill");
             var filled = await browser.FillAsync(new BrowserSelector(Role: "textbox", Name: "Name"), "MateMCP");
