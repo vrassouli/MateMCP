@@ -93,6 +93,12 @@ public sealed class DesktopVisionService
             throw new ArgumentOutOfRangeException(nameof(width), "Requested capture region is too large.");
     }
 
+    internal static double ComputeScale(double logicalWidth, double pixelWidth)
+    {
+        if (logicalWidth <= 0 || pixelWidth <= 0) return 1;
+        return Math.Max(1, Math.Round(pixelWidth / logicalWidth, 3));
+    }
+
     private static PlatformNotSupportedException UnsupportedPlatform()
         => new("Desktop vision currently supports Windows and macOS Agents.");
 
@@ -421,6 +427,7 @@ public sealed class DesktopVisionService
     private static class MacDesktopVision
     {
         private const string CoreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
+        private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 
         public static IReadOnlyList<DesktopScreenInfo> ListScreens()
         {
@@ -434,7 +441,7 @@ public sealed class DesktopVisionService
                 var display = displays[index];
                 var bounds = CGDisplayBounds(display);
                 var logicalWidth = Math.Max(1, (int)Math.Round(bounds.Size.Width));
-                var pixelWidth = (double)CGDisplayPixelsWide(display);
+                var pixelWidth = GetBackingPixelWidth(display);
                 result.Add(new DesktopScreenInfo(
                     display.ToString(CultureInfo.InvariantCulture),
                     display == primary ? "Main display" : $"Display {display}",
@@ -442,7 +449,7 @@ public sealed class DesktopVisionService
                     (int)Math.Round(bounds.Origin.Y),
                     logicalWidth,
                     Math.Max(1, (int)Math.Round(bounds.Size.Height)),
-                    Math.Round(pixelWidth / logicalWidth, 3),
+                    ComputeScale(logicalWidth, pixelWidth),
                     display == primary));
             }
             return result.OrderByDescending(screen => screen.Primary).ThenBy(screen => screen.X).ThenBy(screen => screen.Y).ToArray();
@@ -528,6 +535,18 @@ public sealed class DesktopVisionService
             }
         }
 
+        private static double GetBackingPixelWidth(uint display)
+        {
+            var mode = CGDisplayCopyDisplayMode(display);
+            if (mode == IntPtr.Zero) return CGDisplayPixelsWide(display);
+            try
+            {
+                var pixelWidth = (double)CGDisplayModeGetPixelWidth(mode);
+                return pixelWidth > 0 ? pixelWidth : CGDisplayPixelsWide(display);
+            }
+            finally { CFRelease(mode); }
+        }
+
         private static DesktopScreenInfo ResolveScreen(string? id)
         {
             var screens = ListScreens();
@@ -555,6 +574,15 @@ public sealed class DesktopVisionService
 
         [DllImport(CoreGraphics)]
         private static extern nuint CGDisplayPixelsWide(uint display);
+
+        [DllImport(CoreGraphics)]
+        private static extern IntPtr CGDisplayCopyDisplayMode(uint display);
+
+        [DllImport(CoreGraphics)]
+        private static extern nuint CGDisplayModeGetPixelWidth(IntPtr mode);
+
+        [DllImport(CoreFoundation)]
+        private static extern void CFRelease(IntPtr value);
     }
 
     private static string CompactError(string value)
