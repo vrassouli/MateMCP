@@ -2,9 +2,9 @@
 set -euo pipefail
 
 INSTALL_DIR="${MATEMCP_API_INSTALL_DIR:-/opt/matemcp-api}"
-REPO_RAW="https://raw.githubusercontent.com/vrassouli/MateMCP/main"
+REF="${MATEMCP_INSTALL_REF:-main}"
+REPO_RAW="https://raw.githubusercontent.com/vrassouli/MateMCP/${REF}"
 [[ $EUID -eq 0 ]] || { echo "Run as root (curl ... | sudo bash)." >&2; exit 1; }
-command -v docker >/dev/null && docker compose version >/dev/null 2>&1 || { echo "Docker Engine with Compose v2 is required." >&2; exit 1; }
 
 generate_secret() { openssl rand -hex 32 2>/dev/null || od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
 ask() {
@@ -20,6 +20,33 @@ ask_secret() {
   IFS= read -r -s ANSWER </dev/tty || true
   printf '\n' >/dev/tty
 }
+
+install_docker() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    return
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Docker is not installed and this installer currently supports automatic Docker setup on Debian/Ubuntu only." >&2
+    exit 1
+  fi
+
+  echo
+  echo "==> Installing Docker Engine and Compose plugin"
+  apt-get update
+  apt-get install -y ca-certificates curl gnupg
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+  . /etc/os-release
+  arch="$(dpkg --print-architecture)"
+  echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  systemctl enable --now docker
+}
+
+install_docker
 
 mkdir -p "$INSTALL_DIR"
 COMPOSE_URL="$REPO_RAW/deploy/api/docker-compose.yml"
