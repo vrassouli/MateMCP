@@ -211,7 +211,7 @@ public sealed record ManagedDevice(string Id, string Name, string Platform, stri
 public sealed record DesktopBackgroundUpdateStatus(bool AutoUpdateEnabled, string State, string Message,
     DateTimeOffset? LastChangedAt, long InstalledAssetId, string? LastFailure);
 public sealed record RelayStatus(bool Enabled, string? Url, string? DeviceId, bool EnrollmentSuppressed = false);
-public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Capability, string Target, string Summary);
+public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Capability, string Target, string Summary, string? Risk = null, string? Effect = null);
 public sealed record UserSecretInfo(string Name, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int Kind, IReadOnlyList<string>? AllowedTools);
 public sealed record ShellSessionSnapshot(string SessionId, int ProcessId, string Output, int NextOffset, bool OutputTruncated, bool Exited,
     int? ExitCode, string WorkingDirectory, DateTimeOffset CreatedAt, DateTimeOffset LastTouched);

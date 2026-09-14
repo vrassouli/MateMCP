@@ -235,9 +235,19 @@
                         @foreach (var approval in Approvals)
                         {
                             <div class="row" @key="approval.Id">
-                                <strong>@approval.Capability</strong>
+                                <div class="approval-heading">
+                                    <strong>@approval.Capability</strong>
+                                    @if (!string.IsNullOrWhiteSpace(approval.Risk))
+                                    {
+                                        <span class="approval-risk approval-risk-@approval.Risk.ToLowerInvariant()">Risk: @approval.Risk</span>
+                                    }
+                                </div>
                                 <div>@approval.Target</div>
                                 <div class="muted">@approval.Summary</div>
+                                @if (!string.IsNullOrWhiteSpace(approval.Effect))
+                                {
+                                    <div class="approval-effect"><strong>Expected effect:</strong> @approval.Effect</div>
+                                }
                                 <div class="actions">
                                     <Button Text="Approve" OnClick='() => DecideAsync(approval.Id, "allow")' />
                                     <Button Text="Approve for session" OnClick='() => DecideAsync(approval.Id, "allow-session")' />

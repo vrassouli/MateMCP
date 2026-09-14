@@ -10,7 +10,15 @@ namespace MateMCP.Agent.Security;
 
 public enum ApprovalDecision { AllowOnce, AllowSession, AllowAlways, Deny, Timeout }
 
-public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Capability, string Target, string Summary);
+public sealed record PendingApproval(
+    string Id,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    string Capability,
+    string Target,
+    string Summary,
+    string? Risk = null,
+    string? Effect = null);
 
 public sealed class ApprovalService(
     IOptionsMonitor<MateOptions> options,
@@ -34,28 +42,53 @@ public sealed class ApprovalService(
     public Task<IReadOnlyList<ApprovalPolicy>> GetPoliciesAsync(CancellationToken cancellationToken = default) => policies.GetAlwaysAsync(cancellationToken);
     public Task<bool> RemovePolicyAsync(string capability, string target, CancellationToken cancellationToken = default) => policies.RemoveAlwaysAsync(capability, target, cancellationToken);
 
-    public async Task<ApprovalDecision> RequestAsync(string capability, string target, string summary, CancellationToken cancellationToken)
+    public Task<ApprovalDecision> RequestAsync(string capability, string target, string summary, CancellationToken cancellationToken)
+        => RequestCoreAsync(capability, target, summary, assessment: null, cancellationToken);
+
+    public Task<ApprovalDecision> RequestComputerUseAsync(
+        string capability,
+        string target,
+        string summary,
+        ComputerUseRiskAssessment assessment,
+        CancellationToken cancellationToken)
+        => RequestCoreAsync(capability, target, summary, assessment, cancellationToken);
+
+    private async Task<ApprovalDecision> RequestCoreAsync(
+        string capability,
+        string target,
+        string summary,
+        ComputerUseRiskAssessment? assessment,
+        CancellationToken cancellationToken)
     {
+        var riskAudit = assessment is null ? string.Empty : $":risk={assessment.Label.ToLowerInvariant()}";
         if (policies.IsSessionAllowed(capability, target))
         {
-            await audit.WriteAsync("approval", $"{capability}:{target}", "allowed:session-policy", cancellationToken);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"allowed:session-policy{riskAudit}", cancellationToken);
             return ApprovalDecision.AllowSession;
         }
         if (await policies.IsAlwaysAllowedAsync(capability, target, cancellationToken))
         {
-            await audit.WriteAsync("approval", $"{capability}:{target}", "allowed:persistent-policy", cancellationToken);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"allowed:persistent-policy{riskAudit}", cancellationToken);
             return ApprovalDecision.AllowAlways;
         }
 
         var timeoutSeconds = Math.Clamp(Current.ApprovalTimeoutSeconds, 15, 600);
         var createdAt = DateTimeOffset.UtcNow;
-        var approval = new PendingApproval(Guid.NewGuid().ToString("n"), createdAt, createdAt.AddSeconds(timeoutSeconds), capability, target, summary);
+        var approval = new PendingApproval(
+            Guid.NewGuid().ToString("n"),
+            createdAt,
+            createdAt.AddSeconds(timeoutSeconds),
+            capability,
+            target,
+            summary,
+            assessment?.Label,
+            assessment?.Effect);
         var state = new PendingState(approval);
         if (!_pending.TryAdd(approval.Id, state)) throw new InvalidOperationException("Failed to create approval request.");
 
         _ = PollRemoteDecisionAsync(state, cancellationToken);
         _ = notifications.NotifyApprovalAsync(Current.Port, approval, cancellationToken);
-        logger.LogWarning("MateMCP approval required: {Capability} {Target}. Open http://127.0.0.1:{Port}/ui", capability, target, Current.Port);
+        logger.LogWarning("MateMCP approval required: {Capability} {Target} Risk={Risk}. Open http://127.0.0.1:{Port}/ui", capability, target, approval.Risk ?? "unspecified", Current.Port);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
@@ -64,12 +97,12 @@ public sealed class ApprovalService(
             var decision = await state.Completion.Task.WaitAsync(timeout.Token);
             if (decision == ApprovalDecision.AllowSession) policies.AllowForSession(capability, target);
             if (decision == ApprovalDecision.AllowAlways) await policies.AllowAlwaysAsync(capability, target, cancellationToken);
-            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:{decision.ToString().ToLowerInvariant()}", cancellationToken);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:{decision.ToString().ToLowerInvariant()}{riskAudit}", cancellationToken);
             return decision;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            await audit.WriteAsync("approval", $"{capability}:{target}", "decision:timeout", CancellationToken.None);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:timeout{riskAudit}", CancellationToken.None);
             return ApprovalDecision.Timeout;
         }
         finally { _pending.TryRemove(approval.Id, out _); }
@@ -90,7 +123,13 @@ public sealed class ApprovalService(
             var credential = await credentials.GetAsync(relay.DeviceId, cancellationToken); if (credential is null) return;
             var client = clients.CreateClient(); client.BaseAddress = new Uri(relay.ControlPlaneUrl.TrimEnd('/') + "/");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", credential);
-            using var created = await client.PostAsJsonAsync($"api/agents/{Uri.EscapeDataString(relay.DeviceId)}/approvals", new { state.Approval.Capability, state.Approval.Target, state.Approval.Summary, ExpiresIn = current.ApprovalTimeoutSeconds }, cancellationToken);
+            var remoteSummary = state.Approval.Risk is null
+                ? state.Approval.Summary
+                : $"{state.Approval.Summary}\nRisk: {state.Approval.Risk}\nExpected effect: {state.Approval.Effect}";
+            using var created = await client.PostAsJsonAsync(
+                $"api/agents/{Uri.EscapeDataString(relay.DeviceId)}/approvals",
+                new { state.Approval.Capability, state.Approval.Target, Summary = remoteSummary, ExpiresIn = current.ApprovalTimeoutSeconds },
+                cancellationToken);
             if (!created.IsSuccessStatusCode) { logger.LogWarning("Remote approval publication failed with {StatusCode}.", created.StatusCode); return; }
             var remote = await created.Content.ReadFromJsonAsync<RemoteApproval>(cancellationToken: cancellationToken); if (remote is null) return;
             var delay = TimeSpan.FromSeconds(2);
