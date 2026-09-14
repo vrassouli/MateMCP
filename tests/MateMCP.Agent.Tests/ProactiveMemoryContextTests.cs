@@ -27,9 +27,10 @@ public sealed class ProactiveMemoryContextTests : IDisposable
         Assert.Contains("current user instructions override", context, StringComparison.Ordinal);
 
         var events = await audit.ReadAsync();
-        var injected = Assert.Single(events.Where(x => x.Capability == "memory.inject"));
+        var injected = Assert.Single(events, x => x.Capability == "memory.inject");
         Assert.Equal("shell_exec:Demo", injected.Target);
         Assert.Contains("items:", injected.Result, StringComparison.Ordinal);
+        Assert.Contains("types:procedure:1", injected.Result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -57,6 +58,55 @@ public sealed class ProactiveMemoryContextTests : IDisposable
 
         Assert.Null(context);
         Assert.DoesNotContain(await audit.ReadAsync(), x => x.Capability == "memory.inject");
+    }
+
+    [Fact]
+    public async Task Off_mode_skips_lookup_output_and_telemetry()
+    {
+        var (store, audit) = CreateServices();
+        await store.CreateAsync(new("Release skill", "skill", "global", null, ["release"], null, "Use the release checklist.", "user"));
+        var options = new ProactiveMemoryOptions { Mode = ProactiveMemoryMode.Off };
+
+        var context = await ProactiveMemoryContext.BuildAsync(store, audit, "shell_exec", null, "release package", options, CancellationToken.None);
+
+        Assert.Null(context);
+        Assert.DoesNotContain(await audit.ReadAsync(), x => x.Capability is "memory.inject" or "memory.suggest");
+    }
+
+    [Fact]
+    public async Task Suggested_mode_returns_hint_without_memory_content_and_audits_types()
+    {
+        var (store, audit) = CreateServices();
+        const string durableContent = "PRIVATE DURABLE PROCEDURE CONTENT";
+        await store.CreateAsync(new("Release skill", "skill", "global", null, ["release"], null, durableContent, "user"));
+        var options = new ProactiveMemoryOptions { Mode = ProactiveMemoryMode.Suggested };
+
+        var context = await ProactiveMemoryContext.BuildAsync(store, audit, "shell_session_start", null, "release package", options, CancellationToken.None);
+
+        Assert.NotNull(context);
+        Assert.Contains("relevant durable context", context, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(durableContent, context, StringComparison.Ordinal);
+        var suggested = Assert.Single(await audit.ReadAsync(), x => x.Capability == "memory.suggest");
+        Assert.Equal("shell_session_start", suggested.Target);
+        Assert.Contains("types:skill:1", suggested.Result, StringComparison.OrdinalIgnoreCase);
+        var auditText = await File.ReadAllTextAsync(Path.Combine(_root, "audit.jsonl"));
+        Assert.DoesNotContain(durableContent, auditText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Configured_bounds_are_clamped_and_applied()
+    {
+        var (store, audit) = CreateServices();
+        for (var i = 0; i < 12; i++)
+            await store.CreateAsync(new($"Deploy procedure {i}", "procedure", "global", null, ["deploy"], null, new string((char)('a' + i % 20), 2_000), "user"));
+        var options = new ProactiveMemoryOptions { Mode = ProactiveMemoryMode.Automatic, MaxItems = 2, MaxChars = 700 };
+
+        var context = await ProactiveMemoryContext.BuildAsync(store, audit, "shell_exec", null, "deploy", options, CancellationToken.None);
+
+        Assert.NotNull(context);
+        Assert.True(context.Length <= 700);
+        var itemLines = context.Split('\n').Count(x => x.StartsWith("- [", StringComparison.Ordinal));
+        Assert.True(itemLines <= 2);
     }
 
     private (SkillMemoryStore Store, AuditLog Audit) CreateServices()
