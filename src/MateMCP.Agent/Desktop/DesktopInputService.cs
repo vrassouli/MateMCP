@@ -401,6 +401,7 @@ public sealed class DesktopInputService
         private const uint OtherMouseDragged = 27;
         private const uint KeyDown = 10;
         private const uint KeyUp = 11;
+        private const uint FlagsChanged = 12;
         private const uint ScrollUnitPixel = 0;
         private const uint MouseEventClickState = 1;
 
@@ -477,9 +478,37 @@ public sealed class DesktopInputService
         public static void PressShortcut(IReadOnlyList<string> keys)
         {
             MacAccessibility.EnsureTrusted();
-            var codes = keys.Select(KeyCode).ToArray();
-            try { foreach (var code in codes) PostKey(code, KeyDown); }
-            finally { for (var index = codes.Length - 1; index >= 0; index--) PostKey(codes[index], KeyUp); }
+            var modifiers = keys.Where(IsShortcutModifier).ToArray();
+            var primary = keys.Where(key => !IsShortcutModifier(key)).ToArray();
+            if (primary.Length == 0)
+            {
+                foreach (var modifier in modifiers) PressKey(modifier);
+                return;
+            }
+
+            ulong flags = 0;
+            try
+            {
+                foreach (var modifier in modifiers)
+                {
+                    flags |= ShortcutModifierFlag(modifier);
+                    PostModifier(KeyCode(modifier), flags, keyDown: true);
+                }
+                foreach (var key in primary)
+                {
+                    var code = KeyCode(key);
+                    PostKey(code, KeyDown, flags);
+                    PostKey(code, KeyUp, flags);
+                }
+            }
+            finally
+            {
+                for (var index = modifiers.Length - 1; index >= 0; index--)
+                {
+                    flags &= ~ShortcutModifierFlag(modifiers[index]);
+                    PostModifier(KeyCode(modifiers[index]), flags, keyDown: false);
+                }
+            }
         }
 
         private static IEnumerable<string> ChunkText(string text, int length)
@@ -501,13 +530,42 @@ public sealed class DesktopInputService
             finally { CFRelease(eventRef); }
         }
 
-        private static void PostKey(ushort keyCode, uint type)
+        private static void PostKey(ushort keyCode, uint type, ulong flags = 0)
         {
             var eventRef = CGEventCreateKeyboardEvent(IntPtr.Zero, keyCode, type == KeyDown);
             if (eventRef == IntPtr.Zero) throw new InvalidOperationException("macOS could not create a keyboard event.");
-            try { CGEventPost(HidEventTap, eventRef); }
+            try
+            {
+                if (flags != 0) CGEventSetFlags(eventRef, flags);
+                CGEventPost(HidEventTap, eventRef);
+            }
             finally { CFRelease(eventRef); }
         }
+
+        private static void PostModifier(ushort keyCode, ulong flags, bool keyDown)
+        {
+            var eventRef = CGEventCreateKeyboardEvent(IntPtr.Zero, keyCode, keyDown);
+            if (eventRef == IntPtr.Zero) throw new InvalidOperationException("macOS could not create a modifier event.");
+            try
+            {
+                CGEventSetType(eventRef, FlagsChanged);
+                CGEventSetFlags(eventRef, flags);
+                CGEventPost(HidEventTap, eventRef);
+            }
+            finally { CFRelease(eventRef); }
+        }
+
+        internal static bool IsShortcutModifier(string key)
+            => key is "SHIFT" or "CTRL" or "ALT" or "CMD";
+
+        internal static ulong ShortcutModifierFlag(string key) => key switch
+        {
+            "SHIFT" => 1UL << 17,
+            "CTRL" => 1UL << 18,
+            "ALT" => 1UL << 19,
+            "CMD" => 1UL << 20,
+            _ => 0
+        };
 
         private static void PostMouse(uint type, CGPoint point, uint button, int clickCount)
         {
@@ -593,6 +651,12 @@ public sealed class DesktopInputService
 
         [DllImport(ApplicationServices)]
         private static extern void CGEventKeyboardSetUnicodeString(IntPtr eventRef, nuint length, [In] ushort[] unicodeString);
+
+        [DllImport(ApplicationServices)]
+        private static extern void CGEventSetFlags(IntPtr eventRef, ulong flags);
+
+        [DllImport(ApplicationServices)]
+        private static extern void CGEventSetType(IntPtr eventRef, uint type);
 
         [DllImport(ApplicationServices)]
         private static extern void CGEventSetIntegerValueField(IntPtr eventRef, uint field, long value);
