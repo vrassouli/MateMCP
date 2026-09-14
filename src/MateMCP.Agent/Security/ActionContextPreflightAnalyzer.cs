@@ -42,6 +42,20 @@ public sealed class ActionContextPreflightAnalyzer
             {
                 preview.Add($"Skipped out-of-scope target: {Bound(candidate, 160)}");
                 reasons.Add("A filesystem-like target resolved outside the authorized working directory, so MateMCP did not inspect it.");
+
+                // We can still classify the path string itself without reading the resource.
+                if (!string.IsNullOrWhiteSpace(fullPath) && IsSensitiveSystemPath(fullPath))
+                {
+                    risk = MaxRisk(risk, ActionRiskLevel.High);
+                    confidence = MaxConfidence(confidence, AssessmentConfidence.High);
+                    reasons.Add($"The requested target resolves to a sensitive operating-system path: {Bound(fullPath, 180)}.");
+                }
+                if (!string.IsNullOrWhiteSpace(fullPath) && LooksProductionPath(fullPath))
+                {
+                    production = true;
+                    risk = MaxRisk(risk, ActionRiskLevel.High);
+                    reasons.Add("The requested path contains an explicit production/prod/live environment marker.");
+                }
                 continue;
             }
 
@@ -96,6 +110,9 @@ public sealed class ActionContextPreflightAnalyzer
             preview.Add(dryRun);
             saferAlternative ??= dryRun.Replace("Supported preflight: ", string.Empty, StringComparison.Ordinal);
         }
+
+        foreach (var endpoint in ExtractRemoteEndpoints(context.Summary).Take(4))
+            preview.Add($"Remote endpoint referenced: {endpoint}");
 
         if (preview.Count == 0 && reasons.SequenceEqual(assessment.Reasons)) return assessment;
 
@@ -162,8 +179,7 @@ public sealed class ActionContextPreflightAnalyzer
         for (var i = commandIndex + 1; i < tokens.Count; i++)
         {
             var token = tokens[i];
-            if (string.IsNullOrWhiteSpace(token) || IsOperator(token) || IsOption(token)) continue;
-            if (token is "--") continue;
+            if (string.IsNullOrWhiteSpace(token) || IsOperator(token) || IsOption(token) || token == "--") continue;
             if (token.Contains('*') || token.Contains('?'))
             {
                 foreach (var match in ExpandBoundedWildcard(root, token)) yield return match;
@@ -245,13 +261,17 @@ public sealed class ActionContextPreflightAnalyzer
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            // Prevent read-only status/preflight commands from taking optional locks or refreshing the index.
+            psi.Environment["GIT_OPTIONAL_LOCKS"] = "0";
             foreach (var argument in arguments) psi.ArgumentList.Add(argument);
             using var process = Process.Start(psi);
             if (process is null) return null;
-            var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var stderrTask = process.StandardError.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
-            var result = await stdout;
-            return process.ExitCode == 0 ? result : null;
+            var stdout = await stdoutTask;
+            _ = await stderrTask;
+            return process.ExitCode == 0 ? stdout : null;
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or OperationCanceledException or IOException)
         {
@@ -265,7 +285,8 @@ public sealed class ActionContextPreflightAnalyzer
         var tokens = ShellActionImpactAnalyzer.Tokenize(context.Summary);
         if (tokens.Count == 0) return null;
         var first = Normalize(tokens[0]);
-        if (first == "sudo" && tokens.Count > 1) first = Normalize(tokens.Skip(1).FirstOrDefault(x => !x.StartsWith("-", StringComparison.Ordinal)) ?? string.Empty);
+        if (first == "sudo" && tokens.Count > 1)
+            first = Normalize(tokens.Skip(1).FirstOrDefault(x => !x.StartsWith("-", StringComparison.Ordinal)) ?? string.Empty);
         return first switch
         {
             "apt" or "apt-get" => "Supported preflight: review the transaction with `apt-get -s ...` before applying package changes.",
@@ -274,6 +295,16 @@ public sealed class ActionContextPreflightAnalyzer
             "winget" or "choco" or "scoop" => "Supported preflight: inspect the selected package/version and current installation state before applying the package mutation.",
             _ => null
         };
+    }
+
+    private static IEnumerable<string> ExtractRemoteEndpoints(string command)
+    {
+        foreach (var token in ShellActionImpactAnalyzer.Tokenize(command))
+        {
+            var value = token.Trim().Trim('"', '\'');
+            if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" or "ssh" or "ftp" or "sftp")
+                yield return uri.GetLeftPart(UriPartial.Authority);
+        }
     }
 
     private static bool IsGitRelevant(ActionAssessmentContext context, ActionImpactAssessment assessment)
@@ -289,8 +320,7 @@ public sealed class ActionContextPreflightAnalyzer
             var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
             fullPath = Path.GetFullPath(Path.IsPathRooted(candidate) ? candidate : Path.Combine(normalizedRoot, candidate));
             if (string.Equals(fullPath, normalizedRoot, PathComparison)) return true;
-            var prefix = normalizedRoot + Path.DirectorySeparatorChar;
-            return fullPath.StartsWith(prefix, PathComparison);
+            return fullPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, PathComparison);
         }
         catch { return false; }
     }
