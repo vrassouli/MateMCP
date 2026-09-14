@@ -38,8 +38,15 @@ public sealed class BrowserRuntimeIntegrationTests
             Assert.Equal(server.Url, initial.Url);
             Assert.Contains(initial.Elements, element => element.Role == "textbox" && element.Name == "Name");
             Assert.Contains(initial.Elements, element => element.Role == "combobox" && element.Name == "Country");
+            Assert.Contains(initial.Elements, element => element.Role == "checkbox" && element.Name == "Enabled" && element.Checked == false);
             Assert.Contains(initial.Elements, element => element.Role == "button" && element.Name == "Increment");
             Assert.Contains(initial.Elements, element => element.Role == "heading" && element.Name == "Count 0");
+
+            Mark("diagnostics");
+            await Task.Delay(100);
+            var diagnostics = await browser.GetDiagnosticsAsync(100, includeInfo: true, clear: true);
+            Assert.Contains(diagnostics.Entries, entry => entry.Text.Contains("MateMCP diagnostic error", StringComparison.Ordinal));
+            Assert.Contains(diagnostics.Entries, entry => entry.Text.Contains("MateMCP page exception", StringComparison.Ordinal));
 
             Mark("fill");
             var filled = await browser.FillAsync(new BrowserSelector(Role: "textbox", Name: "Name"), "MateMCP");
@@ -55,6 +62,25 @@ public sealed class BrowserRuntimeIntegrationTests
                 element.Role == "textbox" && element.Name == "Name" && element.Value == "MateMCP");
             Assert.Contains(afterFill.Elements, element =>
                 element.Role == "combobox" && element.Name == "Country" && element.Value == "ir");
+
+            Mark("check");
+            var checkedResult = await browser.CheckAsync(new BrowserSelector(Role: "checkbox", Name: "Enabled"), true);
+            Assert.True(checkedResult.Ok);
+            Assert.True(checkedResult.Checked);
+            var afterCheck = await browser.SnapshotAsync();
+            Assert.Contains(afterCheck.Elements, element => element.Role == "checkbox" && element.Name == "Enabled" && element.Checked == true);
+            var uncheckedResult = await browser.CheckAsync(new BrowserSelector(Role: "checkbox", Name: "Enabled"), false);
+            Assert.False(uncheckedResult.Checked);
+
+            Mark("keyboard shortcut");
+            await browser.ClickAsync(new BrowserSelector(Role: "textbox", Name: "Name"));
+            await browser.PressAsync("A", [OperatingSystem.IsMacOS() ? "META" : "CTRL"]);
+            await browser.PressAsync("X");
+            var afterPress = await browser.SnapshotAsync();
+            var pressedText = afterPress.Elements.FirstOrDefault(element => element.Role == "textbox" && element.Name == "Name")?.Value;
+            Console.WriteLine($"[MateMCP browser integration] textbox after shortcut: '{pressedText}'");
+            Assert.Contains(afterPress.Elements, element =>
+                element.Role == "textbox" && element.Name == "Name" && string.Equals(element.Value, "x", StringComparison.OrdinalIgnoreCase));
 
             Mark("click");
             var clicked = await browser.ClickAsync(new BrowserSelector(Role: "button", Name: "Increment"));
@@ -74,6 +100,15 @@ public sealed class BrowserRuntimeIntegrationTests
             Assert.Equal("image/png", screenshot.MimeType);
             Assert.True(screenshot.Bytes.Length > 8);
             Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, screenshot.Bytes[..4]);
+
+            Mark("history navigation");
+            var secondUrl = server.Url + "second";
+            var second = await browser.OpenAsync(secondUrl, channel);
+            Assert.Equal(secondUrl, second.Url);
+            var back = await browser.BackAsync();
+            Assert.Equal(server.Url, back.Url);
+            var forward = await browser.ForwardAsync();
+            Assert.Equal(secondUrl, forward.Url);
 
             Mark("close");
             await browser.CloseAsync();
@@ -98,6 +133,7 @@ public sealed class BrowserRuntimeIntegrationTests
 <html>
 <head><meta charset="utf-8"><title>MateMCP browser integration</title></head>
 <body>
+  <script>console.error('MateMCP diagnostic error');setTimeout(()=>{throw new Error('MateMCP page exception')},10);</script>
   <label for="name">Name</label>
   <input id="name" type="text">
   <label for="country">Country</label>
@@ -105,6 +141,8 @@ public sealed class BrowserRuntimeIntegrationTests
     <option value="us">United States</option>
     <option value="ir">Iran</option>
   </select>
+  <label for="enabled">Enabled</label>
+  <input id="enabled" type="checkbox">
   <button aria-label="Increment" onclick="const h=document.getElementById('count');const n=Number(h.dataset.count)+1;h.dataset.count=String(n);h.textContent='Count '+n;">Increment</button>
   <h1 id="count" data-count="0">Count 0</h1>
 </body>

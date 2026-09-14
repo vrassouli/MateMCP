@@ -31,7 +31,8 @@ public sealed record BrowserElementInfo(
     bool Enabled,
     bool Visible,
     BrowserBounds? Bounds,
-    BrowserComputedStyle? Styles);
+    BrowserComputedStyle? Styles,
+    bool? Checked = null);
 public sealed record BrowserSnapshot(
     string Url,
     string Title,
@@ -52,7 +53,8 @@ public sealed record BrowserActionResult(
     int MatchCount,
     string? Role,
     string? Name,
-    BrowserBounds? Bounds);
+    BrowserBounds? Bounds,
+    bool? Checked = null);
 public sealed record BrowserSessionStatus(
     bool Active,
     string? Channel,
@@ -60,6 +62,8 @@ public sealed record BrowserSessionStatus(
     string? Title,
     BrowserViewport? Viewport);
 public sealed record BrowserScreenshot(byte[] Bytes, string MimeType, string Url, string Title, BrowserViewport Viewport);
+public sealed record BrowserDiagnosticEntry(string Level, string Source, string Text);
+public sealed record BrowserDiagnostics(IReadOnlyList<BrowserDiagnosticEntry> Entries, bool Truncated);
 
 /// <summary>
 /// Lightweight Chromium automation over the Chrome DevTools Protocol. MateMCP launches a dedicated temporary
@@ -129,6 +133,12 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         finally { _gate.Release(); }
     }
 
+    public Task<BrowserSessionStatus> BackAsync(CancellationToken cancellationToken = default)
+        => NavigateHistoryAsync(-1, cancellationToken);
+
+    public Task<BrowserSessionStatus> ForwardAsync(CancellationToken cancellationToken = default)
+        => NavigateHistoryAsync(1, cancellationToken);
+
     public async Task<BrowserSnapshot> SnapshotAsync(int maxElements = 500, CancellationToken cancellationToken = default)
     {
         maxElements = Math.Clamp(maxElements, 1, 1500);
@@ -167,6 +177,61 @@ public sealed class BrowserAutomationService : IAsyncDisposable
             var result = await EvaluateActionAsync(selector, "fill", text, cancellationToken);
             if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Browser fill failed.");
             return result;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<BrowserActionResult> CheckAsync(
+        BrowserSelector selector,
+        bool isChecked,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateSelector(selector);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var result = await EvaluateActionAsync(selector, "check", isChecked ? "true" : "false", cancellationToken);
+            if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Browser check action failed.");
+            return result;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task PressAsync(
+        string key,
+        IReadOnlyList<string>? modifiers = null,
+        CancellationToken cancellationToken = default)
+    {
+        var primary = NormalizeBrowserKey(key, allowModifier: false);
+        var normalizedModifiers = (modifiers ?? []).Select(value => NormalizeBrowserKey(value, allowModifier: true)).ToArray();
+        if (normalizedModifiers.Distinct(StringComparer.Ordinal).Count() != normalizedModifiers.Length)
+            throw new ArgumentException("Browser key modifiers must not contain duplicates.", nameof(modifiers));
+        if (normalizedModifiers.Any(value => !IsModifier(value)))
+            throw new ArgumentException("Browser modifiers may contain only CTRL, ALT, SHIFT, or META/CMD.", nameof(modifiers));
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var cdp = RequireCdp();
+            var held = new List<string>();
+            try
+            {
+                foreach (var modifier in normalizedModifiers)
+                {
+                    await DispatchKeyAsync(cdp, modifier, keyDown: true, normalizedModifiers, cancellationToken);
+                    held.Add(modifier);
+                }
+                await DispatchKeyAsync(cdp, primary, keyDown: true, normalizedModifiers, cancellationToken);
+                await DispatchKeyAsync(cdp, primary, keyDown: false, normalizedModifiers, cancellationToken);
+            }
+            finally
+            {
+                for (var index = held.Count - 1; index >= 0; index--)
+                {
+                    try { await DispatchKeyAsync(cdp, held[index], keyDown: false, normalizedModifiers, CancellationToken.None); }
+                    catch { }
+                }
+            }
         }
         finally { _gate.Release(); }
     }
@@ -223,6 +288,26 @@ public sealed class BrowserAutomationService : IAsyncDisposable
                 status.Url ?? string.Empty,
                 status.Title ?? string.Empty,
                 status.Viewport ?? new BrowserViewport(0, 0, 1));
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<BrowserDiagnostics> GetDiagnosticsAsync(
+        int maxEntries = 100,
+        bool includeInfo = false,
+        bool clear = true,
+        CancellationToken cancellationToken = default)
+    {
+        maxEntries = Math.Clamp(maxEntries, 1, 500);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var events = RequireCdp().ReadEvents(clear, 1000);
+            var entries = events.Select(ToDiagnostic).Where(entry => entry is not null).Cast<BrowserDiagnosticEntry>().ToList();
+            if (!includeInfo) entries.RemoveAll(entry => entry.Level is not ("error" or "warning"));
+            var truncated = entries.Count > maxEntries;
+            if (truncated) entries = entries[^maxEntries..];
+            return new BrowserDiagnostics(entries, truncated);
         }
         finally { _gate.Release(); }
     }
@@ -286,6 +371,7 @@ public sealed class BrowserAutomationService : IAsyncDisposable
             var cdp = await CdpClient.ConnectAsync(new Uri(page.WebSocketDebuggerUrl), cancellationToken);
             await cdp.SendAsync("Page.enable", new { }, cancellationToken);
             await cdp.SendAsync("Runtime.enable", new { }, cancellationToken);
+            await cdp.SendAsync("Log.enable", new { }, cancellationToken);
 
             _process = process;
             _profileDirectory = profile;
@@ -299,6 +385,53 @@ public sealed class BrowserAutomationService : IAsyncDisposable
             TryDeleteDirectory(profile);
             throw;
         }
+    }
+
+    private async Task<BrowserSessionStatus> NavigateHistoryAsync(int delta, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var cdp = RequireCdp();
+            var history = await cdp.SendAsync("Page.getNavigationHistory", new { }, cancellationToken);
+            if (!history.TryGetProperty("currentIndex", out var currentElement) || !currentElement.TryGetInt32(out var currentIndex) ||
+                !history.TryGetProperty("entries", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException("Browser did not return a usable navigation history.");
+            var targetIndex = currentIndex + delta;
+            if (targetIndex < 0 || targetIndex >= entries.GetArrayLength())
+                throw new InvalidOperationException(delta < 0 ? "Browser has no previous history entry." : "Browser has no forward history entry.");
+            var target = entries[targetIndex];
+            if (!target.TryGetProperty("id", out var idElement) || !idElement.TryGetInt32(out var entryId))
+                throw new InvalidOperationException("Browser history entry did not contain an id.");
+            await cdp.SendAsync("Page.navigateToHistoryEntry", new { entryId }, cancellationToken);
+            await WaitForHistoryIndexAsync(targetIndex, cancellationToken);
+            await WaitForReadyAsync(cancellationToken);
+            return await GetStatusCoreAsync(cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private async Task WaitForHistoryIndexAsync(int expectedIndex, CancellationToken cancellationToken)
+    {
+        var cdp = RequireCdp();
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var history = await cdp.SendAsync("Page.getNavigationHistory", new { }, cancellationToken);
+                if (history.TryGetProperty("currentIndex", out var currentElement) &&
+                    currentElement.TryGetInt32(out var currentIndex) && currentIndex == expectedIndex)
+                    return;
+            }
+            catch (InvalidOperationException ex) when (attempt < 99 &&
+                ex.Message.Contains("Not attached to an active page", StringComparison.OrdinalIgnoreCase))
+            {
+                // Chromium briefly detaches the old document while committing a history navigation.
+            }
+            await Task.Delay(50, cancellationToken);
+        }
+        throw new TimeoutException("Browser navigation history did not reach the requested entry within 5 seconds.");
     }
 
     private async Task NavigateCoreAsync(string url, CancellationToken cancellationToken)
@@ -368,6 +501,166 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         var json = await EvaluateStringAsync(expression, cancellationToken);
         return JsonSerializer.Deserialize<BrowserActionResult>(json, Json)
             ?? throw new InvalidOperationException("Browser returned an invalid action result.");
+    }
+
+    internal static string NormalizeBrowserKey(string? key, bool allowModifier = true)
+    {
+        key = (key ?? string.Empty).Trim().ToUpperInvariant();
+        if (key.Length == 1 && char.IsLetterOrDigit(key[0])) return key;
+        var normalized = key switch
+        {
+            "RETURN" => "ENTER",
+            "ESCAPE" => "ESC",
+            "CONTROL" => "CTRL",
+            "OPTION" => "ALT",
+            "COMMAND" or "CMD" or "WINDOWS" or "WIN" => "META",
+            "ARROWUP" => "UP", "ARROWDOWN" => "DOWN", "ARROWLEFT" => "LEFT", "ARROWRIGHT" => "RIGHT",
+            "PAGE_UP" => "PAGEUP", "PAGE_DOWN" => "PAGEDOWN",
+            "ENTER" or "ESC" or "TAB" or "SPACE" or "BACKSPACE" or "DELETE" or "INSERT" or
+            "HOME" or "END" or "PAGEUP" or "PAGEDOWN" or "UP" or "DOWN" or "LEFT" or "RIGHT" or
+            "SHIFT" or "CTRL" or "ALT" or "META" or
+            "F1" or "F2" or "F3" or "F4" or "F5" or "F6" or "F7" or "F8" or "F9" or "F10" or "F11" or "F12" => key,
+            _ => throw new ArgumentException($"Unsupported browser key '{key}'.", nameof(key))
+        };
+        if (!allowModifier && IsModifier(normalized))
+            throw new ArgumentException("The primary browser key cannot itself be a modifier; pass modifiers separately.", nameof(key));
+        return normalized;
+    }
+
+    private static bool IsModifier(string key) => key is "SHIFT" or "CTRL" or "ALT" or "META";
+
+    private static async Task DispatchKeyAsync(
+        CdpClient cdp,
+        string key,
+        bool keyDown,
+        IReadOnlyList<string> modifiers,
+        CancellationToken cancellationToken)
+    {
+        var (domKey, code, vk, text) = BrowserKeyInfo(key);
+        var mask = 0;
+        if (modifiers.Contains("ALT")) mask |= 1;
+        if (modifiers.Contains("CTRL")) mask |= 2;
+        if (modifiers.Contains("META")) mask |= 4;
+        if (modifiers.Contains("SHIFT")) mask |= 8;
+        var emitsText = !modifiers.Any(value => value is "ALT" or "CTRL" or "META");
+        var eventText = emitsText ? text : string.Empty;
+        if (modifiers.Contains("SHIFT") && eventText.Length == 1 && char.IsLetter(eventText[0]))
+            eventText = eventText.ToUpperInvariant();
+        var commands = BrowserEditingCommands(key, modifiers, keyDown);
+        await cdp.SendAsync("Input.dispatchKeyEvent", new
+        {
+            type = keyDown ? (string.IsNullOrEmpty(eventText) ? "rawKeyDown" : "keyDown") : "keyUp",
+            modifiers = mask,
+            key = domKey,
+            code,
+            text = keyDown ? eventText : string.Empty,
+            unmodifiedText = keyDown ? text : string.Empty,
+            windowsVirtualKeyCode = vk,
+            nativeVirtualKeyCode = vk,
+            commands
+        }, cancellationToken);
+    }
+
+    internal static string[] BrowserEditingCommands(string key, IReadOnlyList<string> modifiers, bool keyDown)
+    {
+        if (!keyDown || !modifiers.Any(value => value is "CTRL" or "META")) return [];
+        return key switch
+        {
+            "A" => ["SelectAll"],
+            "Z" when modifiers.Contains("SHIFT") => ["Redo"],
+            "Z" => ["Undo"],
+            _ => []
+        };
+    }
+
+    private static (string Key, string Code, int VirtualKey, string Text) BrowserKeyInfo(string key)
+    {
+        if (key.Length == 1)
+        {
+            var ch = key[0];
+            if (char.IsLetter(ch)) return (key.ToLowerInvariant(), $"Key{key}", key[0], key.ToLowerInvariant());
+            if (char.IsDigit(ch)) return (key, $"Digit{key}", key[0], key);
+        }
+        return key switch
+        {
+            "ENTER" => ("Enter", "Enter", 13, "\r"),
+            "ESC" => ("Escape", "Escape", 27, ""),
+            "TAB" => ("Tab", "Tab", 9, "\t"),
+            "SPACE" => (" ", "Space", 32, " "),
+            "BACKSPACE" => ("Backspace", "Backspace", 8, ""),
+            "DELETE" => ("Delete", "Delete", 46, ""),
+            "INSERT" => ("Insert", "Insert", 45, ""),
+            "HOME" => ("Home", "Home", 36, ""),
+            "END" => ("End", "End", 35, ""),
+            "PAGEUP" => ("PageUp", "PageUp", 33, ""),
+            "PAGEDOWN" => ("PageDown", "PageDown", 34, ""),
+            "LEFT" => ("ArrowLeft", "ArrowLeft", 37, ""),
+            "UP" => ("ArrowUp", "ArrowUp", 38, ""),
+            "RIGHT" => ("ArrowRight", "ArrowRight", 39, ""),
+            "DOWN" => ("ArrowDown", "ArrowDown", 40, ""),
+            "SHIFT" => ("Shift", "ShiftLeft", 16, ""),
+            "CTRL" => ("Control", "ControlLeft", 17, ""),
+            "ALT" => ("Alt", "AltLeft", 18, ""),
+            "META" => ("Meta", "MetaLeft", 91, ""),
+            _ when key.StartsWith('F') && int.TryParse(key.AsSpan(1), out var f) && f is >= 1 and <= 12
+                => (key, key, 111 + f, ""),
+            _ => throw new UnreachableException()
+        };
+    }
+
+    private static BrowserDiagnosticEntry? ToDiagnostic(CdpEvent item)
+    {
+        try
+        {
+            return item.Method switch
+            {
+                "Runtime.consoleAPICalled" => ParseConsoleDiagnostic(item.Parameters),
+                "Runtime.exceptionThrown" => ParseExceptionDiagnostic(item.Parameters),
+                "Log.entryAdded" => ParseLogDiagnostic(item.Parameters),
+                _ => null
+            };
+        }
+        catch { return null; }
+    }
+
+    private static BrowserDiagnosticEntry ParseConsoleDiagnostic(JsonElement value)
+    {
+        var type = value.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? "log" : "log";
+        var level = type switch { "error" or "assert" => "error", "warning" => "warning", _ => "info" };
+        var parts = new List<string>();
+        if (value.TryGetProperty("args", out var args) && args.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var arg in args.EnumerateArray())
+            {
+                string? text = null;
+                if (arg.TryGetProperty("value", out var raw) && raw.ValueKind is JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False) text = raw.ToString();
+                else if (arg.TryGetProperty("description", out var description) && description.ValueKind == JsonValueKind.String) text = description.GetString();
+                if (!string.IsNullOrWhiteSpace(text)) parts.Add(text);
+            }
+        }
+        return new BrowserDiagnosticEntry(level, "console", Trim(string.Join(" ", parts), 1000));
+    }
+
+    private static BrowserDiagnosticEntry ParseExceptionDiagnostic(JsonElement value)
+    {
+        if (!value.TryGetProperty("exceptionDetails", out var details)) return new BrowserDiagnosticEntry("error", "page", "JavaScript exception");
+        var text = details.TryGetProperty("text", out var textElement) ? textElement.GetString() ?? "JavaScript exception" : "JavaScript exception";
+        if (details.TryGetProperty("exception", out var exception))
+        {
+            if (exception.TryGetProperty("description", out var description) && !string.IsNullOrWhiteSpace(description.GetString())) text = description.GetString()!;
+            else if (exception.TryGetProperty("value", out var raw) && raw.ValueKind == JsonValueKind.String) text = raw.GetString() ?? text;
+        }
+        return new BrowserDiagnosticEntry("error", "page", Trim(text, 1000));
+    }
+
+    private static BrowserDiagnosticEntry? ParseLogDiagnostic(JsonElement value)
+    {
+        if (!value.TryGetProperty("entry", out var entry)) return null;
+        var level = entry.TryGetProperty("level", out var levelElement) ? (levelElement.GetString() ?? "info").ToLowerInvariant() : "info";
+        if (level == "verbose") level = "info";
+        var source = entry.TryGetProperty("source", out var sourceElement) ? sourceElement.GetString() ?? "log" : "log";
+        var text = entry.TryGetProperty("text", out var textElement) ? textElement.GetString() ?? string.Empty : string.Empty;
+        return new BrowserDiagnosticEntry(level, source, Trim(text, 1000));
     }
 
     private CdpClient RequireCdp()
@@ -531,7 +824,8 @@ JSON.stringify((() => {
       enabled: !el.disabled,
       visible: visible(el),
       bounds: {x:r.x,y:r.y,width:r.width,height:r.height},
-      styles: {display:s.display,visibility:s.visibility,overflow:s.overflow,fontSize:s.fontSize,fontFamily:s.fontFamily,fontWeight:s.fontWeight,margin:s.margin,padding:s.padding}
+      styles: {display:s.display,visibility:s.visibility,overflow:s.overflow,fontSize:s.fontSize,fontFamily:s.fontFamily,fontWeight:s.fontWeight,margin:s.margin,padding:s.padding},
+      checked: (role === 'checkbox' || role === 'radio') ? !!el.checked : null
     });
   }
   return {
@@ -599,9 +893,22 @@ JSON.stringify((() => {
     el = candidates[0];
   }
   const r = el.getBoundingClientRect();
-  const result = {ok:true,error:null,matchCount:count,role:roleOf(el),name:nameOf(el)||null,bounds:{x:r.x,y:r.y,width:r.width,height:r.height}};
+  const role = roleOf(el);
+  const result = {ok:true,error:null,matchCount:count,role,name:nameOf(el)||null,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},checked:(role==='checkbox'||role==='radio')?!!el.checked:null};
   el.scrollIntoView({block:'center',inline:'center'});
-  if (action === 'click') { el.click(); return result; }
+  if (action === 'click') { el.focus({preventScroll:true}); el.click(); return result; }
+  if (action === 'check') {
+    if (role !== 'checkbox' && role !== 'radio') return {...result,ok:false,error:'Selected element is not a checkbox or radio control.'};
+    const desired = text === 'true';
+    if (role === 'radio' && !desired) return {...result,ok:false,error:'Radio controls cannot be unchecked directly.'};
+    if (!!el.checked !== desired) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked');
+      if (descriptor && descriptor.set) descriptor.set.call(el,desired); else el.checked=desired;
+      el.dispatchEvent(new Event('input',{bubbles:true}));
+      el.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    return {...result,checked:!!el.checked};
+  }
   if (action === 'fill') {
     const protectedValue = el.tagName.toLowerCase() === 'input' && norm(el.type).toLowerCase() === 'password';
     if (protectedValue) return {...result,ok:false,error:'MateMCP refuses to fill password/protected browser fields.'};
@@ -656,6 +963,7 @@ JSON.stringify((() => {
         }
     }
 
+    private sealed record CdpEvent(string Method, JsonElement Parameters);
     private sealed record DevToolsTarget(string? Id, string? Type, string? Url, string? Title, string? WebSocketDebuggerUrl);
     private sealed record PageState(string? Url, string? Title, int Width, int Height, double Scale);
 
@@ -663,6 +971,7 @@ JSON.stringify((() => {
     {
         private readonly ClientWebSocket _socket = new();
         private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pending = new();
+        private readonly ConcurrentQueue<CdpEvent> _events = new();
         private readonly CancellationTokenSource _lifetime = new();
         private Task? _receiveTask;
         private int _nextId;
@@ -690,6 +999,28 @@ JSON.stringify((() => {
             finally { _pending.TryRemove(id, out _); }
         }
 
+        public IReadOnlyList<CdpEvent> ReadEvents(bool clear, int maxEntries)
+        {
+            maxEntries = Math.Clamp(maxEntries, 1, 2000);
+            if (clear)
+            {
+                var drained = new List<CdpEvent>();
+                while (_events.TryDequeue(out var item))
+                {
+                    drained.Add(item);
+                    if (drained.Count > maxEntries) drained.RemoveAt(0);
+                }
+                return drained;
+            }
+            return _events.ToArray().TakeLast(maxEntries).ToArray();
+        }
+
+        private void EnqueueEvent(string method, JsonElement parameters)
+        {
+            _events.Enqueue(new CdpEvent(method, parameters.Clone()));
+            while (_events.Count > 1000) _events.TryDequeue(out _);
+        }
+
         private async Task ReceiveLoopAsync()
         {
             var buffer = new byte[64 * 1024];
@@ -710,10 +1041,17 @@ JSON.stringify((() => {
 
                     using var document = JsonDocument.Parse(message.ToArray());
                     var root = document.RootElement;
-                    if (!root.TryGetProperty("id", out var idElement) ||
-                        !idElement.TryGetInt32(out var id) ||
-                        !_pending.TryGetValue(id, out var tcs))
+                    if (!root.TryGetProperty("id", out var idElement) || !idElement.TryGetInt32(out var id))
+                    {
+                        if (root.TryGetProperty("method", out var methodElement) && methodElement.ValueKind == JsonValueKind.String &&
+                            root.TryGetProperty("params", out var parameters))
+                        {
+                            var method = methodElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(method)) EnqueueEvent(method, parameters);
+                        }
                         continue;
+                    }
+                    if (!_pending.TryGetValue(id, out var tcs)) continue;
                     if (root.TryGetProperty("error", out var error))
                     {
                         tcs.TrySetException(new InvalidOperationException($"CDP {Trim(error.ToString(), 1000)}"));

@@ -136,6 +136,46 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         return status;
     }
 
+    [McpServerTool(Name = "browser_back", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = true)]
+    [Description("Navigates the dedicated browser to the previous history entry and waits for the page to become interactive.")]
+    public async Task<BrowserSessionStatus> Back(CancellationToken cancellationToken = default)
+    {
+        await RequireApprovalAsync("browser.navigate", "navigation", "Navigate the dedicated browser back one history entry.", cancellationToken);
+        EnsureComputerUseAvailable();
+        var status = await _browser.BackAsync(cancellationToken);
+        _computerUse.Touch("browser-navigation", status.Url);
+        await audit.WriteAsync("browser.back", status.Url ?? "browser", "ok", cancellationToken);
+        return status;
+    }
+
+    [McpServerTool(Name = "browser_forward", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = true)]
+    [Description("Navigates the dedicated browser to the next history entry and waits for the page to become interactive.")]
+    public async Task<BrowserSessionStatus> Forward(CancellationToken cancellationToken = default)
+    {
+        await RequireApprovalAsync("browser.navigate", "navigation", "Navigate the dedicated browser forward one history entry.", cancellationToken);
+        EnsureComputerUseAvailable();
+        var status = await _browser.ForwardAsync(cancellationToken);
+        _computerUse.Touch("browser-navigation", status.Url);
+        await audit.WriteAsync("browser.forward", status.Url ?? "browser", "ok", cancellationToken);
+        return status;
+    }
+
+    [McpServerTool(Name = "browser_diagnostics", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
+    [Description("Returns bounded recent console warnings/errors and JavaScript page exceptions from the dedicated browser. Console text can contain application data; diagnostic text is not copied into MateMCP audit details.")]
+    public async Task<BrowserDiagnostics> Diagnostics(
+        int maxEntries = 100,
+        bool includeInfo = false,
+        bool clear = true,
+        CancellationToken cancellationToken = default)
+    {
+        await RequireApprovalAsync("browser.view", "browser-diagnostics", "Read recent browser console/page diagnostics. Diagnostic text will not be persisted in the audit log.", cancellationToken);
+        EnsureComputerUseAvailable();
+        var result = await _browser.GetDiagnosticsAsync(maxEntries, includeInfo, clear, cancellationToken);
+        _computerUse.Touch("browser-view", "diagnostics");
+        await audit.WriteAsync("browser.diagnostics", "dedicated-browser", $"ok:entries={result.Entries.Count}:truncated={result.Truncated}", cancellationToken);
+        return result;
+    }
+
     [McpServerTool(Name = "browser_close", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Closes only the temporary-profile browser process owned by MateMCP and deletes its temporary profile on a best-effort basis.")]
     public async Task<string> Close(CancellationToken cancellationToken = default)
