@@ -18,6 +18,7 @@ public sealed class AgentRegistry
     private readonly ILogger<AgentRegistry> _logger;
     private readonly RelayInstanceIdentity _instanceIdentity;
     private readonly TimeSpan _reconnectGrace;
+    private readonly int _maxPendingRequestsPerAgent;
     private readonly ConcurrentDictionary<string, AgentSession> _agents = new(StringComparer.OrdinalIgnoreCase);
 
     public AgentRegistry(ILogger<AgentRegistry> logger, RelayInstanceIdentity instanceIdentity, IOptions<RelayOptions> options)
@@ -25,13 +26,20 @@ public sealed class AgentRegistry
         _logger = logger;
         _instanceIdentity = instanceIdentity;
         _reconnectGrace = TimeSpan.FromSeconds(Math.Clamp(options.Value.AgentReconnectGraceSeconds, 0, 300));
+        _maxPendingRequestsPerAgent = Math.Clamp(options.Value.MaxPendingRequestsPerAgent, 1, 4096);
     }
 
     public int Count => _agents.Count;
 
     public bool TryRegister(string deviceId, WebSocket socket, string? requestedConnectionId, CancellationToken connectionLifetime, out AgentConnection connection)
     {
-        connection = new AgentConnection(deviceId, socket, NormalizeConnectionId(requestedConnectionId), connectionLifetime);
+        connection = new AgentConnection(
+            deviceId,
+            socket,
+            NormalizeConnectionId(requestedConnectionId),
+            connectionLifetime,
+            _maxPendingRequestsPerAgent,
+            _logger);
 
         while (true)
         {
@@ -207,7 +215,7 @@ public sealed class AgentRegistry
     public RelayRegistrySnapshot Snapshot(string deviceId)
     {
         if (!_agents.TryGetValue(deviceId, out var session))
-            return new RelayRegistrySnapshot(_agents.Count, null, null, null, null, null, null);
+            return new RelayRegistrySnapshot(_agents.Count, null, null, null, null, null, null, null, null);
 
         lock (session.Gate)
         {
@@ -218,7 +226,9 @@ public sealed class AgentRegistry
                 session.Connection?.Socket.State,
                 session.State,
                 session.LastDisconnectedAt,
-                session.ReconnectUntil);
+                session.ReconnectUntil,
+                session.Connection?.PendingRequestCount,
+                session.Connection?.PendingRequestCapacity);
         }
     }
 
@@ -254,7 +264,9 @@ public sealed record RelayRegistrySnapshot(
     WebSocketState? SocketState,
     AgentPresenceState? State,
     DateTimeOffset? LastDisconnectedAt,
-    DateTimeOffset? ReconnectUntil)
+    DateTimeOffset? ReconnectUntil,
+    int? PendingRequests,
+    int? PendingCapacity)
 {
     public bool IsReconnectGraceActive(DateTimeOffset now)
         => State == AgentPresenceState.Reconnecting && ReconnectUntil is not null && ReconnectUntil > now;
@@ -267,27 +279,50 @@ public sealed class AgentConnection : IDisposable
     private readonly ConcurrentDictionary<string, TaskCompletionSource<RelayResponse>> _pending = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly CancellationTokenSource _transportLifetime;
+    private readonly int _maxPendingRequests;
+    private readonly ILogger? _logger;
+    private int _admittedRequests;
     private int _disposed;
 
-    public AgentConnection(string deviceId, WebSocket socket, string connectionId, CancellationToken connectionLifetime = default)
+    public AgentConnection(
+        string deviceId,
+        WebSocket socket,
+        string connectionId,
+        CancellationToken connectionLifetime = default,
+        int maxPendingRequests = 32,
+        ILogger? logger = null)
     {
         DeviceId = deviceId;
         Socket = socket;
         ConnectionId = connectionId;
         ConnectedAt = DateTimeOffset.UtcNow;
         _transportLifetime = CancellationTokenSource.CreateLinkedTokenSource(connectionLifetime);
+        _maxPendingRequests = Math.Clamp(maxPendingRequests, 1, 4096);
+        _logger = logger;
     }
 
     public string DeviceId { get; }
     public WebSocket Socket { get; }
     public string ConnectionId { get; }
     public DateTimeOffset ConnectedAt { get; }
-    public int PendingRequestCount => _pending.Count;
+    public int PendingRequestCount => Volatile.Read(ref _admittedRequests);
+    public int PendingRequestCapacity => _maxPendingRequests;
 
     public async Task<RelayResponse> SendAsync(RelayRequest request, TimeSpan timeout, CancellationToken requestCancellation)
     {
+        var admitted = Interlocked.Increment(ref _admittedRequests);
+        if (admitted > _maxPendingRequests)
+        {
+            Interlocked.Decrement(ref _admittedRequests);
+            return BusyResponse(request);
+        }
+
         var completion = new TaskCompletionSource<RelayResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_pending.TryAdd(request.Id, completion)) throw new InvalidOperationException("Duplicate relay request id.");
+        if (!_pending.TryAdd(request.Id, completion))
+        {
+            Interlocked.Decrement(ref _admittedRequests);
+            throw new InvalidOperationException("Duplicate relay request id.");
+        }
 
         try
         {
@@ -319,7 +354,38 @@ public sealed class AgentConnection : IDisposable
         finally
         {
             _pending.TryRemove(request.Id, out _);
+            Interlocked.Decrement(ref _admittedRequests);
         }
+    }
+
+    private RelayResponse BusyResponse(RelayRequest request)
+    {
+        var pending = Math.Min(PendingRequestCount, _maxPendingRequests);
+        _logger?.LogWarning(
+            "Relay Agent backpressure rejected request: device={DeviceId}; connection={ConnectionId}; session={SessionId}; operation={OperationId}; relayRequestId={RelayRequestId}; pending={PendingRequests}; capacity={PendingCapacity}",
+            DeviceId,
+            ConnectionId,
+            request.SessionId,
+            request.OperationId ?? request.Id,
+            request.Id,
+            pending,
+            _maxPendingRequests);
+
+        var body = FormattableString.Invariant($"{{\"error\":\"agent_busy\",\"pending\":{pending},\"capacity\":{_maxPendingRequests},\"retryAfterSeconds\":1}}");
+        return new RelayResponse(
+            request.Id,
+            StatusCodes.Status429TooManyRequests,
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Content-Type"] = ["application/json"],
+                ["Retry-After"] = ["1"],
+                ["X-MateMCP-Backpressure"] = ["agent_busy"],
+                ["X-MateMCP-Agent-Pending"] = [pending.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+                ["X-MateMCP-Agent-Capacity"] = [_maxPendingRequests.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+                ["Mcp-Session-Id"] = [request.SessionId]
+            },
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(body)),
+            "agent_busy");
     }
 
     public bool Complete(RelayResponse response)
