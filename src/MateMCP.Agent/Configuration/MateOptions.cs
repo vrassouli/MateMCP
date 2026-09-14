@@ -15,9 +15,30 @@ public sealed class MateOptions
     public int ApprovalTimeoutSeconds { get; set; } = 120;
     public ApprovalRiskPolicyOptions ApprovalRiskPolicy { get; set; } = new();
     public SecondarySemanticAnalysisOptions SecondarySemanticAnalysis { get; set; } = new();
+    public ProactiveMemoryOptions ProactiveMemory { get; set; } = new();
     public InteractiveShellOptions InteractiveShell { get; set; } = new();
     public RelayOptions Relay { get; set; } = new();
     public List<ProjectOptions> Projects { get; set; } = [];
+}
+
+public enum ProactiveMemoryMode
+{
+    Off,
+    Suggested,
+    Automatic
+}
+
+public sealed class ProactiveMemoryOptions
+{
+    /// <summary>
+    /// Automatic is the default because only bounded, relevance-ranked durable context is surfaced.
+    /// Suggested emits a hint when relevant context exists without returning its content.
+    /// Off disables proactive lookup/injection; explicit memory tools remain available.
+    /// </summary>
+    public ProactiveMemoryMode Mode { get; set; } = ProactiveMemoryMode.Automatic;
+
+    public int MaxItems { get; set; } = 3;
+    public int MaxChars { get; set; } = 3_500;
 }
 
 public sealed class SecondarySemanticAnalysisOptions

@@ -24,7 +24,7 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         Destructive = true,
         Idempotent = false,
         OpenWorld = true)]
-    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. When relevant durable MateMCP Skills & Memory exists, a small bounded memoryContext is automatically included in the result so the AI does not need to remember to call memory_search first. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
+    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. When proactive Skills & Memory is enabled and relevant durable context exists, a small bounded memoryContext is automatically included in the result so the AI does not need to remember to call memory_search first. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
     public async Task<object> Exec(
         [Description("Shell/command-line command to run non-interactively.")] string command,
         [Description("Optional configured MateMCP project whose directory, shell policy, and project-scoped Skills & Memory should be used. Omit to run from the Agent user's home directory with relevant global durable context only.")] string? project = null,
@@ -82,7 +82,7 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         }
         var stdout = Limit(await stdoutTask); var stderr = Limit(await stderrTask);
         await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
-        var memoryContext = await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_exec", project, command, cancellationToken);
+        var memoryContext = await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_exec", project, command, options.Value.ProactiveMemory, cancellationToken);
         return new { exitCode = process.ExitCode, stdout, stderr, workingDirectory, project = hasProject ? project : null, memoryContext };
     }
 
