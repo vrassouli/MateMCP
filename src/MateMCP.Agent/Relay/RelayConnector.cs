@@ -6,9 +6,15 @@ using MateMCP.Agent.Security;
 
 namespace MateMCP.Agent.Relay;
 
-public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> options, AgentCredentialStore credentials, LocalAccessCredential localAccess, ILogger<RelayConnector> logger) : BackgroundService
+public sealed class RelayConnector(
+    IOptionsMonitor<Configuration.MateOptions> options,
+    AgentCredentialStore credentials,
+    LocalAccessCredential localAccess,
+    ILogger<RelayConnector> logger,
+    ILoggerFactory loggerFactory) : BackgroundService
 {
     private readonly HttpClient _http = new();
+    private readonly RelayOperationRegistry _operations = new(loggerFactory.CreateLogger<RelayOperationRegistry>());
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -130,7 +136,11 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
 
         await using var scheduler = new RelayRequestScheduler(
             maxConcurrency,
-            (request, workerToken) => ForwardAsync(request, current, workerToken),
+            (request, workerToken) => _operations.ExecuteAsync(
+                request,
+                executionToken => ForwardAsync(request, current, executionToken),
+                ct,
+                workerToken),
             async (response, sendToken) =>
             {
                 var payload = JsonSerializer.SerializeToUtf8Bytes(response);
@@ -194,10 +204,11 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
                 if (!scheduler.TryQueue(request))
                 {
                     logger.LogWarning(
-                        "Ignored duplicate or shutdown Relay request: device={DeviceId}; agentConnection={ConnectionId}; relayRequestId={RelayRequestId}; inFlight={InFlightCount}",
+                        "Ignored duplicate or shutdown Relay request: device={DeviceId}; agentConnection={ConnectionId}; relayRequestId={RelayRequestId}; operation={OperationId}; inFlight={InFlightCount}",
                         deviceId,
                         connectionId,
                         request.Id,
+                        request.OperationId ?? request.Id,
                         scheduler.InFlightCount);
                 }
             }
