@@ -1,4 +1,27 @@
+using System.Collections.Concurrent;
+
 namespace MateMCP.Agent.Security;
+
+/// <summary>
+/// Registration point for optional OS/shell/tool rule packs. Packs can be registered by an
+/// integration without modifying the central analyzer implementation.
+/// </summary>
+public static class ActionImpactAnalyzerPacks
+{
+    private static readonly ConcurrentDictionary<string, IActionImpactAnalyzerPack> Packs = new(StringComparer.Ordinal);
+
+    public static void Register(IActionImpactAnalyzerPack pack)
+    {
+        ArgumentNullException.ThrowIfNull(pack);
+        if (string.IsNullOrWhiteSpace(pack.Name)) throw new ArgumentException("Analyzer pack name is required.", nameof(pack));
+        Packs[pack.Name] = pack;
+    }
+
+    public static bool Unregister(string name) => Packs.TryRemove(name, out _);
+
+    public static IReadOnlyList<IActionImpactAnalyzerPack> Snapshot()
+        => Packs.Values.OrderByDescending(x => x.Priority).ThenBy(x => x.Name, StringComparer.Ordinal).ToArray();
+}
 
 /// <summary>
 /// Composes authoritative deterministic rules, read-only preflight, extension packs, and an
@@ -8,12 +31,12 @@ public sealed class ActionAnalysisService
 {
     private readonly IReadOnlyList<(IActionImpactAnalyzerPack Pack, IActionImpactAnalyzer Analyzer)> _extensions;
     private readonly ISecondarySemanticAnalyzer _semantic;
-    private readonly ILogger<ActionAnalysisService> _logger;
+    private readonly ILogger? _logger;
 
     public ActionAnalysisService(
         IEnumerable<IActionImpactAnalyzerPack> packs,
         ISecondarySemanticAnalyzer semantic,
-        ILogger<ActionAnalysisService> logger)
+        ILogger? logger = null)
     {
         _extensions = packs
             .OrderByDescending(x => x.Priority)
@@ -48,7 +71,7 @@ public sealed class ActionAnalysisService
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            _logger.LogInformation(ex, "Secondary semantic analyzer failed; deterministic assessment remains authoritative.");
+            _logger?.LogInformation(ex, "Secondary semantic analyzer failed; deterministic assessment remains authoritative.");
         }
 
         return signal is null ? assessment : ApplySemanticSignal(assessment, signal);
@@ -70,7 +93,7 @@ public sealed class ActionAnalysisService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Action analyzer extension {Pack}/{Analyzer} failed; falling back to built-in deterministic analysis.", pack.Name, analyzer.GetType().Name);
+                _logger?.LogWarning(ex, "Action analyzer extension {Pack}/{Analyzer} failed; falling back to built-in deterministic analysis.", pack.Name, analyzer.GetType().Name);
             }
         }
 
