@@ -172,7 +172,7 @@ namespace MateMCP.WindowsDesktopHelper
             {
                 Id=id, ParentId=parentId, Role=Role(Safe(() => current.ControlType, (ControlType)null)), Name=Null(Safe(() => current.Name, (string)null)),
                 AutomationId=Null(Safe(() => current.AutomationId, (string)null)), Protected=Safe(() => current.IsPassword, false), Enabled=Safe(() => current.IsEnabled, true),
-                Focused=Safe(() => current.HasKeyboardFocus, false), Bounds=Bounds(Safe(() => current.BoundingRectangle, Rect.Empty)), Actions=new List<string>()
+                Focused=IsFocused(element), Bounds=Bounds(Safe(() => current.BoundingRectangle, Rect.Empty)), Actions=new List<string>()
             };
             ValuePattern value; SelectionItemPattern selection; TogglePattern toggle; ExpandCollapsePattern expand;
             if (!item.Protected && TryPattern(element, ValuePattern.Pattern, out value)) item.Value=Null(Safe(() => value.Current.Value, (string)null));
@@ -193,6 +193,18 @@ namespace MateMCP.WindowsDesktopHelper
         { T value; if (TryPattern(e,p,out value)) return value; throw new InvalidOperationException("The selected " + info.Role + " does not expose the native '"+action+"' pattern."); }
         private static bool TryPattern<T>(AutomationElement e, AutomationPattern p, out T typed) where T:class
         { typed=null; try { object raw; if (!e.TryGetCurrentPattern(p,out raw) || !(raw is T)) return false; typed=(T)raw; return true; } catch { return false; } }
+        private static bool IsFocused(AutomationElement element)
+        {
+            if (Safe(() => element.Current.HasKeyboardFocus, false)) return true;
+            try
+            {
+                var focused = AutomationElement.FocusedElement;
+                var currentId = element.GetRuntimeId();
+                var focusedId = focused == null ? null : focused.GetRuntimeId();
+                return currentId != null && focusedId != null && currentId.SequenceEqual(focusedId);
+            }
+            catch { return false; }
+        }
         private static T Safe<T>(Func<T> getter, T fallback) { try { return getter(); } catch { return fallback; } }
         private static string ElementId(AutomationElement e,string fallback) { var id=Safe(()=>e.GetRuntimeId(),(int[])null); return id==null||id.Length==0?fallback:"uia:"+string.Join(".",id.Select(x=>x.ToString(CultureInfo.InvariantCulture))); }
         private static string Null(string value)=>string.IsNullOrWhiteSpace(value)?null:value;
