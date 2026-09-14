@@ -12,4 +12,5 @@ public sealed class RelayOptions
     public int RequestTimeoutSeconds { get; set; } = 120;
     public int AgentReconnectGraceSeconds { get; set; } = 20;
     public int MaxPendingRequestsPerAgent { get; set; } = 32;
+    public int ShutdownDrainSeconds { get; set; } = 15;
 }

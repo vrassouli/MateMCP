@@ -28,6 +28,51 @@ public sealed class AgentPresenceLeaseService(
         }
     }
 
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        var drainSeconds = Math.Clamp(_options.ShutdownDrainSeconds, 0, 120);
+        var drainingConnections = registry.BeginShutdownDrain();
+        var initialPending = registry.TotalPendingRequestCount;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(drainSeconds);
+
+        logger.LogWarning(
+            "Relay graceful shutdown drain started: connections={ConnectionCount}; pending={PendingRequests}; drainSeconds={DrainSeconds}",
+            drainingConnections,
+            initialPending,
+            drainSeconds);
+
+        try
+        {
+            while (registry.TotalPendingRequestCount > 0 && DateTimeOffset.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+            {
+                var remaining = deadline - DateTimeOffset.UtcNow;
+                var delay = remaining > TimeSpan.FromMilliseconds(100) ? TimeSpan.FromMilliseconds(100) : remaining;
+                if (delay <= TimeSpan.Zero) break;
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+
+        var remainingPending = registry.TotalPendingRequestCount;
+        var outcome = remainingPending == 0 ? "drained" : cancellationToken.IsCancellationRequested ? "host-timeout" : "drain-timeout";
+        logger.LogWarning(
+            "Relay graceful shutdown drain finished: outcome={Outcome}; initialPending={InitialPending}; remainingPending={RemainingPending}; drainSeconds={DrainSeconds}",
+            outcome,
+            initialPending,
+            remainingPending,
+            drainSeconds);
+
+        var disconnected = registry.AbortConnectionsForShutdown();
+        logger.LogWarning(
+            "Relay graceful shutdown disconnected Agent transports: connections={ConnectionCount}; remainingPending={RemainingPending}",
+            disconnected,
+            registry.TotalPendingRequestCount);
+
+        await base.StopAsync(CancellationToken.None);
+    }
+
     private async Task MarkAgentOfflineAsync(ExpiredAgentPresence presence, CancellationToken stoppingToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
