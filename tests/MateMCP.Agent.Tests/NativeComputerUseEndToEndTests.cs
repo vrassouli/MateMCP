@@ -10,6 +10,7 @@ public sealed class NativeComputerUseEndToEndTests
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("MATEMCP_NATIVE_E2E"), "1", StringComparison.Ordinal)) return;
         if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS()) return;
+        if (OperatingSystem.IsWindows()) await EnsureWindowsSemanticHelperAsync();
 
         using var app = await ControlledNativeApp.StartAsync();
         var vision = new DesktopVisionService();
@@ -68,6 +69,54 @@ public sealed class NativeComputerUseEndToEndTests
         await WaitForExitAsync(app.Process);
         var stale = await Assert.ThrowsAsync<InvalidOperationException>(() => semantic.SnapshotAsync(window.Id, 50));
         Assert.Contains("no longer available", stale.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task EnsureWindowsSemanticHelperAsync()
+    {
+        var destination = Path.Combine(AppContext.BaseDirectory, "MateMCP.WindowsDesktopHelper.exe");
+        if (File.Exists(destination)) return;
+
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        string? project = null;
+        while (current is not null)
+        {
+            var candidate = Path.Combine(current.FullName, "src", "MateMCP.WindowsDesktopHelper", "MateMCP.WindowsDesktopHelper.csproj");
+            if (File.Exists(candidate))
+            {
+                project = candidate;
+                break;
+            }
+            current = current.Parent;
+        }
+
+        if (project is null)
+            throw new InvalidOperationException("Could not locate MateMCP.WindowsDesktopHelper.csproj for the native Windows E2E field test.");
+
+        var build = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        build.ArgumentList.Add("build");
+        build.ArgumentList.Add(project);
+        build.ArgumentList.Add("-c");
+        build.ArgumentList.Add("Release");
+
+        using (var process = Process.Start(build) ?? throw new InvalidOperationException("Could not build the Windows semantic helper."))
+        {
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException("Could not build Windows semantic helper: " + await stderr + Environment.NewLine + await stdout);
+        }
+
+        var helperRoot = Path.GetDirectoryName(project)!;
+        var helper = Directory.EnumerateFiles(Path.Combine(helperRoot, "bin", "Release"), "MateMCP.WindowsDesktopHelper.exe", SearchOption.AllDirectories).FirstOrDefault()
+            ?? throw new InvalidOperationException("Windows semantic helper build succeeded but the executable was not found.");
+        File.Copy(helper, destination, overwrite: true);
     }
 
     private static async Task<DesktopWindowInfo> WaitForWindowAsync(DesktopVisionService vision, string title, int processId)
