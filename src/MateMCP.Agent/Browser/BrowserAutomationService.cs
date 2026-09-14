@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
+using System.Text;
 using System.Text.Json;
 
 namespace MateMCP.Agent.Browser;
@@ -213,6 +214,7 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         try
         {
             var cdp = RequireCdp();
+            await cdp.SendAsync("Page.bringToFront", new { }, cancellationToken);
             var held = new List<string>();
             try
             {
@@ -267,29 +269,100 @@ public sealed class BrowserAutomationService : IAsyncDisposable
     public async Task<BrowserScreenshot> ScreenshotAsync(bool fullPage = false, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
+        try { return await ScreenshotCoreAsync(fullPage, cancellationToken); }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<BrowserVisualState> CaptureVisualStateAsync(
+        BrowserViewport viewport,
+        int settleMs = 250,
+        int maxElements = 500,
+        bool fullPage = false,
+        bool disableAnimations = true,
+        IReadOnlyList<string>? maskCss = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(viewport);
+        settleMs = Math.Clamp(settleMs, 0, 5000);
+        maxElements = Math.Clamp(maxElements, 1, 1500);
+        var masks = maskCss ?? [];
+        await _gate.WaitAsync(cancellationToken);
         try
         {
             var cdp = RequireCdp();
-            var result = await cdp.SendAsync("Page.captureScreenshot", new
+            await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new
             {
-                format = "png",
-                fromSurface = true,
-                captureBeyondViewport = fullPage
+                width = Math.Clamp(viewport.Width, 200, 5000),
+                height = Math.Clamp(viewport.Height, 200, 5000),
+                deviceScaleFactor = Math.Clamp(viewport.DeviceScaleFactor, 0.5, 4),
+                mobile = false,
+                screenWidth = Math.Clamp(viewport.Width, 200, 5000),
+                screenHeight = Math.Clamp(viewport.Height, 200, 5000)
             }, cancellationToken);
-            if (!result.TryGetProperty("data", out var dataElement) || string.IsNullOrWhiteSpace(dataElement.GetString()))
-                throw new InvalidOperationException("Browser did not return screenshot data.");
-            var bytes = Convert.FromBase64String(dataElement.GetString()!);
-            if (bytes.Length > 16 * 1024 * 1024)
-                throw new InvalidOperationException("Browser screenshot exceeded the 16 MiB MateMCP limit.");
-            var status = await GetStatusCoreAsync(cancellationToken);
-            return new BrowserScreenshot(
-                bytes,
-                "image/png",
-                status.Url ?? string.Empty,
-                status.Title ?? string.Empty,
-                status.Viewport ?? new BrowserViewport(0, 0, 1));
+            _viewport = new BrowserViewport(
+                Math.Clamp(viewport.Width, 200, 5000),
+                Math.Clamp(viewport.Height, 200, 5000),
+                Math.Clamp(viewport.DeviceScaleFactor, 0.5, 4));
+
+            var styleId = "matemcp-visual-qa-" + Guid.NewGuid().ToString("n");
+            var css = new StringBuilder();
+            if (disableAnimations)
+                css.Append("*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important}");
+            foreach (var selector in masks)
+                css.Append(selector).Append("{visibility:hidden!important}");
+            if (css.Length > 0)
+            {
+                var script = $"(() => {{ const s=document.createElement('style'); s.id={JsonSerializer.Serialize(styleId)}; s.textContent={JsonSerializer.Serialize(css.ToString())}; (document.head||document.documentElement).appendChild(s); }})()";
+                await EvaluateStringAsync(script, cancellationToken);
+            }
+
+            try
+            {
+                await EvaluateStringAsync("(async()=>{if(document.fonts&&document.fonts.ready){try{await document.fonts.ready}catch{}}await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return 'stable'})()", cancellationToken);
+                if (settleMs > 0) await Task.Delay(settleMs, cancellationToken);
+                var snapshotJson = await EvaluateStringAsync(BuildSnapshotScript(maxElements), cancellationToken);
+                var snapshot = JsonSerializer.Deserialize<BrowserSnapshot>(snapshotJson, Json)
+                    ?? throw new InvalidOperationException("Browser returned an invalid DOM snapshot.");
+                var screenshot = await ScreenshotCoreAsync(fullPage, cancellationToken);
+                return new BrowserVisualState(screenshot, snapshot);
+            }
+            finally
+            {
+                if (css.Length > 0)
+                {
+                    try
+                    {
+                        var cleanup = $"document.getElementById({JsonSerializer.Serialize(styleId)})?.remove()";
+                        await EvaluateStringAsync(cleanup, CancellationToken.None);
+                    }
+                    catch { }
+                }
+            }
         }
         finally { _gate.Release(); }
+    }
+
+    private async Task<BrowserScreenshot> ScreenshotCoreAsync(bool fullPage, CancellationToken cancellationToken)
+    {
+        var cdp = RequireCdp();
+        var result = await cdp.SendAsync("Page.captureScreenshot", new
+        {
+            format = "png",
+            fromSurface = true,
+            captureBeyondViewport = fullPage
+        }, cancellationToken);
+        if (!result.TryGetProperty("data", out var dataElement) || string.IsNullOrWhiteSpace(dataElement.GetString()))
+            throw new InvalidOperationException("Browser did not return screenshot data.");
+        var bytes = Convert.FromBase64String(dataElement.GetString()!);
+        if (bytes.Length > 16 * 1024 * 1024)
+            throw new InvalidOperationException("Browser screenshot exceeded the 16 MiB MateMCP limit.");
+        var status = await GetStatusCoreAsync(cancellationToken);
+        return new BrowserScreenshot(
+            bytes,
+            "image/png",
+            status.Url ?? string.Empty,
+            status.Title ?? string.Empty,
+            status.Viewport ?? new BrowserViewport(0, 0, 1));
     }
 
     public async Task<BrowserDiagnostics> GetDiagnosticsAsync(
@@ -896,7 +969,7 @@ JSON.stringify((() => {
   const role = roleOf(el);
   const result = {ok:true,error:null,matchCount:count,role,name:nameOf(el)||null,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},checked:(role==='checkbox'||role==='radio')?!!el.checked:null};
   el.scrollIntoView({block:'center',inline:'center'});
-  if (action === 'click') { el.focus({preventScroll:true}); el.click(); return result; }
+  if (action === 'click') { el.focus({preventScroll:true}); el.click(); if (document.activeElement !== el) el.focus({preventScroll:true}); return result; }
   if (action === 'check') {
     if (role !== 'checkbox' && role !== 'radio') return {...result,ok:false,error:'Selected element is not a checkbox or radio control.'};
     const desired = text === 'true';

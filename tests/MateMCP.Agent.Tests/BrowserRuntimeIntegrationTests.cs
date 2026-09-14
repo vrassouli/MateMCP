@@ -26,7 +26,7 @@ public sealed class BrowserRuntimeIntegrationTests
 
         async Task RunFlowAsync()
         {
-            var browser = new BrowserAutomationService();
+            await using var browser = new BrowserAutomationService();
 
             Mark("open");
             var opened = await browser.OpenAsync(server.Url, channel);
@@ -43,10 +43,18 @@ public sealed class BrowserRuntimeIntegrationTests
             Assert.Contains(initial.Elements, element => element.Role == "heading" && element.Name == "Count 0");
 
             Mark("diagnostics");
-            await Task.Delay(100);
-            var diagnostics = await browser.GetDiagnosticsAsync(100, includeInfo: true, clear: true);
+            BrowserDiagnostics diagnostics = new([], false);
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                diagnostics = await browser.GetDiagnosticsAsync(100, includeInfo: true, clear: false);
+                var hasConsole = diagnostics.Entries.Any(entry => entry.Text.Contains("MateMCP diagnostic error", StringComparison.Ordinal));
+                var hasException = diagnostics.Entries.Any(entry => entry.Text.Contains("MateMCP page exception", StringComparison.Ordinal));
+                if (hasConsole && hasException) break;
+                await Task.Delay(100);
+            }
             Assert.Contains(diagnostics.Entries, entry => entry.Text.Contains("MateMCP diagnostic error", StringComparison.Ordinal));
             Assert.Contains(diagnostics.Entries, entry => entry.Text.Contains("MateMCP page exception", StringComparison.Ordinal));
+            _ = await browser.GetDiagnosticsAsync(100, includeInfo: true, clear: true);
 
             Mark("fill");
             var filled = await browser.FillAsync(new BrowserSelector(Role: "textbox", Name: "Name"), "MateMCP");
@@ -100,6 +108,26 @@ public sealed class BrowserRuntimeIntegrationTests
             Assert.Equal("image/png", screenshot.MimeType);
             Assert.True(screenshot.Bytes.Length > 8);
             Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, screenshot.Bytes[..4]);
+
+            Mark("visual QA before/after");
+            var visual = new BrowserVisualQaService(browser);
+            var visualBefore = await visual.CaptureAsync(new VisualCaptureOptions(Preset: "mobile", SettleMs: 50));
+            Assert.Equal(390, visualBefore.Metadata.Viewport.Width);
+            Assert.Equal(844, visualBefore.Metadata.Viewport.Height);
+            Assert.Equal(390, visualBefore.Metadata.ImageWidth);
+            Assert.Equal(844, visualBefore.Metadata.ImageHeight);
+            var identical = visual.Compare(visualBefore.Metadata.Id, visualBefore.Metadata.Id, tolerance: 0);
+            Assert.True(identical.Comparable);
+            Assert.Equal(0, identical.ChangedPixels);
+
+            await browser.ClickAsync(new BrowserSelector(Role: "button", Name: "Increment"));
+            var visualAfter = await visual.CaptureAsync(new VisualCaptureOptions(Preset: "mobile", SettleMs: 50));
+            var visualDiff = visual.Compare(visualBefore.Metadata.Id, visualAfter.Metadata.Id, tolerance: 8);
+            Assert.True(visualDiff.Comparable);
+            Assert.False(visualDiff.SizeMismatch);
+            Assert.True(visualDiff.ChangedPixels > 0);
+            Assert.NotEmpty(visualDiff.Regions);
+            Assert.Contains(visualAfter.Metadata.Snapshot.Elements, element => element.Role == "heading" && element.Name == "Count 2");
 
             Mark("history navigation");
             var secondUrl = server.Url + "second";
