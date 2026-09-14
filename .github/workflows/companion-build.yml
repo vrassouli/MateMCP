@@ -145,6 +145,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - uses: microsoft/setup-msbuild@v2
       - name: Verify PowerShell syntax
         shell: pwsh
         run: |
@@ -161,13 +162,17 @@ jobs:
         run: dotnet build src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore
       - name: Build Windows desktop helper
         run: dotnet build src/MateMCP.WindowsDesktopHelper/MateMCP.WindowsDesktopHelper.csproj -c Release
+      - name: Build Windows Graphics Capture helper
+        run: msbuild src/MateMCP.WindowsCaptureHelper/MateMCP.WindowsCaptureHelper.vcxproj /m /p:Configuration=Release /p:Platform=x64
       - name: Publish Agent
         if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r win-x64 --self-contained true -o package/agent-payload
-      - name: Stage Windows desktop helper
+      - name: Stage Windows desktop helpers
         if: github.event_name != 'pull_request'
         shell: pwsh
-        run: Copy-Item src/MateMCP.WindowsDesktopHelper/bin/Release/net48/MateMCP.WindowsDesktopHelper.exe package/agent-payload/MateMCP.WindowsDesktopHelper.exe
+        run: |
+          Copy-Item src/MateMCP.WindowsDesktopHelper/bin/Release/net48/MateMCP.WindowsDesktopHelper.exe package/agent-payload/MateMCP.WindowsDesktopHelper.exe
+          Copy-Item src/MateMCP.WindowsCaptureHelper/bin/x64/Release/MateMCP.WindowsCaptureHelper.exe package/agent-payload/MateMCP.WindowsCaptureHelper.exe
       - name: Publish Windows Companion
         if: github.event_name != 'pull_request'
         run: dotnet publish src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --self-contained true -p:WindowsPackageType=None -p:PublishReadyToRun=false --no-restore -o package/companion-payload
@@ -177,6 +182,7 @@ jobs:
         run: |
           if (-not (Test-Path package/agent-payload/MateMCP.Agent.exe)) { throw 'Agent publish output missing.' }
           if (-not (Test-Path package/agent-payload/MateMCP.WindowsDesktopHelper.exe)) { throw 'Windows desktop helper missing.' }
+          if (-not (Test-Path package/agent-payload/MateMCP.WindowsCaptureHelper.exe)) { throw 'Windows Graphics Capture helper missing.' }
           if (-not (Test-Path package/companion-payload/MateMCP.Agent.Companion.exe)) { throw 'Companion publish output missing.' }
           Copy-Item scripts/configure-agent-mode-windows.ps1 package/configure-agent-mode-windows.ps1
           Copy-Item scripts/install-windows.ps1 package/install-windows.ps1
@@ -195,6 +201,7 @@ jobs:
           $programs = [Environment]::GetFolderPath('Programs')
           if (-not (Test-Path (Join-Path $root 'MateMCP.Agent.exe'))) { throw 'Installed Agent missing.' }
           if (-not (Test-Path (Join-Path $root 'MateMCP.WindowsDesktopHelper.exe'))) { throw 'Installed Windows desktop helper missing.' }
+          if (-not (Test-Path (Join-Path $root 'MateMCP.WindowsCaptureHelper.exe'))) { throw 'Installed Windows Graphics Capture helper missing.' }
           if (-not (Test-Path (Join-Path $root 'configure-agent-mode-windows.ps1'))) { throw 'Agent mode configurator missing.' }
           if (-not (Test-Path (Join-Path $root 'Companion\MateMCP.Agent.Companion.exe'))) { throw 'Installed Companion missing.' }
           if (-not (Test-Path (Join-Path $root 'start-agent-hidden.vbs'))) { throw 'Hidden Agent launcher missing.' }
