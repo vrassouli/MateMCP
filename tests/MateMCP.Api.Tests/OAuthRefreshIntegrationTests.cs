@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 
@@ -24,29 +23,21 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
 
     private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), "matemcp-oauth-" + Guid.NewGuid().ToString("N"));
     private readonly Guid _ownerId = Guid.NewGuid();
+    private readonly Dictionary<string, string?> _originalEnvironment = new(StringComparer.Ordinal);
     private WebApplicationFactory<Program>? _factory;
     private HttpClient? _client;
 
     public async Task InitializeAsync()
     {
         Directory.CreateDirectory(_tempRoot);
+        SetEnvironment("MateMCP__PublicUrl", ApiUrl);
+        SetEnvironment("MateMCP__RelayUrl", RelayUrl);
+        SetEnvironment("MateMCP__DatabaseProvider", "sqlite");
+        SetEnvironment("ConnectionStrings__MateMCP", $"Data Source={Path.Combine(_tempRoot, "matemcp.db")}");
+        SetEnvironment("MateMCP__InternalApiKey", InternalKey);
+        SetEnvironment("MateMCP__KeyPath", Path.Combine(_tempRoot, "keys"));
 
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureAppConfiguration((_, configuration) =>
-            {
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["MateMCP:PublicUrl"] = ApiUrl,
-                    ["MateMCP:RelayUrl"] = RelayUrl,
-                    ["MateMCP:DatabaseProvider"] = "sqlite",
-                    ["ConnectionStrings:MateMCP"] = $"Data Source={Path.Combine(_tempRoot, "matemcp.db")}",
-                    ["MateMCP:InternalApiKey"] = InternalKey,
-                    ["MateMCP:KeyPath"] = Path.Combine(_tempRoot, "keys")
-                });
-            });
-        });
-
+        _factory = new WebApplicationFactory<Program>();
         _client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri(ApiUrl),
@@ -210,10 +201,17 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Contains(expectedResource, audiences);
     }
 
+    private void SetEnvironment(string key, string value)
+    {
+        _originalEnvironment[key] = Environment.GetEnvironmentVariable(key);
+        Environment.SetEnvironmentVariable(key, value);
+    }
+
     public async Task DisposeAsync()
     {
         _client?.Dispose();
         if (_factory is not null) await _factory.DisposeAsync();
+        foreach (var (key, value) in _originalEnvironment) Environment.SetEnvironmentVariable(key, value);
         if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
     }
 }
