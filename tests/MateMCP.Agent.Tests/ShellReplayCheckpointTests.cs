@@ -59,7 +59,7 @@ public sealed class ShellReplayCheckpointTests
 
         Assert.False(replay.ReplayGap);
         Assert.Equal(94, replay.FirstAvailableSequence);
-        Assert.Equal("yz", replay.Output);
+        Assert.Equal("wxyz", replay.Output);
         Assert.Equal(96, replay.AcknowledgedSequence);
     }
 
