@@ -28,11 +28,16 @@ public sealed class SemanticUiToolTests
     {
         var root = FindRepositoryRoot();
         var service = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Desktop", "SemanticUiService.cs"));
+        var runner = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Desktop", "WindowsSemanticUiHelper.cs"));
+        var helper = File.ReadAllText(Path.Combine(root, "src", "MateMCP.WindowsDesktopHelper", "Program.cs"));
         var tools = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Tools", "DesktopSemanticTools.cs"));
 
-        Assert.Contains("ElementFromPoint", service, StringComparison.Ordinal);
-        Assert.Contains("ProcessIdProperty", service, StringComparison.Ordinal);
-        Assert.Contains("resolved to a different process", service, StringComparison.Ordinal);
+        Assert.Contains("WindowsSemanticUiHelper", service, StringComparison.Ordinal);
+        Assert.Contains("SerializeAsync(process.StandardInput.BaseStream", runner, StringComparison.Ordinal);
+        Assert.Contains("TreeScope.Descendants", helper, StringComparison.Ordinal);
+        Assert.Contains("BoundingRectangle", helper, StringComparison.Ordinal);
+        Assert.Contains("GetWindowThreadProcessId", helper, StringComparison.Ordinal);
+        Assert.Contains("target-window ancestors", helper, StringComparison.Ordinal);
         Assert.Contains("OperatingSystem.IsWindows()", tools, StringComparison.Ordinal);
         Assert.Contains("_semantic.ClickAtAsync", tools, StringComparison.Ordinal);
     }
