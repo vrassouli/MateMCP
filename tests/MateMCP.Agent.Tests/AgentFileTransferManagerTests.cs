@@ -44,7 +44,7 @@ public sealed class AgentFileTransferManagerTests
             var started = manager.Start(root, "x.bin", null, bytes.Length, null, null);
 
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => manager.AppendChunkAsync(started.TransferId, 2, Convert.ToBase64String(bytes)));
-            Assert.Contains("Expected 0", ex.Message);
+            Assert.Contains("Expected next offset 0", ex.Message);
 
             await manager.AppendChunkAsync(started.TransferId, 0, Convert.ToBase64String(bytes));
             var completed = await manager.CompleteAsync(started.TransferId);
