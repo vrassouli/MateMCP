@@ -57,7 +57,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
             connection = null;
             session.StartReader();
             await Task.Delay(150, CancellationToken.None);
-            return session.Snapshot(0);
+            return session.Snapshot(0, acknowledge: false);
         }
         catch
         {
@@ -72,7 +72,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         ThrowIfDisposed();
         CleanupExpired();
         return _sessions.Values
-            .Select(session => session.Snapshot(0))
+            .Select(session => session.Snapshot(0, acknowledge: false))
             .OrderByDescending(snapshot => snapshot.LastTouched)
             .ToArray();
     }
@@ -81,7 +81,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
     {
         ThrowIfDisposed();
         CleanupExpired();
-        return Get(sessionId).Snapshot(Math.Max(0, offset));
+        return Get(sessionId).Snapshot(Math.Max(0, offset), acknowledge: true);
     }
 
     public async Task WriteAsync(string sessionId, string text, bool submit, CancellationToken ct)
@@ -206,6 +206,7 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         private readonly int _maxInputChars;
         private string _redactionTail = string.Empty;
         private int _trimmedChars;
+        private int _acknowledgedSequence;
         private bool _disposed;
         private bool _exited;
         private int? _exitCode;
@@ -241,15 +242,34 @@ public sealed class InteractiveShellSessionManager : IAsyncDisposable
         public void Touch() => LastTouched = DateTimeOffset.UtcNow;
         public void StartReader() => _ = Task.Run(ReadLoopAsync);
 
-        public ShellSessionSnapshot Snapshot(int absoluteOffset)
+        public ShellSessionSnapshot Snapshot(int absoluteOffset, bool acknowledge)
         {
             lock (_sync)
             {
-                var truncated = absoluteOffset < _trimmedChars;
-                var start = Math.Clamp(absoluteOffset - _trimmedChars, 0, _output.Length);
+                var firstAvailableSequence = _trimmedChars;
+                var nextSequence = _trimmedChars + _output.Length;
+                if (acknowledge)
+                    _acknowledgedSequence = Math.Max(_acknowledgedSequence, Math.Min(absoluteOffset, nextSequence));
+
+                var replayGap = absoluteOffset < firstAvailableSequence;
+                var start = Math.Clamp(absoluteOffset - firstAvailableSequence, 0, _output.Length);
                 var chunk = _output.ToString(start, _output.Length - start);
-                var nextOffset = _trimmedChars + _output.Length;
-                return new ShellSessionSnapshot(Id, _connection.Pid, chunk, nextOffset, truncated, _exited, _exitCode, WorkingDirectory, CreatedAt, LastTouched);
+                return new ShellSessionSnapshot(
+                    Id,
+                    _connection.Pid,
+                    chunk,
+                    nextSequence,
+                    replayGap,
+                    _exited,
+                    _exitCode,
+                    WorkingDirectory,
+                    CreatedAt,
+                    LastTouched,
+                    absoluteOffset,
+                    firstAvailableSequence,
+                    nextSequence,
+                    _acknowledgedSequence,
+                    replayGap);
             }
         }
 
@@ -372,4 +392,9 @@ public sealed record ShellSessionSnapshot(
     int? ExitCode,
     string WorkingDirectory,
     DateTimeOffset CreatedAt,
-    DateTimeOffset LastTouched);
+    DateTimeOffset LastTouched,
+    int RequestedSequence = 0,
+    int FirstAvailableSequence = 0,
+    int NextSequence = 0,
+    int AcknowledgedSequence = 0,
+    bool ReplayGap = false);
