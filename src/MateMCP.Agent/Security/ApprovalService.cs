@@ -94,6 +94,16 @@ public sealed class ApprovalService(
         var riskPolicy = ApprovalRiskPolicyEvaluator.Evaluate(assessment, Current.ApprovalRiskPolicy);
         var riskPolicyAudit = $":policy={riskPolicy.Behavior.ToString().ToLowerInvariant()}";
 
+        // Store a bounded/redacted copy of the proposed action plus the full structured assessment.
+        // Decision events remain separate for backwards-compatible audit timelines.
+        await audit.WriteApprovalAsync(
+            "approval.assessment",
+            $"{capability}:{target}",
+            summary,
+            $"analyzed{riskPolicyAudit}{assessmentAudit}",
+            assessment,
+            cancellationToken);
+
         if (riskPolicy.Behavior == ApprovalRiskBehavior.Deny)
         {
             await audit.WriteAsync("approval", $"{capability}:{target}", $"denied:risk-policy{riskPolicyAudit}{assessmentAudit}", cancellationToken);
