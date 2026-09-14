@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 
@@ -310,7 +312,9 @@ public sealed class AgentConnection : IDisposable
                 _sendLock.Release();
             }
 
-            return await completion.Task.WaitAsync(timeout, requestCancellation);
+            var response = await completion.Task.WaitAsync(timeout, requestCancellation);
+            response.Headers["Mcp-Session-Id"] = [request.SessionId];
+            return response;
         }
         finally
         {
@@ -345,7 +349,34 @@ public sealed class AgentTransportLostException : IOException
         : base($"Agent transport was lost for device '{deviceId}' connection '{connectionId}'.", innerException) { }
 }
 
-public sealed record RelayRequest(string Id, string Method, string Path, Dictionary<string, string[]> Headers, string? BodyBase64, string? OperationId = null);
+public sealed record RelayRequest(
+    string Id,
+    string Method,
+    string Path,
+    Dictionary<string, string[]> Headers,
+    string? BodyBase64,
+    string? OperationId = null)
+{
+    public string SessionId { get; init; } = ResolveSessionId(Headers);
+
+    private static string ResolveSessionId(Dictionary<string, string[]> headers)
+    {
+        if (headers.TryGetValue("Mcp-Session-Id", out var values))
+        {
+            var supplied = values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
+            if (!string.IsNullOrWhiteSpace(supplied))
+            {
+                if (supplied.Length <= 128 && supplied.All(ch => ch is >= (char)0x21 and <= (char)0x7e))
+                    return supplied;
+
+                return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(supplied))).ToLowerInvariant();
+            }
+        }
+
+        return Guid.NewGuid().ToString("N");
+    }
+}
+
 public sealed record RelayResponse(string Id, int StatusCode, Dictionary<string, string[]> Headers, string? BodyBase64, string? Error);
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(RelayRequest))]

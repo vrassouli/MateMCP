@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace MateMCP.Agent.Relay;
 
@@ -131,5 +133,36 @@ internal sealed class RelayRequestScheduler : IAsyncDisposable
     }
 }
 
-internal sealed record RelayRequest(string Id, string Method, string Path, Dictionary<string, string[]> Headers, string? BodyBase64, string? OperationId = null);
+internal sealed record RelayRequest(
+    string Id,
+    string Method,
+    string Path,
+    Dictionary<string, string[]> Headers,
+    string? BodyBase64,
+    string? OperationId = null)
+{
+    public string SessionId { get; init; } = ResolveSessionId(Headers);
+
+    private static string ResolveSessionId(Dictionary<string, string[]> headers)
+    {
+        if (headers.TryGetValue("Mcp-Session-Id", out var values))
+        {
+            var supplied = values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
+            if (!string.IsNullOrWhiteSpace(supplied))
+            {
+                if (supplied.Length <= 128 && supplied.All(ch => ch is >= (char)0x21 and <= (char)0x7e))
+                    return supplied;
+                return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(supplied))).ToLowerInvariant();
+            }
+        }
+
+        // Rolling-upgrade compatibility: older Relay versions do not send a logical
+        // SessionId. Keep those requests in one deterministic legacy session so a
+        // retried OperationId can still recover instead of being mistaken for a
+        // conflicting cross-session reuse. New Relays always send an explicit,
+        // per-client logical SessionId.
+        return "legacy";
+    }
+}
+
 internal sealed record RelayResponse(string Id, int StatusCode, Dictionary<string, string[]> Headers, string? BodyBase64, string? Error);

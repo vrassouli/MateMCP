@@ -57,12 +57,16 @@ internal sealed class RelayOperationRegistry
 
         if (created)
         {
-            _logger.LogInformation("Accepted Relay operation: operation={OperationId}; relayRequestId={RelayRequestId}", operationId, request.Id);
+            _logger.LogInformation(
+                "Accepted Relay operation: session={SessionId}; operation={OperationId}; relayRequestId={RelayRequestId}",
+                request.SessionId, operationId, request.Id);
             _ = RunAsync(entry, execute, executionCancellation);
         }
         else
         {
-            _logger.LogInformation("Deduplicated Relay operation: operation={OperationId}; relayRequestId={RelayRequestId}", operationId, request.Id);
+            _logger.LogInformation(
+                "Deduplicated Relay operation: session={SessionId}; operation={OperationId}; relayRequestId={RelayRequestId}",
+                request.SessionId, operationId, request.Id);
         }
 
         var response = await entry.Completion.Task.WaitAsync(waitCancellation);
@@ -114,7 +118,7 @@ internal sealed class RelayOperationRegistry
 
     private static string Fingerprint(RelayRequest request)
     {
-        var value = $"{request.Method}\n{request.Path}\n{request.BodyBase64 ?? string.Empty}";
+        var value = $"{request.SessionId}\n{request.Method}\n{request.Path}\n{request.BodyBase64 ?? string.Empty}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
 

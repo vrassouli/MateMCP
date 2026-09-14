@@ -136,11 +136,21 @@ public sealed class RelayConnector(
 
         await using var scheduler = new RelayRequestScheduler(
             maxConcurrency,
-            (request, workerToken) => _operations.ExecuteAsync(
-                request,
-                executionToken => ForwardAsync(request, current, executionToken),
-                ct,
-                workerToken),
+            (request, workerToken) =>
+            {
+                logger.LogInformation(
+                    "Relay request dispatched: device={DeviceId}; agentConnection={ConnectionId}; session={SessionId}; relayRequestId={RelayRequestId}; operation={OperationId}",
+                    deviceId,
+                    connectionId,
+                    request.SessionId,
+                    request.Id,
+                    request.OperationId ?? request.Id);
+                return _operations.ExecuteAsync(
+                    request,
+                    executionToken => ForwardAsync(request, current, executionToken),
+                    ct,
+                    workerToken);
+            },
             async (response, sendToken) =>
             {
                 var payload = JsonSerializer.SerializeToUtf8Bytes(response);
@@ -204,9 +214,10 @@ public sealed class RelayConnector(
                 if (!scheduler.TryQueue(request))
                 {
                     logger.LogWarning(
-                        "Ignored duplicate or shutdown Relay request: device={DeviceId}; agentConnection={ConnectionId}; relayRequestId={RelayRequestId}; operation={OperationId}; inFlight={InFlightCount}",
+                        "Ignored duplicate or shutdown Relay request: device={DeviceId}; agentConnection={ConnectionId}; session={SessionId}; relayRequestId={RelayRequestId}; operation={OperationId}; inFlight={InFlightCount}",
                         deviceId,
                         connectionId,
+                        request.SessionId,
                         request.Id,
                         request.OperationId ?? request.Id,
                         scheduler.InFlightCount);
@@ -273,6 +284,9 @@ public sealed class RelayConnector(
 
             foreach (var h in request.Headers)
             {
+                if (string.Equals(h.Key, "Mcp-Session-Id", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 if (message.Headers.TryAddWithoutValidation(h.Key, h.Value))
                     continue;
 
