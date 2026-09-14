@@ -163,6 +163,7 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
 
         var lower = command.ToLowerInvariant();
         var first = NormalizeExecutable(tokens[0]);
+        var (effectiveFirst, classificationLower) = FindEffectiveCommand(tokens, first, lower);
         var resources = ActionImpactAnalyzer.Resource(context);
         var scope = ActionImpactAnalyzer.Scope(context);
         var reasons = new List<string>();
@@ -191,7 +192,7 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
             if (risk == ActionRiskLevel.Unknown) risk = ActionRiskLevel.Medium;
         }
 
-        if (IsCatastrophic(lower, first))
+        if (IsCatastrophic(classificationLower, effectiveFirst))
         {
             risk = ActionRiskLevel.Critical;
             confidence = AssessmentConfidence.High;
@@ -203,7 +204,7 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
             reasons.Add("A known system-destructive command or argument pattern was detected.");
             saferAlternative = "Use a scoped target, dry-run/list operation, or verified backup before executing the destructive command.";
         }
-        else if (IsDeleteCommand(first, lower))
+        else if (IsDeleteCommand(effectiveFirst, classificationLower))
         {
             risk = ActionRiskLevel.High;
             confidence = AssessmentConfidence.High;
@@ -213,12 +214,12 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
             persistence = true;
             reversible = ActionReversibility.Unknown;
             reasons.Add("A filesystem delete/remove command was detected.");
-            if (HasAny(lower, " -r", " -rf", " -fr", "-recurse", " /s", " /q", " -force", "*")) reasons.Add("Recursive, force, quiet, or wildcard behavior broadens the deletion scope.");
+            if (HasAny(classificationLower, " -r", " -rf", " -fr", "-recurse", " /s", " /q", " -force", "*")) reasons.Add("Recursive, force, quiet, or wildcard behavior broadens the deletion scope.");
             saferAlternative = "List the exact targets first and prefer a reversible trash/backup workflow where possible.";
         }
-        else if (IsDestructiveGit(lower))
+        else if (IsDestructiveGit(classificationLower))
         {
-            risk = lower.Contains("push", StringComparison.Ordinal) && HasAny(lower, "--force", " -f") ? ActionRiskLevel.Critical : ActionRiskLevel.High;
+            risk = classificationLower.Contains("push", StringComparison.Ordinal) && HasAny(classificationLower, "--force", " -f") ? ActionRiskLevel.Critical : ActionRiskLevel.High;
             confidence = AssessmentConfidence.High;
             category = "git-mutation";
             effect = risk == ActionRiskLevel.Critical
@@ -226,14 +227,14 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
                 : "May discard or overwrite local Git working-tree/index/history state.";
             destructive = true;
             persistence = true;
-            network |= lower.Contains("push", StringComparison.Ordinal);
+            network |= classificationLower.Contains("push", StringComparison.Ordinal);
             reversible = ActionReversibility.Unknown;
             reasons.Add("A known destructive Git operation was detected.");
             saferAlternative = "Inspect `git status`/`git diff` and create a backup branch or stash before destructive history/worktree changes.";
         }
-        else if (IsPackageMutation(first, lower))
+        else if (IsPackageMutation(effectiveFirst, classificationLower))
         {
-            risk = ActionRiskLevel.Medium;
+            risk = Max(risk, ActionRiskLevel.Medium);
             confidence = AssessmentConfidence.High;
             category = "package-mutation";
             effect = "Installs, removes, or changes software packages and may execute package lifecycle scripts.";
@@ -242,29 +243,29 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
             reversible = ActionReversibility.Partial;
             reasons.Add("A package-manager mutation was detected.");
         }
-        else if (IsSystemMutation(first, lower))
+        else if (IsSystemMutation(effectiveFirst, classificationLower))
         {
             risk = ActionRiskLevel.High;
             confidence = AssessmentConfidence.High;
             category = "system-configuration";
             effect = "Changes service, firewall, registry, permission, or other system configuration.";
             persistence = true;
-            network |= lower.Contains("firewall", StringComparison.Ordinal) || first is "netsh" or "ufw";
+            network |= classificationLower.Contains("firewall", StringComparison.Ordinal) || effectiveFirst is "netsh" or "ufw";
             reversible = ActionReversibility.Partial;
             reasons.Add("A known system-configuration mutation was detected.");
         }
-        else if (IsReadOnly(first, lower) && !ContainsMutationRedirection(tokens))
+        else if (IsReadOnly(effectiveFirst, classificationLower) && !ContainsMutationRedirection(tokens))
         {
-            risk = ActionRiskLevel.Low;
+            risk = risk == ActionRiskLevel.Unknown ? ActionRiskLevel.Low : risk;
             confidence = AssessmentConfidence.High;
             category = "read";
             effect = "Reads or inspects local state without an expected persistent mutation.";
             reversible = ActionReversibility.Yes;
             reasons.Add("The command matches a known read/inspection operation and no output redirection was detected.");
         }
-        else if (LooksNetworkRelated(lower))
+        else if (LooksNetworkRelated(classificationLower))
         {
-            risk = ActionRiskLevel.Medium;
+            risk = Max(risk, ActionRiskLevel.Medium);
             confidence = AssessmentConfidence.Medium;
             category = "network";
             effect = "Communicates with a remote endpoint or may transfer data outside the local machine.";
@@ -358,6 +359,25 @@ internal sealed class ShellActionImpactAnalyzer : IActionImpactAnalyzer
     private static bool ContainsShellControlOperator(IReadOnlyList<string> tokens) => tokens.Any(x => x is ";" or "|" or "||" or "&&" or ">" or ">>" or "<" or "<<" or "$(" or "`");
     private static bool ContainsMutationRedirection(IReadOnlyList<string> tokens) => tokens.Any(x => x is ">" or ">>");
     private static bool ContainsWord(IEnumerable<string> tokens, string value) => tokens.Any(x => string.Equals(NormalizeExecutable(x), value, StringComparison.Ordinal));
+
+    private static (string Executable, string LowerCommand) FindEffectiveCommand(IReadOnlyList<string> tokens, string first, string originalLower)
+    {
+        if (first != "sudo") return (first, originalLower);
+
+        for (var i = 1; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token.StartsWith('-', StringComparison.Ordinal))
+            {
+                if ((token is "-u" or "-g" or "-h" or "-p" or "-r" or "-t" or "-c") && i + 1 < tokens.Count) i++;
+                continue;
+            }
+
+            return (NormalizeExecutable(token), string.Join(' ', tokens.Skip(i)).ToLowerInvariant());
+        }
+
+        return (first, originalLower);
+    }
 
     private static string NormalizeExecutable(string value)
     {
