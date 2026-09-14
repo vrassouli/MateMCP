@@ -36,6 +36,18 @@ public sealed class AgentFileTransferManager : IDisposable
         return new TransferStarted(id, project, fileName, mimeType, size, sha256, finalPath, MaxChunkBytes, IncompleteTtl);
     }
 
+    public async Task<TransferStatus> GetStatusAsync(string transferId, CancellationToken cancellationToken = default)
+    {
+        var state = Get(transferId);
+        await state.Gate.WaitAsync(cancellationToken);
+        try
+        {
+            state.LastTouchedUtc = DateTimeOffset.UtcNow;
+            return Status(state);
+        }
+        finally { state.Gate.Release(); }
+    }
+
     public async Task<TransferProgress> AppendChunkAsync(string transferId, long offset, string base64Data, CancellationToken cancellationToken = default)
     {
         var state = Get(transferId);
@@ -44,13 +56,30 @@ public sealed class AgentFileTransferManager : IDisposable
         catch (FormatException ex) { throw new InvalidOperationException("Chunk data is not valid base64.", ex); }
         if (chunk.Length == 0) throw new InvalidOperationException("Chunk is empty.");
         if (chunk.Length > MaxChunkBytes) throw new InvalidOperationException($"Chunk exceeds the {MaxChunkBytes}-byte limit.");
+        if (offset < 0) throw new InvalidOperationException("Chunk offset cannot be negative.");
 
         await state.Gate.WaitAsync(cancellationToken);
         try
         {
             EnsureWritable(state);
-            if (offset != state.BytesWritten) throw new InvalidOperationException($"Unexpected chunk offset. Expected {state.BytesWritten}, received {offset}.");
-            if (state.BytesWritten + chunk.LongLength > state.ExpectedSize) throw new InvalidOperationException("Chunk would exceed the declared file size.");
+            if (offset > state.BytesWritten)
+                throw new InvalidOperationException($"Chunk offset gap. Expected next offset {state.BytesWritten}, received {offset}.");
+
+            if (offset < state.BytesWritten)
+            {
+                var endOffset = checked(offset + chunk.LongLength);
+                if (endOffset > state.BytesWritten)
+                    throw new InvalidOperationException($"Chunk replay overlaps the uncommitted boundary. Committed offset is {state.BytesWritten}; replay range is {offset}..{endOffset}.");
+
+                if (!await ExistingBytesMatchAsync(state.PartialPath, offset, chunk, cancellationToken))
+                    throw new InvalidOperationException($"Chunk replay conflicts with already committed bytes at offset {offset}.");
+
+                state.LastTouchedUtc = DateTimeOffset.UtcNow;
+                return new TransferProgress(state.Id, state.BytesWritten, state.ExpectedSize, state.BytesWritten == state.ExpectedSize, Replayed: true);
+            }
+
+            if (state.BytesWritten + chunk.LongLength > state.ExpectedSize)
+                throw new InvalidOperationException("Chunk would exceed the declared file size.");
 
             await using var stream = new FileStream(state.PartialPath, FileMode.Open, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
             stream.Position = state.BytesWritten;
@@ -58,7 +87,7 @@ public sealed class AgentFileTransferManager : IDisposable
             await stream.FlushAsync(cancellationToken);
             state.BytesWritten += chunk.LongLength;
             state.LastTouchedUtc = DateTimeOffset.UtcNow;
-            return new TransferProgress(state.Id, state.BytesWritten, state.ExpectedSize, state.BytesWritten == state.ExpectedSize);
+            return new TransferProgress(state.Id, state.BytesWritten, state.ExpectedSize, state.BytesWritten == state.ExpectedSize, Replayed: false);
         }
         finally { state.Gate.Release(); }
     }
@@ -69,8 +98,15 @@ public sealed class AgentFileTransferManager : IDisposable
         await state.Gate.WaitAsync(cancellationToken);
         try
         {
+            if (state.Completion is not null)
+            {
+                state.LastTouchedUtc = DateTimeOffset.UtcNow;
+                return state.Completion;
+            }
+
             EnsureWritable(state);
-            if (state.BytesWritten != state.ExpectedSize) throw new InvalidOperationException($"Transfer is incomplete: received {state.BytesWritten} of {state.ExpectedSize} bytes.");
+            if (state.BytesWritten != state.ExpectedSize)
+                throw new InvalidOperationException($"Transfer is incomplete: received {state.BytesWritten} of {state.ExpectedSize} bytes.");
 
             string actualSha256;
             await using (var stream = new FileStream(state.PartialPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
@@ -84,7 +120,8 @@ public sealed class AgentFileTransferManager : IDisposable
             File.Move(state.PartialPath, state.FinalPath, overwrite: false);
             state.Completed = true;
             state.LastTouchedUtc = DateTimeOffset.UtcNow;
-            return new TransferCompleted(state.Id, state.Project, state.FileName, state.MimeType, state.ExpectedSize, actualSha256, state.FinalPath, CompletedTtl);
+            state.Completion = new TransferCompleted(state.Id, state.Project, state.FileName, state.MimeType, state.ExpectedSize, actualSha256, state.FinalPath, CompletedTtl);
+            return state.Completion;
         }
         finally { state.Gate.Release(); }
     }
@@ -136,6 +173,24 @@ public sealed class AgentFileTransferManager : IDisposable
         if (string.IsNullOrWhiteSpace(transferId) || !_transfers.TryGetValue(transferId, out var state))
             throw new KeyNotFoundException("Transfer was not found or has expired.");
         return state;
+    }
+
+    private static TransferStatus Status(TransferState state)
+        => new(state.Id, state.BytesWritten, state.ExpectedSize, state.BytesWritten == state.ExpectedSize, state.Completed, state.LastTouchedUtc);
+
+    private static async Task<bool> ExistingBytesMatchAsync(string path, long offset, byte[] expected, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.RandomAccess);
+        stream.Position = offset;
+        var actual = new byte[expected.Length];
+        var read = 0;
+        while (read < actual.Length)
+        {
+            var count = await stream.ReadAsync(actual.AsMemory(read), cancellationToken);
+            if (count == 0) return false;
+            read += count;
+        }
+        return actual.AsSpan().SequenceEqual(expected);
     }
 
     private static void EnsureWritable(TransferState state)
@@ -190,11 +245,13 @@ public sealed class AgentFileTransferManager : IDisposable
         public string FinalPath { get; } = finalPath;
         public long BytesWritten { get; set; }
         public bool Completed { get; set; }
+        public TransferCompleted? Completion { get; set; }
         public DateTimeOffset LastTouchedUtc { get; set; } = DateTimeOffset.UtcNow;
         public SemaphoreSlim Gate { get; } = new(1, 1);
     }
 }
 
 public sealed record TransferStarted(string TransferId, string? Project, string FileName, string? MimeType, long Size, string? ExpectedSha256, string RemotePath, int MaxChunkBytes, TimeSpan IncompleteTtl);
-public sealed record TransferProgress(string TransferId, long BytesReceived, long ExpectedSize, bool ReadyToComplete);
+public sealed record TransferProgress(string TransferId, long BytesReceived, long ExpectedSize, bool ReadyToComplete, bool Replayed = false);
+public sealed record TransferStatus(string TransferId, long CommittedOffset, long ExpectedSize, bool ReadyToComplete, bool Completed, DateTimeOffset LastTouchedUtc);
 public sealed record TransferCompleted(string TransferId, string? Project, string FileName, string? MimeType, long Size, string Sha256, string RemotePath, TimeSpan CleanupAfter);
