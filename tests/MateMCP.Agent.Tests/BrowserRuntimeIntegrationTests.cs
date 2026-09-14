@@ -26,7 +26,7 @@ public sealed class BrowserRuntimeIntegrationTests
 
         async Task RunFlowAsync()
         {
-            var browser = new BrowserAutomationService();
+            await using var browser = new BrowserAutomationService();
 
             Mark("open");
             var opened = await browser.OpenAsync(server.Url, channel);
@@ -100,6 +100,26 @@ public sealed class BrowserRuntimeIntegrationTests
             Assert.Equal("image/png", screenshot.MimeType);
             Assert.True(screenshot.Bytes.Length > 8);
             Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, screenshot.Bytes[..4]);
+
+            Mark("visual QA before/after");
+            var visual = new BrowserVisualQaService(browser);
+            var visualBefore = await visual.CaptureAsync(new VisualCaptureOptions(Preset: "mobile", SettleMs: 50));
+            Assert.Equal(390, visualBefore.Metadata.Viewport.Width);
+            Assert.Equal(844, visualBefore.Metadata.Viewport.Height);
+            Assert.Equal(390, visualBefore.Metadata.ImageWidth);
+            Assert.Equal(844, visualBefore.Metadata.ImageHeight);
+            var identical = visual.Compare(visualBefore.Metadata.Id, visualBefore.Metadata.Id, tolerance: 0);
+            Assert.True(identical.Comparable);
+            Assert.Equal(0, identical.ChangedPixels);
+
+            await browser.ClickAsync(new BrowserSelector(Role: "button", Name: "Increment"));
+            var visualAfter = await visual.CaptureAsync(new VisualCaptureOptions(Preset: "mobile", SettleMs: 50));
+            var visualDiff = visual.Compare(visualBefore.Metadata.Id, visualAfter.Metadata.Id, tolerance: 8);
+            Assert.True(visualDiff.Comparable);
+            Assert.False(visualDiff.SizeMismatch);
+            Assert.True(visualDiff.ChangedPixels > 0);
+            Assert.NotEmpty(visualDiff.Regions);
+            Assert.Contains(visualAfter.Metadata.Snapshot.Elements, element => element.Role == "heading" && element.Name == "Count 2");
 
             Mark("history navigation");
             var secondUrl = server.Url + "second";

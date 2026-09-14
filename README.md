@@ -70,6 +70,8 @@ Windows ARM64 continues to receive the Agent-only package through the same boots
 
 The supported Agent capability matrix and the checklist for keeping platforms aligned are documented in [`docs/agent-feature-parity.md`](docs/agent-feature-parity.md).
 
+Browser-based responsive visual regression workflows are documented in [`docs/browser-visual-qa.md`](docs/browser-visual-qa.md).
+
 ## API / Control Plane
 
 For the usual single-server deployment, install the API and Relay together:
