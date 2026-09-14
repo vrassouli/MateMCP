@@ -137,19 +137,19 @@ jobs:
       - name: Build Windows desktop helper
         run: dotnet build src/MateMCP.WindowsDesktopHelper/MateMCP.WindowsDesktopHelper.csproj -c Release
       - name: Build Windows Graphics Capture helper
+        if: matrix.rid == 'win-x64'
         shell: pwsh
-        run: |
-          $platform = if ('${{ matrix.rid }}' -eq 'win-arm64') { 'ARM64' } else { 'x64' }
-          msbuild src/MateMCP.WindowsCaptureHelper/MateMCP.WindowsCaptureHelper.vcxproj /m /p:Configuration=Release /p:Platform=$platform
+        run: msbuild src/MateMCP.WindowsCaptureHelper/MateMCP.WindowsCaptureHelper.vcxproj /m /p:Configuration=Release /p:Platform=x64
       - name: Publish self-contained agent
         shell: pwsh
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
-      - name: Stage Windows desktop helpers
+      - name: Stage Windows desktop helper
         shell: pwsh
-        run: |
-          $platform = if ('${{ matrix.rid }}' -eq 'win-arm64') { 'ARM64' } else { 'x64' }
-          Copy-Item src/MateMCP.WindowsDesktopHelper/bin/Release/net48/MateMCP.WindowsDesktopHelper.exe package/payload/MateMCP.WindowsDesktopHelper.exe
-          Copy-Item "src/MateMCP.WindowsCaptureHelper/bin/$platform/Release/MateMCP.WindowsCaptureHelper.exe" package/payload/MateMCP.WindowsCaptureHelper.exe
+        run: Copy-Item src/MateMCP.WindowsDesktopHelper/bin/Release/net48/MateMCP.WindowsDesktopHelper.exe package/payload/MateMCP.WindowsDesktopHelper.exe
+      - name: Stage Windows Graphics Capture helper
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: Copy-Item src/MateMCP.WindowsCaptureHelper/bin/x64/Release/MateMCP.WindowsCaptureHelper.exe package/payload/MateMCP.WindowsCaptureHelper.exe
       - name: Smoke test packaged local management surface
         if: matrix.rid == 'win-x64'
         shell: pwsh
