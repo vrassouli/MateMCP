@@ -1,3 +1,6 @@
+using System.Text.RegularExpressions;
+using MateMCP.Agent.Diagnostics;
+
 namespace MateMCP.Agent.Security;
 
 public enum ActionRiskLevel
@@ -49,6 +52,10 @@ public sealed record ActionImpactAssessment(
     string? SaferAlternative = null,
     string? Preview = null)
 {
+    private static readonly Regex SensitiveArgumentPattern = new(
+        "(?i)((?:--?|/)(?:password|passwd|token|access[-_]?token|refresh[-_]?token|api[-_]?key|client[-_]?secret|secret)\\s+)(?:\"[^\"]*\"|'[^']*'|\\S+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public string RiskLabel => Risk.ToString();
     public string ConfidenceLabel => Confidence.ToString();
     public string ReversibilityLabel => Reversible.ToString();
@@ -60,7 +67,14 @@ public sealed record ActionImpactAssessment(
     {
         var reasons = Reasons.Count == 0 ? "No additional deterministic reasons." : string.Join("; ", Reasons.Take(4).Select(x => Bound(x, 180)));
         var resources = AffectedResources.Count == 0 ? "unspecified" : string.Join(", ", AffectedResources.Take(4).Select(x => Bound(x, 120)));
-        return $"{Bound(originalSummary, 1200)}\nRisk: {RiskLabel} ({ConfidenceLabel} confidence)\nExpected effect: {Bound(Effect, 500)}\nReversibility: {ReversibilityLabel}\nAffected: {resources}\nWhy: {reasons}";
+        var safeSummary = RedactRemoteSummary(originalSummary);
+        return $"{Bound(safeSummary, 1200)}\nRisk: {RiskLabel} ({ConfidenceLabel} confidence)\nExpected effect: {Bound(Effect, 500)}\nReversibility: {ReversibilityLabel}\nAffected: {resources}\nWhy: {reasons}";
+    }
+
+    internal static string RedactRemoteSummary(string value)
+    {
+        var redacted = AgentLogRedactor.Redact(value);
+        return SensitiveArgumentPattern.Replace(redacted, "$1[REDACTED]");
     }
 
     private static string Bound(string? value, int max)
