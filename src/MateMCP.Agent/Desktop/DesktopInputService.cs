@@ -211,7 +211,38 @@ public sealed class DesktopInputService
                 throw new ArgumentException("Invalid Windows window id.", nameof(id));
             var window = new IntPtr(raw);
             if (IsIconic(window)) _ = ShowWindow(window, SwRestore);
-            if (!SetForegroundWindow(window)) throw new InvalidOperationException("Windows could not activate the selected window. The OS may be preventing foreground activation.");
+            if (GetForegroundWindow() == window) return;
+
+            var currentThread = GetCurrentThreadId();
+            var targetThread = GetWindowThreadProcessId(window, out _);
+            var foregroundWindow = GetForegroundWindow();
+            var foregroundThread = foregroundWindow == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foregroundWindow, out _);
+            var attachedForeground = false;
+            var attachedTarget = false;
+
+            try
+            {
+                // Windows normally prevents a background process from stealing foreground activation.
+                // Temporarily attach the input queues involved so an explicitly-approved MateMCP
+                // window_focus can activate the requested target without synthesizing unrelated keys.
+                if (foregroundThread != 0 && foregroundThread != currentThread)
+                    attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
+                if (targetThread != 0 && targetThread != currentThread)
+                    attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+
+                _ = BringWindowToTop(window);
+                _ = SetForegroundWindow(window);
+                _ = SetActiveWindow(window);
+                _ = SetFocus(window);
+            }
+            finally
+            {
+                if (attachedTarget) _ = AttachThreadInput(currentThread, targetThread, false);
+                if (attachedForeground) _ = AttachThreadInput(currentThread, foregroundThread, false);
+            }
+
+            if (GetForegroundWindow() != window)
+                throw new InvalidOperationException("Windows could not activate the selected window after attaching the relevant input queues. The OS may be blocking foreground activation for this desktop/session.");
         }
 
         private static (uint Down, uint Up) MouseFlags(string button) => button switch
@@ -320,6 +351,29 @@ public sealed class DesktopInputService
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetForegroundWindow(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool AttachThreadInput(uint attachThreadId, uint attachToThreadId, [MarshalAs(UnmanagedType.Bool)] bool attach);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool BringWindowToTop(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetActiveWindow(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetFocus(IntPtr window);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
