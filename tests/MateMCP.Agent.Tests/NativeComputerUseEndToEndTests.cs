@@ -48,13 +48,8 @@ public sealed class NativeComputerUseEndToEndTests
             ?? afterKeyboard.Elements.FirstOrDefault(e => e.Name == "Point target")
             ?? throw new InvalidOperationException("Controlled native app point target was not exposed in the semantic snapshot.");
         var bounds = pointTarget.Bounds ?? throw new InvalidOperationException("Controlled native app point target has no bounds.");
-        var x = bounds.X + bounds.Width / 2;
-        var y = bounds.Y + bounds.Height / 2;
-        if (OperatingSystem.IsMacOS())
-        {
-            x -= window.X;
-            y -= window.Y;
-        }
+        var x = bounds.X + bounds.Width / 2 - window.X;
+        var y = bounds.Y + bounds.Height / 2 - window.Y;
 
         if (OperatingSystem.IsMacOS())
             await macSemantic.ClickAtAsync(window.Id, x, y);
