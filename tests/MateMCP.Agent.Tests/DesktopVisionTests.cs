@@ -24,6 +24,14 @@ public sealed class DesktopVisionTests
     public void Unknown_capture_target_is_rejected(string target)
         => Assert.Throws<ArgumentException>(() => DesktopVisionService.NormalizeTarget(target));
 
+    [Theory]
+    [InlineData(1512, 3024, 2)]
+    [InlineData(1920, 1920, 1)]
+    [InlineData(1280, 2560, 2)]
+    [InlineData(0, 3024, 1)]
+    public void Display_scale_uses_backing_pixels(double logicalWidth, double pixelWidth, double expected)
+        => Assert.Equal(expected, DesktopVisionService.ComputeScale(logicalWidth, pixelWidth));
+
     [Fact]
     public void Vision_tools_are_published_in_the_MCP_catalog()
     {
