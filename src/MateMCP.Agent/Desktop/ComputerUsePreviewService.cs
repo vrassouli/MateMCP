@@ -26,6 +26,7 @@ public sealed class ComputerUsePreviewService : IDisposable
     private readonly DesktopVisionService _vision = new();
     private readonly ComputerUseSessionManager _computerUse = ComputerUseSessionManager.Shared;
     private readonly MacScreenCaptureKitPreviewStream _macStream = new();
+    private readonly WindowsGraphicsCapturePreviewStream _windowsStream = new();
 
     private DesktopWindowInfo? _window;
     private double? _cursorX;
@@ -62,6 +63,7 @@ public sealed class ComputerUsePreviewService : IDisposable
         }
 
         if (OperatingSystem.IsMacOS()) _macStream.EnsureStarted(window.Id);
+        if (OperatingSystem.IsWindows()) _windowsStream.EnsureStarted(window.Id);
     }
 
     public async Task TrackWindowPointAsync(
@@ -87,6 +89,7 @@ public sealed class ComputerUsePreviewService : IDisposable
         }
 
         if (OperatingSystem.IsMacOS()) _macStream.EnsureStarted(window.Id);
+        if (OperatingSystem.IsWindows()) _windowsStream.EnsureStarted(window.Id);
     }
 
     internal static (double X, double Y) NormalizeCursor(DesktopWindowInfo window, UiRect bounds)
@@ -106,6 +109,7 @@ public sealed class ComputerUsePreviewService : IDisposable
         {
             var active = use.Active && !use.Blocked && _window is not null;
             if (!active && OperatingSystem.IsMacOS()) _macStream.Stop();
+            if (!active && OperatingSystem.IsWindows()) _windowsStream.Stop();
             return new ComputerUsePreviewState(
                 active,
                 use.Blocked,
@@ -116,8 +120,8 @@ public sealed class ComputerUsePreviewService : IDisposable
                 active ? _cursorX : null,
                 active ? _cursorY : null,
                 active ? _lastAction : null,
-                OperatingSystem.IsMacOS() ? _macStream.BackendName : "os-screenshot-fallback",
-                OperatingSystem.IsMacOS() ? _macStream.LastError : null,
+                OperatingSystem.IsMacOS() ? _macStream.BackendName : OperatingSystem.IsWindows() ? _windowsStream.BackendName : "os-screenshot-fallback",
+                OperatingSystem.IsMacOS() ? _macStream.LastError : OperatingSystem.IsWindows() ? _windowsStream.LastError : null,
                 _updatedAt,
                 _revision);
         }
@@ -137,6 +141,15 @@ public sealed class ComputerUsePreviewService : IDisposable
             if (native is not null) return native;
         }
 
+        if (OperatingSystem.IsWindows() && _windowsStream.Available)
+        {
+            var native = await _windowsStream.WaitForFrameAsync(
+                state.WindowId,
+                TimeSpan.FromMilliseconds(350),
+                cancellationToken);
+            if (native is not null) return native;
+        }
+
         try
         {
             return await _vision.CaptureAsync("window", state.WindowId, cancellationToken: cancellationToken);
@@ -147,5 +160,9 @@ public sealed class ComputerUsePreviewService : IDisposable
         }
     }
 
-    public void Dispose() => _macStream.Dispose();
+    public void Dispose()
+    {
+        _macStream.Dispose();
+        _windowsStream.Dispose();
+    }
 }
