@@ -15,5 +15,6 @@ services:
       Relay__InternalApiKey: ${MATEMCP_INTERNAL_API_KEY}
       Relay__MaxBodyBytes: ${MATEMCP_RELAY_MAX_BODY_BYTES:-4194304}
       Relay__RequestTimeoutSeconds: ${MATEMCP_RELAY_REQUEST_TIMEOUT_SECONDS:-120}
+      Relay__AgentReconnectGraceSeconds: ${MATEMCP_RELAY_AGENT_RECONNECT_GRACE_SECONDS:-20}
     ports:
       - "${MATEMCP_RELAY_BIND:-0.0.0.0}:${MATEMCP_RELAY_PORT:-8080}:8080"

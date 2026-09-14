@@ -65,8 +65,26 @@ public sealed class RelayConnector(IOptionsMonitor<Configuration.MateOptions> op
             }
 
             if (!stoppingToken.IsCancellationRequested)
-                await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+            {
+                var delay = ComputeReconnectDelay(reconnectAttempt, Random.Shared.NextDouble());
+                logger.LogInformation(
+                    "Relay reconnect backoff: device={DeviceId}; failureCount={FailureCount}; delayMs={DelayMs:F0}",
+                    current.Relay.DeviceId,
+                    reconnectAttempt,
+                    delay.TotalMilliseconds);
+                await Task.Delay(delay, stoppingToken);
+            }
         }
+    }
+
+    internal static TimeSpan ComputeReconnectDelay(int failureCount, double jitterUnit)
+    {
+        var normalizedFailures = Math.Max(1, failureCount);
+        var exponent = Math.Min(normalizedFailures - 1, 4);
+        var baseMilliseconds = Math.Min(8_000d, 500d * Math.Pow(2, exponent));
+        var normalizedJitter = Math.Clamp(jitterUnit, 0d, 1d);
+        var jitterFactor = 0.8d + (normalizedJitter * 0.4d);
+        return TimeSpan.FromMilliseconds(Math.Min(8_000d, baseMilliseconds * jitterFactor));
     }
 
     private async Task RunConnectionAsync(

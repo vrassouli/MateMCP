@@ -12,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection(RelayOptions.SectionName));
 builder.Services.AddSingleton<RelayInstanceIdentity>();
 builder.Services.AddSingleton<AgentRegistry>();
+builder.Services.AddHostedService<AgentPresenceLeaseService>();
 builder.Services.AddHttpClient("control-plane", client => client.BaseAddress = new Uri((builder.Configuration["Relay:ControlPlaneUrl"] ?? "https://api.matemcp.com").TrimEnd('/') + "/"));
 
 var options = builder.Configuration.GetSection(RelayOptions.SectionName).Get<RelayOptions>() ?? new RelayOptions();
@@ -195,10 +196,10 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
         }
 
         connection.Disconnect();
-        var removedCurrent = registry.Remove(deviceId, connection);
+        var enteredReconnectGrace = registry.Remove(deviceId, connection);
         var disconnectedAt = DateTimeOffset.UtcNow;
         logger.LogWarning(
-            "Agent relay WebSocket disconnected: device={DeviceId}; connection={ConnectionId}; connectedAt={ConnectedAt:O}; disconnectedAt={DisconnectedAt:O}; lifetimeMs={LifetimeMs:F0}; socketState={SocketState}; closeStatus={CloseStatus}; closeReason={CloseReason}; exceptionType={ExceptionType}; exceptionMessage={ExceptionMessage}; removedCurrent={RemovedCurrent}; relayInstance={RelayInstanceId}",
+            "Agent relay WebSocket disconnected: device={DeviceId}; connection={ConnectionId}; connectedAt={ConnectedAt:O}; disconnectedAt={DisconnectedAt:O}; lifetimeMs={LifetimeMs:F0}; socketState={SocketState}; closeStatus={CloseStatus}; closeReason={CloseReason}; exceptionType={ExceptionType}; exceptionMessage={ExceptionMessage}; enteredReconnectGrace={EnteredReconnectGrace}; relayInstance={RelayInstanceId}",
             deviceId,
             connection.ConnectionId,
             connection.ConnectedAt,
@@ -209,11 +210,9 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
             string.IsNullOrWhiteSpace(closeReason) ? McpRequestDiagnostics.SafeHeader(socket.CloseStatusDescription) : closeReason,
             disconnectException?.GetType().Name ?? "none",
             disconnectException?.Message ?? "none",
-            removedCurrent,
+            enteredReconnectGrace,
             relayInstance.InstanceId);
 
-        if (removedCurrent)
-            await MarkAgentOfflineAsync(clients, options, deviceId, disconnectedAt);
     }
 });
 
@@ -251,13 +250,37 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
 
     if (!registry.TryGet(deviceId, out var agent))
     {
+        var now = DateTimeOffset.UtcNow;
         var snapshot = registry.Snapshot(deviceId);
+        if (snapshot.IsReconnectGraceActive(now))
+        {
+            var remaining = snapshot.ReconnectUntil!.Value - now;
+            var retryAfterSeconds = Math.Clamp((int)Math.Ceiling(remaining.TotalSeconds), 1, 3);
+            context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            logger.LogWarning(
+                "Remote MCP agent_reconnecting {RequestId}: device={DeviceId}; relayInstance={RelayInstanceId}; registryCount={RegistryCount}; lastDisconnectedAt={LastDisconnectedAt:O}; reconnectUntil={ReconnectUntil:O}; retryAfterSeconds={RetryAfterSeconds}",
+                context.TraceIdentifier,
+                deviceId,
+                relayInstance.InstanceId,
+                snapshot.RegistryCount,
+                snapshot.LastDisconnectedAt,
+                snapshot.ReconnectUntil,
+                retryAfterSeconds);
+            return Results.Json(new
+            {
+                error = "agent_reconnecting",
+                retryAfterSeconds,
+                reconnectUntil = snapshot.ReconnectUntil
+            }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
         logger.LogWarning(
-            "Remote MCP device_offline {RequestId}: device={DeviceId}; relayInstance={RelayInstanceId}; registryCount={RegistryCount}; currentConnection={CurrentConnectionId}; currentSocketState={CurrentSocketState}",
+            "Remote MCP device_offline {RequestId}: device={DeviceId}; relayInstance={RelayInstanceId}; registryCount={RegistryCount}; presenceState={PresenceState}; currentConnection={CurrentConnectionId}; currentSocketState={CurrentSocketState}",
             context.TraceIdentifier,
             deviceId,
             relayInstance.InstanceId,
             snapshot.RegistryCount,
+            snapshot.State?.ToString() ?? "none",
             snapshot.CurrentConnectionId ?? "none",
             snapshot.SocketState?.ToString() ?? "none");
         return Results.NotFound(new { error = "device_offline" });
@@ -349,20 +372,6 @@ static async Task<bool> AuthenticateAgentAsync(IHttpClientFactory factory, Relay
     request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
     using var response = await client.SendAsync(request, ct);
     return response.IsSuccessStatusCode;
-}
-
-static async Task MarkAgentOfflineAsync(IHttpClientFactory factory, RelayOptions options, string agentId, DateTimeOffset lastSeenAt)
-{
-    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-    try
-    {
-        var client = factory.CreateClient("control-plane");
-        using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/offline") { Content = JsonContent.Create(new { agentId, lastSeenAt }) };
-        request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
-        using var response = await client.SendAsync(request, timeout.Token);
-    }
-    catch (OperationCanceledException) { }
-    catch (HttpRequestException) { }
 }
 
 static async Task RunAgentHeartbeatAsync(IHttpClientFactory factory, RelayOptions options, string agentId, string credential, CancellationToken ct)

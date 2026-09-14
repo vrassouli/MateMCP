@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using MateMCP.Relay;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace MateMCP.Relay.Tests;
 
@@ -24,6 +25,9 @@ public sealed class AgentRegistryConcurrencyTests
         Assert.Equal("22222222222222222222222222222222", current.ConnectionId);
         Assert.True(registry.Remove("device", second));
         Assert.False(registry.TryGet("device", out _));
+        var reconnecting = registry.Snapshot("device");
+        Assert.Equal(AgentPresenceState.Reconnecting, reconnecting.State);
+        Assert.True(reconnecting.ReconnectUntil > DateTimeOffset.UtcNow);
     }
 
     [Fact]
@@ -37,6 +41,72 @@ public sealed class AgentRegistryConcurrencyTests
         registry.TryRegister("device", secondSocket, null, CancellationToken.None, out var second);
 
         Assert.NotEqual(first.ConnectionId, second.ConnectionId);
+        Assert.True(registry.TryGet("device", out var current));
+        Assert.Same(second, current);
+    }
+
+
+    [Fact]
+    public void Reconnect_within_grace_rebinds_presence_without_offline_gap()
+    {
+        var registry = NewRegistry(graceSeconds: 20);
+        using var firstSocket = new TestWebSocket();
+        using var secondSocket = new TestWebSocket();
+
+        registry.TryRegister("device", firstSocket, "11111111111111111111111111111111", CancellationToken.None, out var first);
+        Assert.True(registry.Remove("device", first));
+
+        var reconnecting = registry.Snapshot("device");
+        Assert.Equal(AgentPresenceState.Reconnecting, reconnecting.State);
+        Assert.True(reconnecting.IsReconnectGraceActive(DateTimeOffset.UtcNow));
+        Assert.False(registry.TryGet("device", out _));
+
+        registry.TryRegister("device", secondSocket, "22222222222222222222222222222222", CancellationToken.None, out var second);
+
+        var online = registry.Snapshot("device");
+        Assert.Equal(AgentPresenceState.Online, online.State);
+        Assert.Null(online.ReconnectUntil);
+        Assert.Null(online.LastDisconnectedAt);
+        Assert.True(registry.TryGet("device", out var current));
+        Assert.Same(second, current);
+        Assert.Empty(registry.ExpireReconnects(DateTimeOffset.UtcNow.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void Expired_reconnect_lease_is_removed_once()
+    {
+        var registry = NewRegistry(graceSeconds: 1);
+        using var socket = new TestWebSocket();
+
+        registry.TryRegister("device", socket, null, CancellationToken.None, out var connection);
+        Assert.True(registry.Remove("device", connection));
+        var snapshot = registry.Snapshot("device");
+        Assert.NotNull(snapshot.ReconnectUntil);
+
+        Assert.Empty(registry.ExpireReconnects(snapshot.ReconnectUntil!.Value.AddTicks(-1)));
+        var expired = registry.ExpireReconnects(snapshot.ReconnectUntil.Value);
+
+        var item = Assert.Single(expired);
+        Assert.Equal("device", item.DeviceId);
+        Assert.False(registry.TryGet("device", out _));
+        Assert.Null(registry.Snapshot("device").State);
+        Assert.Empty(registry.ExpireReconnects(snapshot.ReconnectUntil.Value.AddSeconds(1)));
+    }
+
+    [Fact]
+    public void Stale_disconnect_after_rebind_cannot_move_replacement_into_reconnect_grace()
+    {
+        var registry = NewRegistry(graceSeconds: 20);
+        using var firstSocket = new TestWebSocket();
+        using var secondSocket = new TestWebSocket();
+
+        registry.TryRegister("device", firstSocket, null, CancellationToken.None, out var first);
+        registry.TryRegister("device", secondSocket, null, CancellationToken.None, out var second);
+
+        Assert.False(registry.Remove("device", first));
+        var snapshot = registry.Snapshot("device");
+        Assert.Equal(AgentPresenceState.Online, snapshot.State);
+        Assert.Null(snapshot.ReconnectUntil);
         Assert.True(registry.TryGet("device", out var current));
         Assert.Same(second, current);
     }
@@ -136,8 +206,11 @@ public sealed class AgentRegistryConcurrencyTests
         Assert.Equal(0, connection.PendingRequestCount);
         Assert.Equal(WebSocketState.Open, socket.State);
     }
-    private static AgentRegistry NewRegistry()
-        => new(NullLogger<AgentRegistry>.Instance, new RelayInstanceIdentity());
+    private static AgentRegistry NewRegistry(int graceSeconds = 20)
+        => new(
+            NullLogger<AgentRegistry>.Instance,
+            new RelayInstanceIdentity(),
+            Options.Create(new RelayOptions { AgentReconnectGraceSeconds = graceSeconds }));
 
     private static RelayRequest Request(string id) => new(id, "POST", "/mcp", new(), null);
     private static RelayResponse Response(string id) => new(id, 200, new(), null, null);
