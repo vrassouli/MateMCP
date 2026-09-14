@@ -45,7 +45,6 @@ public sealed class AgentRegistryConcurrencyTests
         Assert.Same(second, current);
     }
 
-
     [Fact]
     public void Reconnect_within_grace_rebinds_presence_without_offline_gap()
     {
@@ -153,7 +152,7 @@ public sealed class AgentRegistryConcurrencyTests
 
         transportLifetime.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => requestTask);
+        await Assert.ThrowsAsync<AgentTransportLostException>(() => requestTask);
         Assert.True(socket.FirstObservedSendToken.IsCancellationRequested);
     }
 
@@ -206,6 +205,7 @@ public sealed class AgentRegistryConcurrencyTests
         Assert.Equal(0, connection.PendingRequestCount);
         Assert.Equal(WebSocketState.Open, socket.State);
     }
+
     private static AgentRegistry NewRegistry(int graceSeconds = 20)
         => new(
             NullLogger<AgentRegistry>.Instance,
