@@ -19,7 +19,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalSer
         Destructive = false,
         Idempotent = false,
         OpenWorld = false)]
-    [Description("Starts a secure chunked file upload to this MateMCP Agent. Use this for a file supplied by the user in the active AI conversation. After approval, send base64 chunks with agent_file_upload_chunk, then call agent_file_upload_complete. If project is supplied, the temporary file is isolated under that writable project; otherwise it is stored in the Agent temporary area for shell use.")]
+    [Description("Starts a secure chunked file upload to this MateMCP Agent. Use this for a file supplied by the user in the active AI conversation. After approval, send base64 chunks with agent_file_upload_chunk, then call agent_file_upload_complete. If connectivity is interrupted, call agent_file_upload_status and resume from nextOffset. If project is supplied, the temporary file is isolated under that writable project; otherwise it is stored in the Agent temporary area for shell use.")]
     public async Task<object> Start(
         [Description("Original attachment file name.")] string fileName,
         [Description("Exact attachment size in bytes.")] long size,
@@ -87,23 +87,63 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalSer
     }
 
     [McpServerTool(
+        Name = "agent_file_upload_status",
+        Title = "Get attachment upload resume checkpoint",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false)]
+    [Description("Returns the currently committed byte offset for an attachment transfer. Use this after a reconnect or whenever a chunk response may have been lost, then resume agent_file_upload_chunk from nextOffset. Status also reports whether all bytes are present and whether the transfer has already been completed.")]
+    public async Task<object> Status(
+        [Description("Transfer id returned by agent_file_upload_start.")] string transferId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var status = await Transfers.GetStatusAsync(transferId, cancellationToken);
+            return new
+            {
+                status.TransferId,
+                status.CommittedOffset,
+                status.ExpectedSize,
+                status.ReadyToComplete,
+                status.Completed,
+                status.LastTouchedUtc,
+                nextOffset = status.CommittedOffset
+            };
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new McpException(ex.Message, ex);
+        }
+    }
+
+    [McpServerTool(
         Name = "agent_file_upload_chunk",
         Title = "Upload the next attachment chunk",
         ReadOnly = false,
         Destructive = false,
-        Idempotent = false,
+        Idempotent = true,
         OpenWorld = false)]
-    [Description("Appends the next base64-encoded chunk to an attachment transfer. Chunks must be sequential and no larger than maxChunkBytes returned by agent_file_upload_start. The Agent writes each chunk directly to disk instead of buffering the whole attachment in memory.")]
+    [Description("Commits a base64-encoded attachment chunk at the supplied byte offset. Normal chunks are sequential and no larger than maxChunkBytes. Retrying the exact same already-committed chunk is safe and returns replayed=true without writing duplicate bytes. If connectivity is interrupted, query agent_file_upload_status and continue from nextOffset.")]
     public async Task<object> UploadChunk(
         [Description("Transfer id returned by agent_file_upload_start.")] string transferId,
-        [Description("Zero-based byte offset of this chunk in the original file. Must equal the next expected offset.")] long offset,
+        [Description("Zero-based byte offset of this chunk in the original file. Normally use nextOffset from the previous chunk or status response.")] long offset,
         [Description("Base64-encoded raw file bytes for this chunk.")] string base64Data,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var progress = await Transfers.AppendChunkAsync(transferId, offset, base64Data, cancellationToken);
-            return new { progress.TransferId, progress.BytesReceived, progress.ExpectedSize, progress.ReadyToComplete, nextOffset = progress.BytesReceived };
+            return new
+            {
+                progress.TransferId,
+                progress.BytesReceived,
+                progress.ExpectedSize,
+                progress.ReadyToComplete,
+                progress.Replayed,
+                nextOffset = progress.BytesReceived
+            };
         }
         catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
@@ -117,9 +157,9 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalSer
         Title = "Complete and verify an attachment upload",
         ReadOnly = false,
         Destructive = false,
-        Idempotent = false,
+        Idempotent = true,
         OpenWorld = false)]
-    [Description("Completes a chunked attachment upload, verifies declared size and optional SHA-256, atomically publishes the temporary file, and returns the remote path usable by shell tools. For project-scoped transfers the path is inside that project and can also be addressed by filesystem tools using projectRelativePath.")]
+    [Description("Completes a chunked attachment upload, verifies declared size and optional SHA-256, atomically publishes the temporary file, and returns the remote path usable by shell tools. Repeating completion after a lost response safely returns the same verified result. For project-scoped transfers the path is inside that project and can also be addressed by filesystem tools using projectRelativePath.")]
     public async Task<object> Complete(
         [Description("Transfer id returned by agent_file_upload_start.")] string transferId,
         CancellationToken cancellationToken = default)
