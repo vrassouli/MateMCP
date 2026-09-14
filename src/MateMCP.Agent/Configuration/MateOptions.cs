@@ -1,3 +1,5 @@
+using MateMCP.Agent.Security;
+
 namespace MateMCP.Agent.Configuration;
 
 public sealed class MateOptions
@@ -11,9 +13,26 @@ public sealed class MateOptions
     public string? AccessToken { get; set; }
     public bool RequireShellApproval { get; set; } = true;
     public int ApprovalTimeoutSeconds { get; set; } = 120;
+    public ApprovalRiskPolicyOptions ApprovalRiskPolicy { get; set; } = new();
+    public SecondarySemanticAnalysisOptions SecondarySemanticAnalysis { get; set; } = new();
     public InteractiveShellOptions InteractiveShell { get; set; } = new();
     public RelayOptions Relay { get; set; } = new();
     public List<ProjectOptions> Projects { get; set; } = [];
+}
+
+public sealed class SecondarySemanticAnalysisOptions
+{
+    /// <summary>Disabled by default. Deterministic analysis remains authoritative.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// OpenAI-compatible chat-completions endpoint. Only loopback endpoints are accepted so
+    /// proposed actions are not silently disclosed to a remote model/provider.
+    /// </summary>
+    public string Endpoint { get; set; } = "http://127.0.0.1:11434/v1/chat/completions";
+    public string? Model { get; set; }
+    public int TimeoutSeconds { get; set; } = 5;
+    public int MaxInputChars { get; set; } = 2_000;
 }
 
 public sealed class InteractiveShellOptions
