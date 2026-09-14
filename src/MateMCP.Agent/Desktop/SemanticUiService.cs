@@ -75,6 +75,13 @@ public sealed class SemanticUiService
         throw UnsupportedPlatform();
     }
 
+    public async Task<UiElementInfo> ClickAtAsync(string windowId, double x, double y, CancellationToken cancellationToken = default)
+    {
+        var window = await ResolveWindowAsync(windowId, cancellationToken);
+        if (OperatingSystem.IsWindows()) return WindowsSemanticUi.ClickAt(window, x, y);
+        throw new PlatformNotSupportedException("Window-relative semantic hit-testing through SemanticUiService is currently supported on Windows.");
+    }
+
     private async Task<DesktopWindowInfo> ResolveWindowAsync(string windowId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(windowId)) throw new ArgumentException("windowId is required.", nameof(windowId));
@@ -93,6 +100,7 @@ public sealed class SemanticUiService
         private const int TreeScopeDescendants = 4;
 
         private const int BoundingRectangleProperty = 30001;
+        private const int ProcessIdProperty = 30002;
         private const int ControlTypeProperty = 30003;
         private const int NameProperty = 30005;
         private const int HasKeyboardFocusProperty = 30008;
@@ -186,6 +194,87 @@ public sealed class SemanticUiService
             {
                 throw new InvalidOperationException($"Windows UI Automation could not perform '{action}' on {selected.Role} '{selected.Name ?? selected.AutomationId ?? selected.Id}': {ex.Message}", ex);
             }
+        }
+
+        public static UiElementInfo ClickAt(DesktopWindowInfo window, double x, double y)
+        {
+            if (!double.IsFinite(x) || !double.IsFinite(y))
+                throw new ArgumentOutOfRangeException(nameof(x), "Window-relative coordinates must be finite numbers.");
+            if (x < 0 || y < 0 || x >= window.Width || y >= window.Height)
+                throw new ArgumentOutOfRangeException(nameof(x), $"Point ({x:0.##},{y:0.##}) is outside window {window.Id} bounds {window.Width}x{window.Height}.");
+
+            var automationType = Type.GetTypeFromCLSID(CUiAutomation, throwOnError: true)
+                ?? throw new InvalidOperationException("Windows UI Automation is unavailable.");
+            var automationObject = Activator.CreateInstance(automationType)
+                ?? throw new InvalidOperationException("Windows UI Automation could not be initialized.");
+            var automation = (IUiAutomationNative)automationObject;
+
+            var screenX = checked((int)Math.Round(window.X + x, MidpointRounding.AwayFromZero));
+            var screenY = checked((int)Math.Round(window.Y + y, MidpointRounding.AwayFromZero));
+            var hr = automation.ElementFromPoint(new UiaPoint(screenX, screenY), out var hitObject);
+            if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+            if (hitObject is null)
+                throw new InvalidOperationException($"Windows UI Automation found no element at window-relative point ({x:0.##},{y:0.##}).");
+
+            dynamic element = hitObject;
+            dynamic walker = ((dynamic)automationObject).ControlViewWalker;
+            UiElementInfo? initial = null;
+
+            for (var depth = 0; depth < 32 && element is not null; depth++)
+            {
+                var processId = IntProperty(element, ProcessIdProperty);
+                if (processId != 0 && processId != window.ProcessId)
+                {
+                    if (depth == 0)
+                        throw new InvalidOperationException("Windows UI Automation hit-testing resolved to a different process; no action was performed.");
+                    break;
+                }
+
+                var info = BuildInfo(element, depth == 0 ? "uia:point" : $"uia:point-parent:{depth}", null);
+                initial ??= info;
+                if (info.Enabled)
+                {
+                    if (HasPattern(element, InvokePattern))
+                    {
+                        dynamic pattern = element.GetCurrentPattern(InvokePattern);
+                        pattern.Invoke();
+                        return BuildInfo(element, info.Id, null);
+                    }
+                    if (HasPattern(element, TogglePattern))
+                    {
+                        dynamic pattern = element.GetCurrentPattern(TogglePattern);
+                        pattern.Toggle();
+                        return BuildInfo(element, info.Id, null);
+                    }
+                    if (HasPattern(element, SelectionItemPattern))
+                    {
+                        dynamic pattern = element.GetCurrentPattern(SelectionItemPattern);
+                        pattern.Select();
+                        return BuildInfo(element, info.Id, null);
+                    }
+                    if (HasPattern(element, ExpandCollapsePattern))
+                    {
+                        dynamic pattern = element.GetCurrentPattern(ExpandCollapsePattern);
+                        var state = NullableIntProperty(element, ExpandCollapseStateProperty);
+                        if (state == 1) pattern.Collapse(); else pattern.Expand();
+                        return BuildInfo(element, info.Id, null);
+                    }
+                }
+
+                try
+                {
+                    element = walker.GetParentElement(element);
+                }
+                catch
+                {
+                    break;
+                }
+            }
+
+            var bounds = initial?.Bounds is null
+                ? "No coordinate fallback bounds are available."
+                : $"Hit element bounds: x={initial.Bounds.X}, y={initial.Bounds.Y}, width={initial.Bounds.Width}, height={initial.Bounds.Height}.";
+            throw new InvalidOperationException($"No actionable Windows UI Automation control was found at ({x:0.##},{y:0.##}) or in its accessible ancestors. {bounds}");
         }
 
         private static Traversal Traverse(DesktopWindowInfo window, int maxElements)
@@ -386,6 +475,37 @@ public sealed class SemanticUiService
             50030 => "document", 50032 => "window", 50033 => "pane", 50036 => "table",
             50037 => "titlebar", 50038 => "separator", _ => controlType == 0 ? "unknown" : $"control-{controlType}"
         };
+
+        [StructLayout(LayoutKind.Sequential)]
+        private readonly struct UiaPoint(int x, int y)
+        {
+            public readonly int X = x;
+            public readonly int Y = y;
+        }
+
+        [ComImport]
+        [Guid("30CBE57D-D9D0-452A-AB13-7AC5AC4825EE")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IUiAutomationNative
+        {
+            [PreserveSig]
+            int CompareElements([MarshalAs(UnmanagedType.Interface)] object element1, [MarshalAs(UnmanagedType.Interface)] object element2, out int areSame);
+
+            [PreserveSig]
+            int CompareRuntimeIds(
+                [MarshalAs(UnmanagedType.SafeArray, SafeArraySubType = VarEnum.VT_I4)] int[] runtimeId1,
+                [MarshalAs(UnmanagedType.SafeArray, SafeArraySubType = VarEnum.VT_I4)] int[] runtimeId2,
+                out int areSame);
+
+            [PreserveSig]
+            int GetRootElement([MarshalAs(UnmanagedType.Interface)] out object root);
+
+            [PreserveSig]
+            int ElementFromHandle(IntPtr hwnd, [MarshalAs(UnmanagedType.Interface)] out object element);
+
+            [PreserveSig]
+            int ElementFromPoint(UiaPoint point, [MarshalAs(UnmanagedType.Interface)] out object element);
+        }
 
         private sealed record Traversal(List<UiElementInfo> Elements, Dictionary<string, object> Handles, bool Truncated);
     }

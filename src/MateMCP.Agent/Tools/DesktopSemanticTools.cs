@@ -99,11 +99,15 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
         var decision = await approvals.RequestAsync("desktop.semantic", "semantic-action", summary, cancellationToken);
         await EnsureApprovedAsync(decision, "Isolated semantic click", "desktop.semantic", "semantic-action", cancellationToken);
 
-        if (!OperatingSystem.IsMacOS())
-            throw new McpException("ui_click_at isolated hit-testing is currently implemented on macOS. Windows UIA ElementFromPoint support is tracked in #147; use selector-based semantic actions in the meantime.");
-
         UiElementInfo result;
-        try { result = await _macSemantic.ClickAtAsync(windowId, x, y, cancellationToken); }
+        try
+        {
+            result = OperatingSystem.IsMacOS()
+                ? await _macSemantic.ClickAtAsync(windowId, x, y, cancellationToken)
+                : OperatingSystem.IsWindows()
+                    ? await _semantic.ClickAtAsync(windowId, x, y, cancellationToken)
+                    : throw new PlatformNotSupportedException("ui_click_at isolated semantic hit-testing currently supports Windows and macOS.");
+        }
         catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
 
         _computerUse.Touch("semantic-input", $"isolated-point-invoke:{result.Role}:{result.Name ?? result.AutomationId ?? result.Id}");
