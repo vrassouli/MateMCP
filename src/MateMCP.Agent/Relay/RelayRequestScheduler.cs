@@ -156,7 +156,12 @@ internal sealed record RelayRequest(
             }
         }
 
-        return Guid.NewGuid().ToString("N");
+        // Rolling-upgrade compatibility: older Relay versions do not send a logical
+        // SessionId. Keep those requests in one deterministic legacy session so a
+        // retried OperationId can still recover instead of being mistaken for a
+        // conflicting cross-session reuse. New Relays always send an explicit,
+        // per-client logical SessionId.
+        return "legacy";
     }
 }
 
