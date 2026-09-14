@@ -19,5 +19,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/MateMCP.Relay/MateMCP.Relay.csproj" />
+    <ProjectReference Include="../../src/MateMCP.Agent/MateMCP.Agent.csproj" />
   </ItemGroup>
 </Project>
