@@ -16,5 +16,6 @@ services:
       Relay__MaxBodyBytes: ${MATEMCP_RELAY_MAX_BODY_BYTES:-4194304}
       Relay__RequestTimeoutSeconds: ${MATEMCP_RELAY_REQUEST_TIMEOUT_SECONDS:-120}
       Relay__AgentReconnectGraceSeconds: ${MATEMCP_RELAY_AGENT_RECONNECT_GRACE_SECONDS:-20}
+      Relay__MaxPendingRequestsPerAgent: ${MATEMCP_RELAY_MAX_PENDING_REQUESTS_PER_AGENT:-32}
     ports:
       - "${MATEMCP_RELAY_BIND:-0.0.0.0}:${MATEMCP_RELAY_PORT:-8080}:8080"
