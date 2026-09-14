@@ -22,7 +22,7 @@ public interface ISecondarySemanticAnalyzer
 public sealed class LocalOpenAiCompatibleSemanticAnalyzer(
     IHttpClientFactory clients,
     IOptionsMonitor<MateOptions> options,
-    ILogger<LocalOpenAiCompatibleSemanticAnalyzer> logger) : ISecondarySemanticAnalyzer
+    ILogger logger) : ISecondarySemanticAnalyzer
 {
     public async Task<SecondarySemanticSignal?> AnalyzeAsync(
         ActionAssessmentContext context,
@@ -38,8 +38,7 @@ public sealed class LocalOpenAiCompatibleSemanticAnalyzer(
         }
 
         var maxInput = Math.Clamp(semantic.MaxInputChars, 256, 8_000);
-        var safeSummary = ActionImpactAssessment.RedactRemoteSummary(context.Summary);
-        safeSummary = ActionImpactAssessment.Bound(safeSummary, maxInput);
+        var safeSummary = ActionImpactAssessment.Bound(ActionImpactAssessment.RedactRemoteSummary(context.Summary), maxInput);
         var safeTarget = ActionImpactAssessment.Bound(ActionImpactAssessment.RedactRemoteSummary(context.Target), 500);
         var prompt = $"""
             Independently review this proposed local computer action. Return ONLY one JSON object with fields:
