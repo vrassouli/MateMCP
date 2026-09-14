@@ -1,5 +1,6 @@
 using System.Text;
 using MateMCP.Agent.Audit;
+using MateMCP.Agent.Configuration;
 
 namespace MateMCP.Agent.Memory;
 
@@ -8,45 +9,75 @@ public static class ProactiveMemoryContext
     public const int MaxItems = 3;
     public const int MaxChars = 3500;
 
-    public static async Task<string?> BuildAsync(
+    public static Task<string?> BuildAsync(
         SkillMemoryStore store,
         AuditLog audit,
         string tool,
         string? project,
         string? query,
         CancellationToken cancellationToken = default)
+        => BuildAsync(store, audit, tool, project, query, new ProactiveMemoryOptions(), cancellationToken);
+
+    public static async Task<string?> BuildAsync(
+        SkillMemoryStore store,
+        AuditLog audit,
+        string tool,
+        string? project,
+        string? query,
+        ProactiveMemoryOptions options,
+        CancellationToken cancellationToken = default)
     {
+        var mode = options?.Mode ?? ProactiveMemoryMode.Automatic;
+        if (mode == ProactiveMemoryMode.Off) return null;
+
         var items = await store.ApplicableAsync(project, cancellationToken);
         if (items.Count == 0) return null;
 
         var terms = Tokenize(query);
+        var maxItems = Math.Clamp(options?.MaxItems ?? MaxItems, 1, 8);
+        var maxChars = Math.Clamp(options?.MaxChars ?? MaxChars, 512, 12_000);
         var ranked = items
             .Select(item => new { Item = item, Score = Score(item, terms) })
             .Where(x => x.Score > 0)
             .OrderByDescending(x => x.Score)
             .ThenByDescending(x => x.Item.UpdatedAt)
-            .Take(MaxItems)
+            .Take(maxItems)
             .Select(x => x.Item)
             .ToArray();
         if (ranked.Length == 0) return null;
+
+        var typeSummary = string.Join(',', ranked
+            .GroupBy(x => x.Type, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(x => $"{x.Key}:{x.Count()}"));
+
+        if (mode == ProactiveMemoryMode.Suggested)
+        {
+            await audit.WriteAsync(
+                "memory.suggest",
+                string.IsNullOrWhiteSpace(project) ? tool : $"{tool}:{project}",
+                $"items:{ranked.Length};types:{typeSummary}",
+                cancellationToken);
+            return $"MateMCP found {ranked.Length} relevant durable context item(s) ({typeSummary}). Consult Skills & Memory before continuing if the task depends on prior project decisions or procedures.";
+        }
 
         var builder = new StringBuilder();
         builder.AppendLine("MateMCP durable context (automatically supplied; current user instructions override persisted context):");
         foreach (var item in ranked)
         {
             var prefix = $"- [{item.Type}; {item.Scope}; id={item.Id}] {item.Title}: ";
-            if (builder.Length + prefix.Length >= MaxChars) break;
+            if (builder.Length + prefix.Length >= maxChars) break;
             builder.Append(prefix);
-            AppendBounded(builder, item.Content, MaxChars);
+            AppendBounded(builder, item.Content, maxChars);
             builder.AppendLine();
-            if (builder.Length >= MaxChars) break;
+            if (builder.Length >= maxChars) break;
         }
 
         var result = builder.ToString().TrimEnd();
         await audit.WriteAsync(
             "memory.inject",
             string.IsNullOrWhiteSpace(project) ? tool : $"{tool}:{project}",
-            $"items:{ranked.Length};chars:{result.Length}",
+            $"items:{ranked.Length};chars:{result.Length};types:{typeSummary}",
             cancellationToken);
         return result;
     }
