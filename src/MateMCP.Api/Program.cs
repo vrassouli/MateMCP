@@ -145,7 +145,7 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext context
     var request = context.GetOpenIddictServerRequest() ?? throw new InvalidOperationException("OIDC request unavailable."); if (context.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login?returnUrl=" + Uri.EscapeDataString(context.Request.Path + context.Request.QueryString));
     var resources = request.GetResources(); if (resources.Length != 1 || !TryAgentId(resources[0], relayUrl, out var publicId)) return Results.BadRequest(new { error = OpenIddictConstants.Errors.InvalidTarget });
     var userId = UserId(context.User); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == publicId && x.OwnerId == userId && !x.IsRevoked); if (agent is null) return Results.Forbid();
-    var scopes = request.GetScopes().Intersect(agent.AllowedScopes.Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToArray(); var identity = new ClaimsIdentity(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, OpenIddictConstants.Claims.Name, ClaimTypes.Role);
+    var scopes = MateMCP.Api.OAuthScopePolicy.FilterAuthorizedScopes(request.GetScopes(), agent.AllowedScopes); var identity = new ClaimsIdentity(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, OpenIddictConstants.Claims.Name, ClaimTypes.Role);
     identity.AddClaim(OpenIddictConstants.Claims.Subject, userId.ToString()); identity.AddClaim(OpenIddictConstants.Claims.Name, context.User.Identity!.Name!); identity.AddClaim("agent_id", agent.PublicId); identity.SetScopes(scopes); identity.SetResources(resources[0], relayUrl); identity.SetDestinations(_ => [OpenIddictConstants.Destinations.AccessToken]);
     return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
@@ -175,7 +175,7 @@ app.MapPost("/internal/agents/offline", async (HttpContext c, AgentOffline r, Co
 });
 app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db) =>
 {
-    if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked); if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid(); var allowed = agent.AllowedScopes.Split(' ', StringSplitOptions.RemoveEmptyEntries); return r.Scopes.All(allowed.Contains) ? Results.Ok() : Results.Forbid();
+    if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked); if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid(); return MateMCP.Api.OAuthScopePolicy.AreGrantedAgentScopesAllowed(r.Scopes, agent.AllowedScopes) ? Results.Ok() : Results.Forbid();
 });
 app.MapPost("/api/agents/{agentId}/approvals", async (string agentId, HttpContext c, NewApproval r, ControlPlaneDbContext db) =>
 {
