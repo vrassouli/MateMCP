@@ -1,0 +1,262 @@
+@using System.Net.Http.Json
+@implements IAsyncDisposable
+@inject AgentApiClient Api
+
+@if (_current is not null)
+{
+    <div class="approval-overlay-backdrop" role="presentation">
+        <section class="approval-overlay approval-@RiskClass(_current.Risk)" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+            <div class="approval-topline">
+                <div>
+                    <div class="eyebrow">MateMCP approval required</div>
+                    <h2 id="approval-title">Review what this action can do</h2>
+                </div>
+                <div class="risk-stack">
+                    <span class="risk-badge">@RiskLabel(_current.Risk) risk</span>
+                    @if (!string.IsNullOrWhiteSpace(_current.Confidence))
+                    {
+                        <span class="confidence">@_current.Confidence confidence</span>
+                    }
+                </div>
+            </div>
+
+            @if (IsCriticalOrUnknown(_current.Risk))
+            {
+                <div class="critical-warning">
+                    <strong>@(IsUnknown(_current.Risk) ? "MateMCP cannot confidently classify this action." : "This action can have severe or difficult-to-reverse effects.")</strong>
+                    <span>Review the effect, reasons, and technical details before approving.</span>
+                </div>
+            }
+
+            <div class="impact-primary">
+                <div class="impact-label">Expected effect</div>
+                <div class="impact-effect">@Fallback(_current.Effect, "The exact effect is not known with high confidence.")</div>
+            </div>
+
+            <div class="impact-facts">
+                <div><span>Category</span><strong>@Fallback(_current.IntentCategory, "Unknown")</strong></div>
+                <div><span>Reversibility</span><strong>@Fallback(_current.Reversibility, "Unknown")</strong></div>
+                <div><span>Scope</span><strong>@_current.Target</strong></div>
+            </div>
+
+            @if (ImpactFlags(_current).Count > 0)
+            {
+                <div class="impact-flags" aria-label="Risk factors">
+                    @foreach (var flag in ImpactFlags(_current))
+                    {
+                        <span>@flag</span>
+                    }
+                </div>
+            }
+
+            @if (_current.AffectedResources?.Count > 0)
+            {
+                <div class="impact-section">
+                    <strong>Affected resources</strong>
+                    <ul>
+                        @foreach (var resource in _current.AffectedResources.Take(6))
+                        {
+                            <li>@resource</li>
+                        }
+                    </ul>
+                </div>
+            }
+
+            @if (_current.Reasons?.Count > 0)
+            {
+                <div class="impact-section">
+                    <strong>Why MateMCP rated it this way</strong>
+                    <ul>
+                        @foreach (var reason in _current.Reasons.Take(6))
+                        {
+                            <li>@reason</li>
+                        }
+                    </ul>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_current.SaferAlternative))
+            {
+                <div class="safer-alternative">
+                    <strong>Safer alternative</strong>
+                    <span>@_current.SaferAlternative</span>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_current.Preview))
+            {
+                <div class="impact-section">
+                    <strong>Preview</strong>
+                    <pre>@_current.Preview</pre>
+                </div>
+            }
+
+            <details class="technical-details">
+                <summary>Technical details</summary>
+                <dl>
+                    <dt>Capability</dt><dd>@_current.Capability</dd>
+                    <dt>Target</dt><dd>@_current.Target</dd>
+                </dl>
+                <pre>@_current.Summary</pre>
+            </details>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="approval-error">@_error</div>
+            }
+
+            <div class="approval-actions">
+                <Button Text="Deny" OnClick='() => DecideAsync("deny")' />
+                <Button Text="Approve once" OnClick='() => DecideAsync("allow")' />
+            </div>
+            <details class="approval-more">
+                <summary>More approval choices</summary>
+                <div class="approval-actions secondary-actions">
+                    <Button Text="Approve for session" OnClick='() => DecideAsync("allow-session")' />
+                    <Button Text="Always allow this target" OnClick='() => DecideAsync("allow-always")' />
+                </div>
+                <div class="muted-note">Session and persistent approval rules reduce future prompts for the same capability/target. Use them only when you trust that scope.</div>
+            </details>
+
+            @if (_pending.Count > 1)
+            {
+                <div class="queue-note">1 of @_pending.Count pending approvals</div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private readonly CancellationTokenSource _stop = new();
+    private readonly HttpClient _http = CreateHttpClient();
+    private Task? _pollTask;
+    private IReadOnlyList<ApprovalView> _pending = [];
+    private ApprovalView? _current;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync(_stop.Token);
+        _pollTask = PollAsync(_stop.Token);
+    }
+
+    private async Task PollAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await RefreshAsync(cancellationToken);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _pending = await _http.GetFromJsonAsync<List<ApprovalView>>("approvals", cancellationToken) ?? [];
+            _current = _pending.OrderBy(x => x.CreatedAt).FirstOrDefault();
+            _error = null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task DecideAsync(string decision)
+    {
+        if (_current is null) return;
+        try
+        {
+            _error = null;
+            await Api.DecideApprovalAsync(_current.Id, decision, _stop.Token);
+            await RefreshAsync(_stop.Token);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private static HttpClient CreateHttpClient()
+    {
+        var configured = Environment.GetEnvironmentVariable("MATEMCP_COMPANION_AGENT_URL");
+        var baseUrl = string.IsNullOrWhiteSpace(configured) ? "http://127.0.0.1:45871/" : configured.TrimEnd('/') + "/";
+        return new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(8) };
+    }
+
+    private static string RiskClass(string? risk)
+        => string.IsNullOrWhiteSpace(risk) ? "unknown" : risk.Trim().ToLowerInvariant() switch
+        {
+            "low" => "low",
+            "medium" or "sensitive" => "medium",
+            "high" => "high",
+            "critical" => "critical",
+            _ => "unknown"
+        };
+
+    private static string RiskLabel(string? risk)
+        => RiskClass(risk) switch
+        {
+            "low" => "Low",
+            "medium" => "Medium",
+            "high" => "High",
+            "critical" => "Critical",
+            _ => "Unknown"
+        };
+
+    private static bool IsUnknown(string? risk) => RiskClass(risk) == "unknown";
+    private static bool IsCriticalOrUnknown(string? risk) => RiskClass(risk) is "critical" or "unknown";
+    private static string Fallback(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value;
+
+    private static IReadOnlyList<string> ImpactFlags(ApprovalView approval)
+    {
+        var result = new List<string>(5);
+        if (approval.Destructive) result.Add("Destructive");
+        if (approval.RequiresElevation) result.Add("Elevated privileges");
+        if (approval.CredentialExposure) result.Add("Credential access");
+        if (approval.NetworkEffect) result.Add("Network effect");
+        if (approval.PersistenceEffect) result.Add("Persistent change");
+        return result;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _stop.Cancel();
+        if (_pollTask is not null)
+        {
+            try { await _pollTask; }
+            catch (OperationCanceledException) { }
+        }
+        _http.Dispose();
+        _stop.Dispose();
+    }
+
+    private sealed record ApprovalView(
+        string Id,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset ExpiresAt,
+        string Capability,
+        string Target,
+        string Summary,
+        string? Risk = null,
+        string? Effect = null,
+        string? Confidence = null,
+        string? IntentCategory = null,
+        string? Reversibility = null,
+        bool Destructive = false,
+        bool RequiresElevation = false,
+        bool CredentialExposure = false,
+        bool NetworkEffect = false,
+        bool PersistenceEffect = false,
+        IReadOnlyList<string>? AffectedResources = null,
+        IReadOnlyList<string>? Reasons = null,
+        string? SaferAlternative = null,
+        string? Preview = null);
+}
