@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -138,19 +139,80 @@ public sealed partial class AgentLogRedactor
     }
 }
 
-public sealed class AgentLogProvider(AgentLogStore store) : ILoggerProvider
+public sealed class AgentLogProvider : ILoggerProvider
 {
-    public ILogger CreateLogger(string categoryName) => new StoreLogger(store, categoryName);
+    public const string VerboseHttpEnvironmentVariable = "MATEMCP_VERBOSE_HTTP_LOGGING";
+
+    private readonly AgentLogStore _store;
+    private readonly bool _verboseHttpLogging;
+
+    public AgentLogProvider(AgentLogStore store, bool? verboseHttpLogging = null)
+    {
+        _store = store;
+        _verboseHttpLogging = verboseHttpLogging ?? ReadVerboseHttpLoggingFromEnvironment();
+    }
+
+    public ILogger CreateLogger(string categoryName) => new StoreLogger(_store, categoryName, _verboseHttpLogging);
     public void Dispose() { }
 
-    private sealed class StoreLogger(AgentLogStore store, string category) : ILogger
+    internal static bool ShouldStoreFrameworkLog<TState>(string category, LogLevel level, TState state, Exception? exception, bool verboseHttpLogging)
+    {
+        if (level == LogLevel.None) return false;
+        if (exception is not null || level >= LogLevel.Warning) return true;
+        if (!category.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal)) return true;
+        if (verboseHttpLogging) return true;
+        return TryGetStatusCode(state, out var statusCode) && statusCode >= StatusCodes.Status400BadRequest;
+    }
+
+    private static bool ReadVerboseHttpLoggingFromEnvironment()
+        => bool.TryParse(Environment.GetEnvironmentVariable(VerboseHttpEnvironmentVariable), out var enabled) && enabled;
+
+    private static bool TryGetStatusCode<TState>(TState state, out int statusCode)
+    {
+        if (state is IEnumerable<KeyValuePair<string, object?>> values)
+        {
+            foreach (var pair in values)
+            {
+                if (!string.Equals(pair.Key, "StatusCode", StringComparison.OrdinalIgnoreCase)) continue;
+                if (pair.Value is int value)
+                {
+                    statusCode = value;
+                    return true;
+                }
+                if (pair.Value is not null && int.TryParse(pair.Value.ToString(), out value))
+                {
+                    statusCode = value;
+                    return true;
+                }
+            }
+        }
+        else if (state is IDictionary dictionary && dictionary.Contains("StatusCode"))
+        {
+            var value = dictionary["StatusCode"];
+            if (value is int integer)
+            {
+                statusCode = integer;
+                return true;
+            }
+            if (value is not null && int.TryParse(value.ToString(), out integer))
+            {
+                statusCode = integer;
+                return true;
+            }
+        }
+
+        statusCode = 0;
+        return false;
+    }
+
+    private sealed class StoreLogger(AgentLogStore store, string category, bool verboseHttpLogging) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            if (!IsEnabled(logLevel)) return;
+            if (!IsEnabled(logLevel) || !ShouldStoreFrameworkLog(category, logLevel, state, exception, verboseHttpLogging)) return;
             var message = formatter(state, exception);
             if (exception is not null) message += Environment.NewLine + exception;
             store.Append(logLevel, category, message);
