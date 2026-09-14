@@ -32,11 +32,11 @@ public sealed class NativeComputerUseEndToEndTests
         Assert.Contains(initial.Elements, e => e.Name == "Name" && e.Role is "textbox" or "text field");
         Assert.Contains(initial.Elements, e => e.Name == "Increment");
 
-        await semantic.TypeAsync(window.Id, new UiSelector(Name: "Name"), "MateMCP");
-        await semantic.ClickAsync(window.Id, new UiSelector(Name: "Increment"));
+        await semantic.TypeAsync(window.Id, new UiSelector(AutomationId: "nameInput"), "MateMCP");
+        await semantic.ClickAsync(window.Id, new UiSelector(AutomationId: "incrementButton"));
 
         input.FocusWindow(window.Id, window.ProcessId, window.Title);
-        await semantic.FocusAsync(window.Id, new UiSelector(Name: "Name"));
+        await semantic.FocusAsync(window.Id, new UiSelector(AutomationId: "nameInput"));
         input.PressShortcut([OperatingSystem.IsMacOS() ? "CMD" : "CTRL", "A"]);
         input.TypeText("Shortcut");
         await Task.Delay(150);

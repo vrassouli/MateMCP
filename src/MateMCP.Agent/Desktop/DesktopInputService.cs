@@ -509,6 +509,11 @@ public sealed class DesktopInputService
                     PostModifier(KeyCode(modifiers[index]), flags, keyDown: false);
                 }
             }
+
+            // Quartz posts synthetic keyboard events asynchronously. Give modifier-release
+            // events a short bounded window to reach the target app before a caller sends
+            // subsequent text/input, otherwise Command/Option can remain transiently active.
+            if (modifiers.Length > 0) Thread.Sleep(80);
         }
 
         private static IEnumerable<string> ChunkText(string text, int length)
