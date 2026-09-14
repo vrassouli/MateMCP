@@ -30,7 +30,10 @@ public sealed record PendingApproval(
     IReadOnlyList<string>? AffectedResources = null,
     IReadOnlyList<string>? Reasons = null,
     string? SaferAlternative = null,
-    string? Preview = null);
+    string? Preview = null,
+    bool CanAllowSession = true,
+    bool CanAllowAlways = true,
+    IReadOnlyList<AssessmentContributor>? Contributors = null);
 
 public sealed class ApprovalService(
     IOptionsMonitor<MateOptions> options,
@@ -49,6 +52,10 @@ public sealed class ApprovalService(
     }
 
     private readonly ConcurrentDictionary<string, PendingState> _pending = new(StringComparer.Ordinal);
+    private readonly ActionAnalysisService _analysis = new(
+        ActionImpactAnalyzerPacks.Snapshot(),
+        new LocalOpenAiCompatibleSemanticAnalyzer(clients, options, logger),
+        logger);
     private MateOptions Current => options.CurrentValue;
 
     public IReadOnlyCollection<PendingApproval> GetPending() => _pending.Values.Select(x => x.Approval).OrderBy(x => x.CreatedAt).ToArray();
@@ -58,15 +65,13 @@ public sealed class ApprovalService(
     public async Task<ApprovalDecision> RequestAsync(string capability, string target, string summary, CancellationToken cancellationToken)
     {
         var context = new ActionAssessmentContext(capability, target, summary);
-        var assessment = ActionImpactAnalyzer.Default.Assess(context);
-        assessment = await ActionContextPreflightAnalyzer.Default.EnrichAsync(context, assessment, cancellationToken);
+        var assessment = await _analysis.AnalyzeAsync(context, cancellationToken);
         return await RequestCoreAsync(capability, target, summary, assessment, cancellationToken);
     }
 
     public async Task<ApprovalDecision> RequestAsync(ActionAssessmentContext context, CancellationToken cancellationToken)
     {
-        var assessment = ActionImpactAnalyzer.Default.Assess(context);
-        assessment = await ActionContextPreflightAnalyzer.Default.EnrichAsync(context, assessment, cancellationToken);
+        var assessment = await _analysis.AnalyzeAsync(context, cancellationToken);
         return await RequestCoreAsync(context.Capability, context.Target, context.Summary, assessment, cancellationToken);
     }
 
@@ -86,14 +91,30 @@ public sealed class ApprovalService(
         CancellationToken cancellationToken)
     {
         var assessmentAudit = assessment is null ? string.Empty : ":" + assessment.ToAuditSummary();
-        if (policies.IsSessionAllowed(capability, target))
+        var riskPolicy = ApprovalRiskPolicyEvaluator.Evaluate(assessment, Current.ApprovalRiskPolicy);
+        var riskPolicyAudit = $":policy={riskPolicy.Behavior.ToString().ToLowerInvariant()}";
+
+        if (riskPolicy.Behavior == ApprovalRiskBehavior.Deny)
         {
-            await audit.WriteAsync("approval", $"{capability}:{target}", $"allowed:session-policy{assessmentAudit}", cancellationToken);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"denied:risk-policy{riskPolicyAudit}{assessmentAudit}", cancellationToken);
+            logger.LogWarning("MateMCP risk policy denied {Capability} {Target} Risk={Risk}.", capability, target, assessment?.RiskLabel ?? "Unknown");
+            return ApprovalDecision.Deny;
+        }
+
+        if (riskPolicy.Behavior == ApprovalRiskBehavior.AutoAllow)
+        {
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"allowed:risk-policy-auto{riskPolicyAudit}{assessmentAudit}", cancellationToken);
+            return ApprovalDecision.AllowOnce;
+        }
+
+        if (riskPolicy.CanUseStoredRule && policies.IsSessionAllowed(capability, target))
+        {
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"allowed:session-policy{riskPolicyAudit}{assessmentAudit}", cancellationToken);
             return ApprovalDecision.AllowSession;
         }
-        if (await policies.IsAlwaysAllowedAsync(capability, target, cancellationToken))
+        if (riskPolicy.CanUseStoredRule && await policies.IsAlwaysAllowedAsync(capability, target, cancellationToken))
         {
-            await audit.WriteAsync("approval", $"{capability}:{target}", $"allowed:persistent-policy{assessmentAudit}", cancellationToken);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"allowed:persistent-policy{riskPolicyAudit}{assessmentAudit}", cancellationToken);
             return ApprovalDecision.AllowAlways;
         }
 
@@ -119,19 +140,23 @@ public sealed class ApprovalService(
             assessment?.AffectedResources,
             assessment?.Reasons,
             assessment?.SaferAlternative,
-            assessment?.Preview);
+            assessment?.Preview,
+            riskPolicy.CanCreateBroadTrust,
+            riskPolicy.CanCreateBroadTrust,
+            assessment?.Contributors);
         var state = new PendingState(approval, assessment);
         if (!_pending.TryAdd(approval.Id, state)) throw new InvalidOperationException("Failed to create approval request.");
 
         _ = PollRemoteDecisionAsync(state, cancellationToken);
         _ = notifications.NotifyApprovalAsync(Current.Port, approval, cancellationToken);
         logger.LogWarning(
-            "MateMCP approval required: {Capability} {Target} Risk={Risk} Confidence={Confidence} Category={Category}. Open http://127.0.0.1:{Port}/ui",
+            "MateMCP approval required: {Capability} {Target} Risk={Risk} Confidence={Confidence} Category={Category} Policy={Policy}. Open http://127.0.0.1:{Port}/ui",
             capability,
             target,
             approval.Risk ?? "Unknown",
             approval.Confidence ?? "Low",
             approval.IntentCategory ?? "unknown",
+            riskPolicy.Behavior,
             Current.Port);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -139,14 +164,14 @@ public sealed class ApprovalService(
         try
         {
             var decision = await state.Completion.Task.WaitAsync(timeout.Token);
-            if (decision == ApprovalDecision.AllowSession) policies.AllowForSession(capability, target);
-            if (decision == ApprovalDecision.AllowAlways) await policies.AllowAlwaysAsync(capability, target, cancellationToken);
-            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:{decision.ToString().ToLowerInvariant()}{assessmentAudit}", cancellationToken);
+            if (decision == ApprovalDecision.AllowSession && approval.CanAllowSession) policies.AllowForSession(capability, target);
+            if (decision == ApprovalDecision.AllowAlways && approval.CanAllowAlways) await policies.AllowAlwaysAsync(capability, target, cancellationToken);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:{decision.ToString().ToLowerInvariant()}{riskPolicyAudit}{assessmentAudit}", cancellationToken);
             return decision;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:timeout{assessmentAudit}", CancellationToken.None);
+            await audit.WriteAsync("approval", $"{capability}:{target}", $"decision:timeout{riskPolicyAudit}{assessmentAudit}", CancellationToken.None);
             return ApprovalDecision.Timeout;
         }
         finally { _pending.TryRemove(approval.Id, out _); }
@@ -155,6 +180,8 @@ public sealed class ApprovalService(
     public bool Decide(string id, ApprovalDecision decision)
     {
         if (!_pending.TryGetValue(id, out var state)) return false;
+        if (decision == ApprovalDecision.AllowSession && !state.Approval.CanAllowSession) return false;
+        if (decision == ApprovalDecision.AllowAlways && !state.Approval.CanAllowAlways) return false;
         return state.Completion.TrySetResult(decision);
     }
 
@@ -214,7 +241,8 @@ public sealed class ApprovalService(
             NetworkEffect: true,
             PersistenceEffect: assessment.Level != ComputerUseRiskLevel.Low,
             ProductionLikelihood: ActionImpactAnalyzer.LooksProductionRelated(target),
-            Reasons: [assessment.Reason]);
+            Reasons: [assessment.Reason],
+            Contributors: [new AssessmentContributor("computer-use-risk", "deterministic", Authoritative: true)]);
     }
 
     private sealed record RemoteApproval(Guid Id);
