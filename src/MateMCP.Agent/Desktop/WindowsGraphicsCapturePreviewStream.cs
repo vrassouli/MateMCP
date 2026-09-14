@@ -5,7 +5,7 @@ namespace MateMCP.Agent.Desktop;
 
 /// <summary>
 /// Keeps one persistent Windows Graphics Capture helper for the window currently shown in
-/// Companion's Computer Use preview. The helper is native Swift and emits framed
+/// Companion's Computer Use preview. The helper is native C++/WinRT and emits framed
 /// JPEGs over stdout. It is intentionally local-only and never participates in audit.
 /// </summary>
 internal sealed class WindowsGraphicsCapturePreviewStream : IDisposable
