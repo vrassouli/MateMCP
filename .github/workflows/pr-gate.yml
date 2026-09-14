@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Validate server installer scripts
+        run: bash -n deploy/install.sh deploy/api/install.sh deploy/relay/install.sh
       - name: Restore
         run: dotnet restore MateMCP.slnx
       - name: Build
