@@ -1,5 +1,5 @@
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Text;
 
 namespace MateMCP.Agent.Security;
 
@@ -12,6 +12,8 @@ public sealed class ActionContextPreflightAnalyzer
 {
     private const int MaxPreviewChars = 4_000;
     private const int MaxDirectoryEntries = 200;
+
+    public static ActionContextPreflightAnalyzer Default { get; } = new();
 
     public async Task<ActionImpactAssessment> EnrichAsync(
         ActionAssessmentContext context,
