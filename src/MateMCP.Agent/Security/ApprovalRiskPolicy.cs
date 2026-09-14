@@ -1,5 +1,3 @@
-using MateMCP.Agent.Configuration;
-
 namespace MateMCP.Agent.Security;
 
 public enum ApprovalRiskBehavior
@@ -19,8 +17,8 @@ public sealed class ApprovalRiskPolicyOptions
     public ApprovalRiskBehavior Unknown { get; set; } = ApprovalRiskBehavior.RequireApproval;
 
     /// <summary>
-    /// Risk levels for which a user-created session/persistent trust rule may be reused or created.
-    /// Critical/Unknown are intentionally excluded by default.
+    /// Risk levels for which a user-created session/persistent trust rule may be reused or created
+    /// when that level's behavior is AllowStoredRule. Critical/Unknown are excluded by default.
     /// </summary>
     public List<ActionRiskLevel> BroadTrustRisks { get; set; } = [ActionRiskLevel.Low, ActionRiskLevel.Medium];
 }
@@ -45,11 +43,12 @@ public static class ApprovalRiskPolicyEvaluator
             ActionRiskLevel.Critical => options.Critical,
             _ => options.Unknown
         };
-        var broadTrust = options.BroadTrustRisks?.Contains(risk) == true;
+        var broadTrust = behavior == ApprovalRiskBehavior.AllowStoredRule
+            && options.BroadTrustRisks?.Contains(risk) == true;
         return new(
             behavior,
-            CanUseStoredRule: behavior == ApprovalRiskBehavior.AllowStoredRule && broadTrust,
-            CanCreateBroadTrust: broadTrust && behavior is not ApprovalRiskBehavior.Deny,
+            CanUseStoredRule: broadTrust,
+            CanCreateBroadTrust: broadTrust,
             Reason: $"Risk policy for {risk}: {behavior}; broad trust {(broadTrust ? "allowed" : "not allowed")}.");
     }
 }
