@@ -38,6 +38,7 @@ public sealed class SemanticUiToolTests
         Assert.Contains("BoundingRectangle", helper, StringComparison.Ordinal);
         Assert.Contains("GetWindowThreadProcessId", helper, StringComparison.Ordinal);
         Assert.Contains("target-window ancestors", helper, StringComparison.Ordinal);
+        Assert.Contains("Name=isProtected ? null", helper, StringComparison.Ordinal);
         Assert.Contains("OperatingSystem.IsWindows()", tools, StringComparison.Ordinal);
         Assert.Contains("_semantic.ClickAtAsync", tools, StringComparison.Ordinal);
     }

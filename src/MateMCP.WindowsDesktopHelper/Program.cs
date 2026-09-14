@@ -175,10 +175,11 @@ namespace MateMCP.WindowsDesktopHelper
         private static Element BuildInfo(AutomationElement element, string id, string parentId)
         {
             var current = element.Current;
+            var isProtected = Safe(() => current.IsPassword, false);
             var item = new Element
             {
-                Id=id, ParentId=parentId, Role=Role(Safe(() => current.ControlType, (ControlType)null)), Name=Null(Safe(() => current.Name, (string)null)),
-                AutomationId=Null(Safe(() => current.AutomationId, (string)null)), Protected=Safe(() => current.IsPassword, false), Enabled=Safe(() => current.IsEnabled, true),
+                Id=id, ParentId=parentId, Role=Role(Safe(() => current.ControlType, (ControlType)null)), Name=isProtected ? null : Null(Safe(() => current.Name, (string)null)),
+                AutomationId=Null(Safe(() => current.AutomationId, (string)null)), Protected=isProtected, Enabled=Safe(() => current.IsEnabled, true),
                 Focused=IsFocused(element), Bounds=Bounds(Safe(() => current.BoundingRectangle, Rect.Empty)), Actions=new List<string>()
             };
             ValuePattern value; SelectionItemPattern selection; TogglePattern toggle; ExpandCollapsePattern expand;
