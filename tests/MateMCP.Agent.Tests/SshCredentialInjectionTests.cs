@@ -36,7 +36,8 @@ public sealed class SshCredentialInjectionTests
                       $"-o PreferredAuthentications=password -o PubkeyAuthentication=no {user}@{host} " +
                       "\"printf 'SSH_AUTHENTICATED\\n'\"";
 
-        var started = Assert.IsType<ShellSessionSnapshot>(await tools.Start(command));
+        var started = await tools.Start(command);
+        Assert.IsType<ShellSessionStartResult>(started);
         var prompt = await WaitForAsync(sessions, started.SessionId, 0,
             x => x.Output.Contains("password:", StringComparison.OrdinalIgnoreCase));
         var response = await tools.SendSecret(started.SessionId, "ssh-integration", true);
