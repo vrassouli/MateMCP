@@ -306,7 +306,10 @@
                     <div class="field"><label>Name</label><input @bind="SecretName" autocomplete="off" /></div>
                     <div class="field"><label>Description</label><input @bind="SecretDescription" /></div>
                     <div class="field"><label>Secret value</label><input type="password" @bind="SecretValue" autocomplete="new-password" /></div>
-                    <div class="field"><label>Allowed tools (comma separated)</label><input @bind="SecretAllowedTools" placeholder="shell_session_send_secret" /></div>
+                    <div class="field"><label>Allowed use</label>
+                        <label><input type="checkbox" @bind="SecretAllowShell" /> Shell / terminal credential prompts</label>
+                        <label><input type="checkbox" @bind="SecretAllowUi" /> Browser / desktop text and password fields</label>
+                    </div>
                     <Button Text="Save secret" OnClick="SaveSecretAsync" />
                     <div class="muted" style="margin-top:10px">Secret values are sent only to the loopback Agent API and are never read back or shown in this UI.</div>
                 </div>
@@ -414,7 +417,8 @@
     private string SecretName { get; set; } = string.Empty;
     private string SecretDescription { get; set; } = string.Empty;
     private string SecretValue { get; set; } = string.Empty;
-    private string SecretAllowedTools { get; set; } = "shell_session_send_secret";
+    private bool SecretAllowShell { get; set; } = true;
+    private bool SecretAllowUi { get; set; } = true;
     private bool DeviceUrlCopied { get; set; }
     private DateOnly AuditDate { get; set; } = DateOnly.FromDateTime(DateTime.Now);
     private bool ConfirmAuditCleanup { get; set; }
@@ -674,7 +678,13 @@
     private async Task SaveSecretAsync()
     {
         if (string.IsNullOrWhiteSpace(SecretName) || string.IsNullOrEmpty(SecretValue)) return;
-        var allowed = SecretAllowedTools.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var allowed = new List<string>();
+        if (SecretAllowShell) allowed.Add("shell_session_send_secret");
+        if (SecretAllowUi)
+        {
+            allowed.Add("ui_fill_secret");
+            allowed.Add("browser_fill_secret");
+        }
         await Api.SaveSecretAsync(SecretName.Trim(), SecretValue, string.IsNullOrWhiteSpace(SecretDescription) ? null : SecretDescription.Trim(), allowed, _disposeCts.Token);
         SecretValue = string.Empty;
         Secrets = await Api.GetSecretsAsync(_disposeCts.Token);

@@ -12,13 +12,16 @@ internal sealed class WindowsSemanticUiHelper
     };
 
     public Task<UiSnapshot> SnapshotAsync(string windowId, int maxElements, CancellationToken ct)
-        => InvokeAsync<UiSnapshot>(new Request("snapshot", windowId, maxElements, null, null, null, 0, 0), response => response.Snapshot, ct);
+        => InvokeAsync<UiSnapshot>(new Request("snapshot", windowId, maxElements, null, null, null, null, null, 0, 0), response => response.Snapshot, ct);
 
     public Task<UiElementInfo> ActAsync(string windowId, UiSelector selector, string action, string? text, CancellationToken ct)
-        => InvokeAsync<UiElementInfo>(new Request("act", windowId, 0, action, selector, text, 0, 0), response => response.Element, ct);
+        => InvokeAsync<UiElementInfo>(new Request("act", windowId, 0, action, selector, text, null, null, 0, 0), response => response.Element, ct);
 
     public Task<UiElementInfo> ClickAtAsync(string windowId, double x, double y, CancellationToken ct)
-        => InvokeAsync<UiElementInfo>(new Request("click-at", windowId, 0, null, null, null, x, y), response => response.Element, ct);
+        => InvokeAsync<UiElementInfo>(new Request("click-at", windowId, 0, null, null, null, null, null, x, y), response => response.Element, ct);
+
+    public Task<UiElementInfo> FillSecretAsync(string windowId, UiElementInfo expected, string secret, CancellationToken ct)
+        => InvokeAsync<UiElementInfo>(new Request("fill-secret", windowId, 0, null, null, secret, expected.Id, expected, 0, 0), response => response.Element, ct);
 
     private static async Task<T> InvokeAsync<T>(Request request, Func<Response, T?> selector, CancellationToken ct) where T : class
     {
@@ -94,6 +97,6 @@ internal sealed class WindowsSemanticUiHelper
     private static string Compact(string value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Replace('\r', ' ').Replace('\n', ' ').Trim()[..Math.Min(value.Trim().Length, 500)];
 
-    private sealed record Request(string Command, string WindowId, int MaxElements, string? Action, UiSelector? Selector, string? Text, double X, double Y);
+    private sealed record Request(string Command, string WindowId, int MaxElements, string? Action, UiSelector? Selector, string? Text, string? ElementId, UiElementInfo? Expected, double X, double Y);
     private sealed record Response(bool Ok, UiSnapshot? Snapshot, UiElementInfo? Element, string? Error, string? ErrorType);
 }

@@ -62,6 +62,7 @@ public static class McpScopePolicy
         "window_focus" or
         "ui_click" or
         "ui_type" or
+        "ui_fill_secret" or
         "ui_focus" or
         "ui_toggle" or
         "ui_select" or
@@ -71,6 +72,7 @@ public static class McpScopePolicy
         "browser_open" or
         "browser_click" or
         "browser_fill" or
+        "browser_fill_secret" or
         "browser_set_viewport" or
         "browser_reload" or
         "browser_back" or

@@ -66,6 +66,7 @@ public sealed class DesktopVisionTools(AuditLog audit, ApprovalService approvals
         [Description("Region height in global desktop logical coordinates; required only for target=region.")] int? height = null,
         CancellationToken cancellationToken = default)
     {
+        if (SensitiveUiGuard.Shared.Active) throw new McpException(SensitiveUiGuard.CaptureBlockedMessage);
         EnsureComputerUseAvailable();
         var normalized = DesktopVisionService.NormalizeTarget(target);
         var targetSummary = normalized switch

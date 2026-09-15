@@ -11,7 +11,11 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
+public sealed class BrowserTools(
+    ApprovalService approvals,
+    AuditLog audit,
+    ICredentialStore secrets,
+    CredentialInjectionRateLimiter injectionRateLimiter)
 {
     private readonly BrowserAutomationService _browser = BrowserAutomationService.Shared;
     private readonly ComputerUseSessionManager _computerUse = ComputerUseSessionManager.Shared;
@@ -33,11 +37,12 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
     }
 
     [McpServerTool(Name = "browser_snapshot", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
-    [Description("Returns a bounded DOM/semantic snapshot of the active dedicated browser page, including role/name/text/label/test-id, geometry, selected computed styles, viewport, and redacted form values. Password values are never returned.")]
+    [Description("Returns a bounded DOM/semantic snapshot of the active dedicated browser page, including role/name/text/label/test-id, geometry, selected computed styles, viewport, and redacted form values. Password and Secret Manager-injected values are never returned.")]
     public async Task<BrowserSnapshot> Snapshot(
         [Description("Maximum elements returned, clamped to 1..1500.")] int maxElements = 500,
         CancellationToken cancellationToken = default)
     {
+        if (SensitiveUiGuard.Shared.Active) throw new McpException(SensitiveUiGuard.CaptureBlockedMessage);
         await RequireRiskApprovalAsync("browser.view", "dom-inspection", "view", null, "Inspect the active browser DOM, accessible names, geometry, selected styles, and non-password form values.", cancellationToken);
         EnsureComputerUseAvailable();
         var snapshot = await _browser.SnapshotAsync(maxElements, cancellationToken);
@@ -80,12 +85,92 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         return result;
     }
 
+    [McpServerTool(Name = "browser_fill_secret", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
+    [Description("Fills one uniquely selected dedicated-browser text/password input with a named Secret Manager credential. The plaintext is resolved inside the Agent and never appears in MCP arguments/results, approvals, or audit. The exact DOM element is bound before approval. Ordinary text inputs are visually masked and their DOM value is redacted until overwritten or removed.")]
+    public async Task<object> FillSecret(
+        string credential,
+        string? css = null, string? role = null, string? name = null, string? text = null,
+        string? label = null, string? testId = null, int? index = null,
+        CancellationToken cancellationToken = default)
+    {
+        var selector = Selector(css, role, name, text, label, testId, index);
+        var available = await secrets.ListAsync(cancellationToken);
+        var info = available.FirstOrDefault(x => string.Equals(x.Name, credential, StringComparison.OrdinalIgnoreCase));
+        if (info is null) throw new McpException($"Named credential '{credential}' does not exist.");
+        var auditTarget = $"browser:{Describe(selector)}";
+        if (!info.IsAllowedForTool(UserSecretInfo.BrowserFillSecretTool))
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.BrowserFillSecretTool, auditTarget, "denied:tool-policy", cancellationToken);
+            throw new McpException($"Credential '{info.Name}' is not authorized for tool '{UserSecretInfo.BrowserFillSecretTool}'.");
+        }
+        if (!injectionRateLimiter.TryAcquire(info.Name, out var retryAfter))
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.BrowserFillSecretTool, auditTarget, "denied:rate-limit", cancellationToken);
+            throw new McpException($"Credential injection rate limit exceeded. Retry after {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds.");
+        }
+
+        EnsureComputerUseAvailable();
+        BrowserSecretTarget target;
+        try { target = await _browser.BindSecretTargetAsync(selector, cancellationToken); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
+
+        string? value = null;
+        try
+        {
+            var assessment = new ComputerUseRiskAssessment(
+                ComputerUseRiskLevel.High,
+                "Enters a locally stored credential into the selected browser field without revealing the secret value to the AI.",
+                "Using a credential in a browser is security-sensitive even though MateMCP keeps the plaintext Agent-local.");
+            var decision = await approvals.RequestComputerUseAsync(
+                "secret.use",
+                $"{info.Name}@{auditTarget}",
+                $"Use credential {info.Name} in browser {target.Role} '{target.Name ?? "unnamed"}'. Secret value omitted.",
+                assessment,
+                cancellationToken);
+            if (decision == ApprovalDecision.Deny)
+            {
+                await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.BrowserFillSecretTool, auditTarget, "denied:approval", cancellationToken);
+                throw new McpException("Credential use denied by local user.");
+            }
+            if (decision == ApprovalDecision.Timeout)
+            {
+                await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.BrowserFillSecretTool, auditTarget, "denied:approval-timeout", cancellationToken);
+                throw new McpException("Credential use approval timed out.");
+            }
+
+            value = await secrets.ResolveAsync(info.Name, cancellationToken);
+            if (value is null) throw new McpException($"Named credential '{info.Name}' could not be resolved from the local secure store.");
+            BrowserActionResult result;
+            try { result = await _browser.FillBoundSecretAsync(target, value, cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.BrowserFillSecretTool, auditTarget, "failed:target-or-browser", cancellationToken);
+                throw new McpException("Browser secret injection failed after target validation. The local credential value was not included in the error details.");
+            }
+
+            _computerUse.Touch("browser-input", $"secret-fill:{result.Role}:{result.Name}");
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.BrowserFillSecretTool, auditTarget, "injected", cancellationToken);
+            return new
+            {
+                credential = info.Name,
+                injected = true,
+                target = new { result.Role, result.Name, Protected = result.Protected == true }
+            };
+        }
+        finally
+        {
+            value = null;
+            try { await _browser.ReleaseSecretBindingAsync(target.BindingId, CancellationToken.None); } catch { }
+        }
+    }
+
     [McpServerTool(Name = "browser_screenshot", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Captures the active dedicated browser viewport/page as an inspectable PNG MCP image. Screenshot pixels are not persisted by MateMCP.")]
     public async Task<IEnumerable<ContentBlock>> Screenshot(
         [Description("Capture beyond the current viewport where Chromium supports it.")] bool fullPage = false,
         CancellationToken cancellationToken = default)
     {
+        if (SensitiveUiGuard.Shared.Active) throw new McpException(SensitiveUiGuard.CaptureBlockedMessage);
         await RequireRiskApprovalAsync("browser.view", "visual-inspection", "view", null, $"Capture {(fullPage ? "the full browser page" : "the browser viewport")} as pixels.", cancellationToken);
         EnsureComputerUseAvailable();
         var shot = await _browser.ScreenshotAsync(fullPage, cancellationToken);

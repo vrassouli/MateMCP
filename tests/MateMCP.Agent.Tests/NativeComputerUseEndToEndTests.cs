@@ -6,6 +6,31 @@ namespace MateMCP.Agent.Tests;
 public sealed class NativeComputerUseEndToEndTests
 {
     [Fact]
+    public async Task Native_secure_field_accepts_agent_local_secret_without_exposing_value()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("MATEMCP_NATIVE_E2E"), "1", StringComparison.Ordinal)) return;
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS()) return;
+        if (OperatingSystem.IsWindows()) await EnsureWindowsSemanticHelperAsync();
+
+        using var app = await ControlledNativeApp.StartAsync();
+        var vision = new DesktopVisionService();
+        var semantic = new SemanticUiService();
+        var window = await WaitForWindowAsync(vision, ControlledNativeApp.WindowTitle, app.Process.Id);
+
+        var before = await semantic.SnapshotAsync(window.Id, 500);
+        var secure = Assert.Single(before.Elements, element => element.Protected);
+        Assert.Null(secure.Value);
+
+        var result = await semantic.FillSecretAsync(window.Id, secure, "native-e2e-secret");
+        Assert.True(result.Protected);
+        Assert.Null(result.Value);
+
+        var after = await semantic.SnapshotAsync(window.Id, 500);
+        var secureAfterFill = Assert.Single(after.Elements, element => element.Protected);
+        Assert.Null(secureAfterFill.Value);
+    }
+
+    [Fact]
     public async Task Native_visual_semantic_keyboard_and_coordinate_workflow_runs_end_to_end()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("MATEMCP_NATIVE_E2E"), "1", StringComparison.Ordinal)) return;
@@ -30,6 +55,10 @@ public sealed class NativeComputerUseEndToEndTests
         Assert.False(initial.Truncated);
         var secure = Assert.Single(initial.Elements, e => e.Protected);
         Assert.Null(secure.Value);
+        await semantic.FillSecretAsync(window.Id, secure, "native-e2e-secret");
+        var afterSecret = await semantic.SnapshotAsync(window.Id, 500);
+        var secureAfterFill = Assert.Single(afterSecret.Elements, e => e.Protected);
+        Assert.Null(secureAfterFill.Value);
         Assert.Contains(initial.Elements, e => e.Name == "Name" && e.Role is "textbox" or "text field");
         Assert.Contains(initial.Elements, e => e.Name == "Increment");
 

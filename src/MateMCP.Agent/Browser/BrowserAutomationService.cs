@@ -55,7 +55,14 @@ public sealed record BrowserActionResult(
     string? Role,
     string? Name,
     BrowserBounds? Bounds,
-    bool? Checked = null);
+    bool? Checked = null,
+    bool? Protected = null);
+public sealed record BrowserSecretTarget(
+    string BindingId,
+    string Role,
+    string? Name,
+    bool Protected,
+    BrowserBounds? Bounds);
 public sealed record BrowserSessionStatus(
     bool Active,
     string? Channel,
@@ -178,6 +185,56 @@ public sealed class BrowserAutomationService : IAsyncDisposable
             var result = await EvaluateActionAsync(selector, "fill", text, cancellationToken);
             if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Browser fill failed.");
             return result;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<BrowserSecretTarget> BindSecretTargetAsync(BrowserSelector selector, CancellationToken cancellationToken = default)
+    {
+        ValidateSelector(selector);
+        var bindingId = Guid.NewGuid().ToString("n");
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var result = await EvaluateActionAsync(selector, "bind-secret", bindingId, cancellationToken);
+            if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Browser secret target binding failed.");
+            if (result.Role is not ("textbox" or "password"))
+                throw new InvalidOperationException("Browser secret injection requires a text or password input.");
+            return new BrowserSecretTarget(bindingId, result.Role, result.Name, result.Protected == true, result.Bounds);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<BrowserActionResult> FillBoundSecretAsync(BrowserSecretTarget target, string secret, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(secret);
+        if (secret.Length > 16_384) throw new ArgumentOutOfRangeException(nameof(secret), "Secret value is too large.");
+        var selector = new BrowserSelector(
+            Css: $"[data-matemcp-secret-binding=\"{target.BindingId}\"]",
+            Role: target.Role,
+            Name: target.Name);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var result = await EvaluateActionAsync(selector, "fill-secret", secret, cancellationToken);
+            if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Browser secret injection failed.");
+            if (result.Protected != target.Protected)
+                throw new InvalidOperationException("The bound browser field protection state changed before secret injection.");
+            return result;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task ReleaseSecretBindingAsync(string bindingId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(bindingId)) return;
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_cdp is null) return;
+            var encoded = JsonSerializer.Serialize(bindingId, Json);
+            _ = await EvaluateStringAsync($"JSON.stringify((() => {{ const id={encoded}; let count=0; for (const el of document.querySelectorAll('[data-matemcp-secret-binding]')) {{ if (el.getAttribute('data-matemcp-secret-binding')===id) {{ el.removeAttribute('data-matemcp-secret-binding'); count++; }} }} return {{count}}; }})())", cancellationToken);
         }
         finally { _gate.Release(); }
     }
@@ -881,7 +938,7 @@ JSON.stringify((() => {
     const interactive = ['button','link','textbox','password','checkbox','radio','combobox','listbox','option'].includes(role) || el.tabIndex >= 0;
     if (!interactive && !name && !(/^h[1-6]$/.test(tag))) continue;
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
-    const protectedValue = tag === 'input' && norm(el.type).toLowerCase() === 'password';
+    const protectedValue = (tag === 'input' && norm(el.type).toLowerCase() === 'password') || el.getAttribute('data-matemcp-secret-guard') === '1';
     let value = null;
     if (!protectedValue && ('value' in el) && typeof el.value !== 'object') value = norm(el.value);
     elements.push({
@@ -967,9 +1024,18 @@ JSON.stringify((() => {
   }
   const r = el.getBoundingClientRect();
   const role = roleOf(el);
-  const result = {ok:true,error:null,matchCount:count,role,name:nameOf(el)||null,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},checked:(role==='checkbox'||role==='radio')?!!el.checked:null};
+  const protectedValue = el.tagName.toLowerCase() === 'input' && norm(el.type).toLowerCase() === 'password';
+  const result = {ok:true,error:null,matchCount:count,role,name:nameOf(el)||null,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},checked:(role==='checkbox'||role==='radio')?!!el.checked:null,protected:protectedValue};
   el.scrollIntoView({block:'center',inline:'center'});
   if (action === 'click') { el.focus({preventScroll:true}); el.click(); if (document.activeElement !== el) el.focus({preventScroll:true}); return result; }
+  if (action === 'bind-secret') {
+    const tag = el.tagName.toLowerCase();
+    if ((tag !== 'input' && tag !== 'textarea') || (role !== 'textbox' && role !== 'password'))
+      return {...result,ok:false,error:'Selected element is not a text/password input suitable for secret injection.'};
+    if (!text || !/^[a-f0-9]{32}$/.test(text)) return {...result,ok:false,error:'Invalid secret target binding token.'};
+    el.setAttribute('data-matemcp-secret-binding',text);
+    return result;
+  }
   if (action === 'check') {
     if (role !== 'checkbox' && role !== 'radio') return {...result,ok:false,error:'Selected element is not a checkbox or radio control.'};
     const desired = text === 'true';
@@ -982,21 +1048,38 @@ JSON.stringify((() => {
     }
     return {...result,checked:!!el.checked};
   }
-  if (action === 'fill') {
-    const protectedValue = el.tagName.toLowerCase() === 'input' && norm(el.type).toLowerCase() === 'password';
-    if (protectedValue) return {...result,ok:false,error:'MateMCP refuses to fill password/protected browser fields.'};
+  if (action === 'fill' || action === 'fill-secret') {
+    const tag = el.tagName.toLowerCase();
+    const secretFill = action === 'fill-secret';
+    const guarded = el.getAttribute('data-matemcp-secret-guard') === '1';
+    if (!secretFill && protectedValue) return {...result,ok:false,error:'MateMCP refuses to fill password/protected browser fields.'};
+    if (secretFill && ((tag !== 'input' && tag !== 'textarea') || (role !== 'textbox' && role !== 'password')))
+      return {...result,ok:false,error:'Selected element is not a text/password input suitable for secret injection.'};
     el.focus();
-    if (el.isContentEditable) {
+    if (!secretFill && el.isContentEditable) {
       el.textContent = text ?? '';
       el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text??''}));
       return result;
     }
     if (!('value' in el)) return {...result,ok:false,error:'Selected element is not editable.'};
+    if (secretFill && !protectedValue) {
+      if (!guarded) el.setAttribute('data-matemcp-secret-security-original',el.style.getPropertyValue('-webkit-text-security') || '');
+      el.setAttribute('data-matemcp-secret-guard','1');
+      el.style.setProperty('-webkit-text-security','disc');
+    }
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(proto,'value');
     if (descriptor && descriptor.set) descriptor.set.call(el,text??''); else el.value = text??'';
     el.dispatchEvent(new Event('input',{bubbles:true}));
     el.dispatchEvent(new Event('change',{bubbles:true}));
+    if (secretFill) {
+      el.removeAttribute('data-matemcp-secret-binding');
+    } else if (guarded) {
+      const original = el.getAttribute('data-matemcp-secret-security-original') || '';
+      if (original) el.style.setProperty('-webkit-text-security',original); else el.style.removeProperty('-webkit-text-security');
+      el.removeAttribute('data-matemcp-secret-security-original');
+      el.removeAttribute('data-matemcp-secret-guard');
+    }
     return result;
   }
   return {...result,ok:false,error:'Unknown browser action.'};

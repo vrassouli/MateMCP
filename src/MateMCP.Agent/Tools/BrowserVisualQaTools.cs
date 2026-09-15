@@ -34,6 +34,7 @@ public sealed class BrowserVisualQaTools(ApprovalService approvals, AuditLog aud
         [Description("Optional CSS selectors hidden without collapsing layout during this capture. Useful for timestamps, cursors, ads, or other dynamic regions. Maximum 32 selectors.")] IReadOnlyList<string>? maskCss = null,
         CancellationToken cancellationToken = default)
     {
+        if (SensitiveUiGuard.Shared.Active) throw new McpException(SensitiveUiGuard.CaptureBlockedMessage);
         EnsureComputerUseAvailable();
         var viewport = BrowserVisualQaService.ResolveViewport(preset, width, height, deviceScaleFactor);
         var assessment = ComputerUseRiskClassifier.AssessSemantic("view");

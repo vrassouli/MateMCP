@@ -13,9 +13,11 @@ public sealed class SemanticUiService
     {
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         maxElements = Math.Clamp(maxElements, 1, 1000);
-        if (OperatingSystem.IsWindows()) return await _windows.SnapshotAsync(window.Id, maxElements, cancellationToken);
-        if (OperatingSystem.IsMacOS()) return await MacSemanticUi.SnapshotAsync(window, maxElements, cancellationToken);
-        throw UnsupportedPlatform();
+        UiSnapshot snapshot;
+        if (OperatingSystem.IsWindows()) snapshot = await _windows.SnapshotAsync(window.Id, maxElements, cancellationToken);
+        else if (OperatingSystem.IsMacOS()) snapshot = await MacSemanticUi.SnapshotAsync(window, maxElements, cancellationToken);
+        else throw UnsupportedPlatform();
+        return SensitiveUiGuard.Shared.RedactAndReconcile(snapshot);
     }
 
     public async Task<UiElementInfo> FocusAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
@@ -41,6 +43,24 @@ public sealed class SemanticUiService
         var window = await ResolveWindowAsync(windowId, cancellationToken);
         if (OperatingSystem.IsWindows()) return await _windows.ActAsync(window.Id, selector, "value", text, cancellationToken);
         if (OperatingSystem.IsMacOS()) return MacSemanticUi.Act(window, selector, "value", text);
+        throw UnsupportedPlatform();
+    }
+
+    public async Task<UiElementInfo> ResolveAsync(string windowId, UiSelector selector, CancellationToken cancellationToken = default)
+    {
+        var snapshot = await SnapshotAsync(windowId, 1000, cancellationToken);
+        return UiSelectorResolver.Resolve(snapshot.Elements, selector);
+    }
+
+    public async Task<UiElementInfo> FillSecretAsync(string windowId, UiElementInfo expected, string secret, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expected.Id);
+        ArgumentNullException.ThrowIfNull(secret);
+        if (secret.Length > 16_384) throw new ArgumentOutOfRangeException(nameof(secret), "Secret value is too large.");
+        var window = await ResolveWindowAsync(windowId, cancellationToken);
+        if (OperatingSystem.IsWindows()) return await _windows.FillSecretAsync(window.Id, expected, secret, cancellationToken);
+        if (OperatingSystem.IsMacOS()) return MacAccessibility.FillSecret(window, expected, secret);
         throw UnsupportedPlatform();
     }
 

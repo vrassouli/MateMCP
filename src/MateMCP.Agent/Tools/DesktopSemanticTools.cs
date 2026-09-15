@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Text;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Desktop;
 using MateMCP.Agent.Security;
@@ -8,7 +10,12 @@ using ModelContextProtocol.Server;
 namespace MateMCP.Agent.Tools;
 
 [McpServerToolType]
-public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog audit, ComputerUsePreviewService preview)
+public sealed class DesktopSemanticTools(
+    ApprovalService approvals,
+    AuditLog audit,
+    ComputerUsePreviewService preview,
+    ICredentialStore secrets,
+    CredentialInjectionRateLimiter injectionRateLimiter)
 {
     private readonly SemanticUiService _semantic = new();
     private readonly MacSemanticUiActionService _macSemantic = new();
@@ -44,6 +51,100 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
         string windowId, string text, string? role = null, string? name = null, string? automationId = null,
         string? parentId = null, int? index = null, CancellationToken cancellationToken = default)
         => await ActAsync("value", windowId, Selector(role, name, automationId, parentId, index), text, cancellationToken);
+
+    [McpServerTool(Name = "ui_fill_secret", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
+    [Description("Safely fills a uniquely matched browser/native text or password field with a locally stored MateMCP credential. Pass only the credential name; the plaintext is resolved inside the Agent and is never returned to the AI, approvals, logs, audit, or tool output. The target is bound before approval and revalidated by exact accessibility element id immediately before injection. If the target is an ordinary unmasked textbox, MateMCP temporarily suppresses visual/DOM capture and redacts semantic values until the field is cleared or disappears.")]
+    public async Task<object> FillSecret(
+        string windowId,
+        string credential,
+        string? role = null,
+        string? name = null,
+        string? automationId = null,
+        string? parentId = null,
+        int? index = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureComputerUseAvailable();
+        var selector = Selector(role, name, automationId, parentId, index);
+        var available = await secrets.ListAsync(cancellationToken);
+        var info = available.FirstOrDefault(x => string.Equals(x.Name, credential, StringComparison.OrdinalIgnoreCase));
+        if (info is null) throw new McpException($"Named credential '{credential}' does not exist.");
+
+        UiElementInfo selected;
+        try { selected = await _semantic.ResolveAsync(windowId, selector, cancellationToken); }
+        catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
+
+        var targetDescription = DescribeTarget(selected);
+        var targetFingerprint = TargetFingerprint(windowId, selected);
+        var auditTarget = $"ui:{targetFingerprint}";
+        if (!info.IsAllowedForTool(UserSecretInfo.UiFillSecretTool))
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "denied:tool-policy", cancellationToken);
+            throw new McpException($"Credential '{info.Name}' is not authorized for tool '{UserSecretInfo.UiFillSecretTool}'.");
+        }
+        if (!injectionRateLimiter.TryAcquire(info.Name, out var retryAfter))
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "denied:rate-limit", cancellationToken);
+            throw new McpException($"Credential injection rate limit exceeded. Retry after {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds.");
+        }
+        if (!selected.Enabled) throw new McpException("The selected UI control is disabled.");
+        if (selected.Role is not ("textbox" or "password"))
+            throw new McpException("ui_fill_secret requires an editable text/password control.");
+
+        var assessment = new ComputerUseRiskAssessment(
+            ComputerUseRiskLevel.High,
+            "Enters a locally stored credential into the selected UI field without revealing the secret value to the AI.",
+            "Using a credential in another application is security-sensitive even though MateMCP keeps the plaintext Agent-local.");
+        var approvalTarget = $"{info.Name}@{auditTarget}";
+        var decision = await approvals.RequestComputerUseAsync(
+            "secret.use",
+            approvalTarget,
+            $"Use credential {info.Name} in {targetDescription} in window {windowId}. Secret value omitted.",
+            assessment,
+            cancellationToken);
+        if (decision == ApprovalDecision.Deny)
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "denied:approval", cancellationToken);
+            throw new McpException("Credential use denied by local user.");
+        }
+        if (decision == ApprovalDecision.Timeout)
+        {
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "denied:approval-timeout", cancellationToken);
+            throw new McpException("Credential use approval timed out.");
+        }
+
+        var value = await secrets.ResolveAsync(info.Name, cancellationToken);
+        if (value is null) throw new McpException($"Named credential '{info.Name}' could not be resolved from the local secure store.");
+        var visibleGuardArmed = !selected.Protected;
+        if (visibleGuardArmed) SensitiveUiGuard.Shared.Mark(windowId, selected.Id);
+        var injected = false;
+        try
+        {
+            UiElementInfo result;
+            try { result = await _semantic.FillSecretAsync(windowId, selected, value, cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "failed:target-or-platform", cancellationToken);
+                throw new McpException("UI secret injection failed after target validation. The local credential value was not included in the error details.");
+            }
+
+            injected = true;
+            _computerUse.Touch("semantic-input", $"secret-value:{result.Role}:{result.Name ?? result.AutomationId ?? result.Id}");
+            await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "injected", cancellationToken);
+            return new
+            {
+                windowId,
+                credential = info.Name,
+                injected = true,
+                target = new { result.Id, result.Role, result.Name, result.AutomationId, result.Protected }
+            };
+        }
+        finally
+        {
+            value = null;
+            if (visibleGuardArmed && !injected) SensitiveUiGuard.Shared.Clear(windowId, selected.Id);
+        }
+    }
 
     [McpServerTool(Name = "ui_focus", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Focuses a uniquely matched native UI control through the accessibility/UI Automation API.")]
@@ -156,6 +257,7 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     private async Task<UiElementInfo> RecordSuccessAsync(string action, string windowId, UiSelector selector, UiElementInfo result, CancellationToken cancellationToken)
     {
         _computerUse.Touch("semantic-input", $"{action}:{result.Role}:{result.Name ?? result.AutomationId ?? result.Id}");
+        if (action == "value") SensitiveUiGuard.Shared.Clear(windowId, result.Id);
         await preview.TrackWindowAsync(windowId, result.Bounds, action, cancellationToken);
         await audit.WriteAsync("desktop.semantic.action", windowId, $"ok:{action}:{Describe(selector)}", cancellationToken);
         return result;
@@ -199,6 +301,18 @@ public sealed class DesktopSemanticTools(ApprovalService approvals, AuditLog aud
     {
         try { _computerUse.EnsureAvailable(); }
         catch (InvalidOperationException ex) { throw new McpException(ex.Message); }
+    }
+
+    private static string DescribeTarget(UiElementInfo element)
+    {
+        var identity = element.Name ?? element.AutomationId ?? element.Id;
+        return $"{element.Role} '{identity}'";
+    }
+
+    private static string TargetFingerprint(string windowId, UiElementInfo element)
+    {
+        var raw = $"{windowId}\n{element.Id}\n{element.Role}\n{element.Name}\n{element.AutomationId}";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant()[..16];
     }
 
     private static UiSelector Selector(string? role, string? name, string? automationId, string? parentId, int? index)
