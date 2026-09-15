@@ -16,10 +16,15 @@ public sealed class McpScopePolicyTests
         Assert.Equal("mcp:shell", McpScopePolicy.RequiredScopeForTool(tool));
     }
 
-    [Fact]
-    public void Filesystem_write_requires_write_scope()
+    [Theory]
+    [InlineData("filesystem_write")]
+    [InlineData("agent_file_upload_start")]
+    [InlineData("agent_file_upload_chunk")]
+    [InlineData("agent_file_upload_complete")]
+    [InlineData("agent_file_upload_cancel")]
+    public void Write_tools_require_write_scope(string tool)
     {
-        Assert.Equal("mcp:write", McpScopePolicy.RequiredScopeForTool("filesystem_write"));
+        Assert.Equal("mcp:write", McpScopePolicy.RequiredScopeForTool(tool));
     }
 
     [Theory]
