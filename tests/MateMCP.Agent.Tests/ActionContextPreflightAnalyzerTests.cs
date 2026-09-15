@@ -164,7 +164,16 @@ public sealed class ActionContextPreflightAnalyzerTests
     {
         public TempDirectory()
         {
-            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "matemcp-preflight-" + Guid.NewGuid().ToString("n"));
+            var tempRoot = System.IO.Path.GetTempPath();
+            // On macOS, /var is a symlink to /private/var. Git canonicalizes the
+            // repository path through /private while Path.GetTempPath() commonly
+            // returns /var, which can make an in-scope preflight look out-of-scope.
+            // Use the canonical alias for this test fixture so every path producer
+            // (filesystem APIs and Git) observes the same root.
+            if (OperatingSystem.IsMacOS() && tempRoot.StartsWith("/var/", StringComparison.Ordinal))
+                tempRoot = "/private" + tempRoot;
+
+            Path = System.IO.Path.Combine(tempRoot, "matemcp-preflight-" + Guid.NewGuid().ToString("n"));
             Directory.CreateDirectory(Path);
         }
 
