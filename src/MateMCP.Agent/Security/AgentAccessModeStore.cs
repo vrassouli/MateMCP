@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MateMCP.Agent.Configuration;
 
 namespace MateMCP.Agent.Security;
 
@@ -18,10 +19,7 @@ public sealed class AgentAccessModeStore
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path;
 
-    public AgentAccessModeStore() : this(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "MateMCP",
-        FileName))
+    public AgentAccessModeStore() : this(GetDefaultPath())
     {
     }
 
@@ -29,6 +27,10 @@ public sealed class AgentAccessModeStore
     {
         _path = path;
     }
+
+    public static string GetDefaultPath() => Path.Combine(
+        ConfigurationBootstrap.GetUserDataDirectory(),
+        FileName);
 
     public async Task<AgentAccessModeState> GetAsync(CancellationToken cancellationToken = default)
     {
