@@ -235,10 +235,17 @@ public sealed class ActionContextPreflightAnalyzer
 
     private static async Task<GitPreflight?> InspectGitAsync(string allowedRoot, CancellationToken cancellationToken)
     {
-        var repoRoot = await RunGitAsync(allowedRoot, ["rev-parse", "--show-toplevel"], cancellationToken);
-        if (string.IsNullOrWhiteSpace(repoRoot)) return null;
-        repoRoot = repoRoot.Trim();
-        if (!TryResolveInsideRoot(allowedRoot, repoRoot, out var safeRepoRoot)) return null;
+        // Avoid comparing Git's canonical absolute path with the caller's textual path.
+        // On macOS, for example, /var is a symlink to /private/var and Git reports the
+        // canonical alias. Instead ask Git how far the working directory is below the
+        // repository top-level. We only inspect when the authorized working directory
+        // itself is the top-level, preserving the existing no-out-of-scope guarantee.
+        var prefix = await RunGitAsync(allowedRoot, ["rev-parse", "--show-prefix"], cancellationToken);
+        if (prefix is null || !string.IsNullOrWhiteSpace(prefix)) return null;
+
+        string safeRepoRoot;
+        try { safeRepoRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(allowedRoot)); }
+        catch { return null; }
 
         var status = await RunGitAsync(safeRepoRoot, ["status", "--porcelain=v1", "-uno"], cancellationToken) ?? string.Empty;
         var untracked = await RunGitAsync(safeRepoRoot, ["ls-files", "--others", "--exclude-standard"], cancellationToken) ?? string.Empty;
