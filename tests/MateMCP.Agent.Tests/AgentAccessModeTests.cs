@@ -1,3 +1,4 @@
+using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Security;
 
 namespace MateMCP.Agent.Tests;
@@ -22,18 +23,28 @@ public sealed class AgentAccessModeTests
     }
 
     [Fact]
+    public void DefaultStorePath_FollowsAgentConfigurationDataDirectory()
+    {
+        var expected = Path.Combine(ConfigurationBootstrap.GetUserDataDirectory(), AgentAccessModeStore.FileName);
+
+        Assert.Equal(expected, AgentAccessModeStore.GetDefaultPath());
+    }
+
+    [Fact]
     public void ApprovalService_RemovesDecidedRequestsSynchronouslyAndChecksFullAccessBeforePrompting()
     {
         var root = FindRepositoryRoot();
         var service = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Security", "ApprovalService.cs"));
+        var store = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Security", "AgentAccessModeStore.cs"));
 
         Assert.Contains("_pending.TryRemove(id, out _);", service, StringComparison.Ordinal);
         Assert.Contains("accessMode.Mode == AgentAccessMode.FullAccess", service, StringComparison.Ordinal);
         Assert.Contains("allowed:full-access", service, StringComparison.Ordinal);
+        Assert.Contains("ConfigurationBootstrap.GetUserDataDirectory()", store, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Companion_Overview_ExposesExplicitFullAccessWithConfirmationAndImmediateDowngrade()
+    public void Companion_Overview_ExposesExplicitFullAccessWithConfirmationAndUsesAgentDataDirectory()
     {
         var root = FindRepositoryRoot();
         var overview = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdateOverviewCard.razor"));
@@ -44,6 +55,7 @@ public sealed class AgentAccessModeTests
         Assert.Contains("Confirm Full Access", overview, StringComparison.Ordinal);
         Assert.Contains("Safe / Ask", overview, StringComparison.Ordinal);
         Assert.Contains("agent-access-mode.json", overview, StringComparison.Ordinal);
+        Assert.Contains("Path.GetDirectoryName(status.Configuration)", overview, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
