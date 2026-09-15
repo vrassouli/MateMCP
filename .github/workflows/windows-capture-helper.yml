@@ -1,0 +1,51 @@
+name: windows-capture-helper
+
+on:
+  pull_request:
+    paths:
+      - 'src/MateMCP.WindowsCaptureHelper/**'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/windows-capture-helper.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/MateMCP.WindowsCaptureHelper/**'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/windows-capture-helper.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            machine: '8664'
+          - platform: ARM64
+            machine: 'AA64'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows Graphics Capture helper
+        shell: pwsh
+        run: msbuild src/MateMCP.WindowsCaptureHelper/MateMCP.WindowsCaptureHelper.vcxproj /m /p:Configuration=Release /p:Platform=${{ matrix.platform }}
+      - name: Verify PE target architecture
+        shell: pwsh
+        run: |
+          $path = 'src/MateMCP.WindowsCaptureHelper/bin/${{ matrix.platform }}/Release/MateMCP.WindowsCaptureHelper.exe'
+          if (-not (Test-Path $path)) { throw 'Capture helper output missing.' }
+          $bytes = [System.IO.File]::ReadAllBytes($path)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          $expected = [Convert]::ToUInt16('${{ matrix.machine }}', 16)
+          if ($machine -ne $expected) { throw ('Unexpected PE machine 0x{0:X4}; expected 0x{1:X4}.' -f $machine, $expected) }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MateMCP-WindowsCaptureHelper-${{ matrix.platform }}
+          path: src/MateMCP.WindowsCaptureHelper/bin/${{ matrix.platform }}/Release/MateMCP.WindowsCaptureHelper.exe

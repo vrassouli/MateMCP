@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/MateMCP.Agent/**'
       - 'src/MateMCP.Relay/**'
+      - 'src/MateMCP.WindowsCaptureHelper/**'
       - 'scripts/bootstrap-macos.sh'
       - 'scripts/build-screen-capture-kit-macos.sh'
       - 'scripts/bootstrap-windows.ps1'
@@ -137,9 +138,10 @@ jobs:
       - name: Build Windows desktop helper
         run: dotnet build src/MateMCP.WindowsDesktopHelper/MateMCP.WindowsDesktopHelper.csproj -c Release
       - name: Build Windows Graphics Capture helper
-        if: matrix.rid == 'win-x64'
         shell: pwsh
-        run: msbuild src/MateMCP.WindowsCaptureHelper/MateMCP.WindowsCaptureHelper.vcxproj /m /p:Configuration=Release /p:Platform=x64
+        run: |
+          $platform = if ('${{ matrix.rid }}' -eq 'win-arm64') { 'ARM64' } else { 'x64' }
+          msbuild src/MateMCP.WindowsCaptureHelper/MateMCP.WindowsCaptureHelper.vcxproj /m /p:Configuration=Release /p:Platform=$platform
       - name: Publish self-contained agent
         shell: pwsh
         run: dotnet publish src/MateMCP.Agent/MateMCP.Agent.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o package/payload
@@ -147,9 +149,21 @@ jobs:
         shell: pwsh
         run: Copy-Item src/MateMCP.WindowsDesktopHelper/bin/Release/net48/MateMCP.WindowsDesktopHelper.exe package/payload/MateMCP.WindowsDesktopHelper.exe
       - name: Stage Windows Graphics Capture helper
-        if: matrix.rid == 'win-x64'
         shell: pwsh
-        run: Copy-Item src/MateMCP.WindowsCaptureHelper/bin/x64/Release/MateMCP.WindowsCaptureHelper.exe package/payload/MateMCP.WindowsCaptureHelper.exe
+        run: |
+          $platform = if ('${{ matrix.rid }}' -eq 'win-arm64') { 'ARM64' } else { 'x64' }
+          Copy-Item "src/MateMCP.WindowsCaptureHelper/bin/$platform/Release/MateMCP.WindowsCaptureHelper.exe" package/payload/MateMCP.WindowsCaptureHelper.exe
+      - name: Verify packaged Windows Graphics Capture helper architecture
+        shell: pwsh
+        run: |
+          $path = 'package/payload/MateMCP.WindowsCaptureHelper.exe'
+          if (-not (Test-Path $path)) { throw 'Packaged Windows Graphics Capture helper missing.' }
+          $bytes = [System.IO.File]::ReadAllBytes($path)
+          if ($bytes.Length -lt 256) { throw 'Windows Graphics Capture helper is unexpectedly small.' }
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          $expected = if ('${{ matrix.rid }}' -eq 'win-arm64') { [uint16]0xAA64 } else { [uint16]0x8664 }
+          if ($machine -ne $expected) { throw ('Unexpected helper PE machine 0x{0:X4}; expected 0x{1:X4} for {2}.' -f $machine, $expected, '${{ matrix.rid }}') }
       - name: Smoke test packaged local management surface
         if: matrix.rid == 'win-x64'
         shell: pwsh
