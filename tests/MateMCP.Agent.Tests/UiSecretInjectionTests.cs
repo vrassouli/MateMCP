@@ -26,6 +26,9 @@ public sealed class UiSecretInjectionTests
 
         Assert.Contains("_semantic.ResolveAsync(windowId, selector", tools, StringComparison.Ordinal);
         Assert.Contains("_semantic.FillSecretAsync(windowId, selected, value", tools, StringComparison.Ordinal);
+        var guardIndex = tools.IndexOf("SensitiveUiGuard.Shared.Mark(windowId, selected.Id)", StringComparison.Ordinal);
+        var injectIndex = tools.IndexOf("_semantic.FillSecretAsync(windowId, selected, value", StringComparison.Ordinal);
+        Assert.True(guardIndex >= 0 && guardIndex < injectIndex, "Visible-secret capture guard must be armed before platform injection.");
         Assert.DoesNotContain("value = value", tools, StringComparison.Ordinal);
         Assert.Contains("FillSecretAsync(string windowId, UiElementInfo expected, string secret", semantic, StringComparison.Ordinal);
         Assert.Contains("entries.SingleOrDefault(x => string.Equals(x.Info.Id, request.ElementId", windows, StringComparison.Ordinal);

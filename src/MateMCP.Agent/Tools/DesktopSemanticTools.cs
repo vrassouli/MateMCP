@@ -115,6 +115,9 @@ public sealed class DesktopSemanticTools(
 
         var value = await secrets.ResolveAsync(info.Name, cancellationToken);
         if (value is null) throw new McpException($"Named credential '{info.Name}' could not be resolved from the local secure store.");
+        var visibleGuardArmed = !selected.Protected;
+        if (visibleGuardArmed) SensitiveUiGuard.Shared.Mark(windowId, selected.Id);
+        var injected = false;
         try
         {
             UiElementInfo result;
@@ -125,8 +128,8 @@ public sealed class DesktopSemanticTools(
                 throw new McpException(ex.Message);
             }
 
+            injected = true;
             _computerUse.Touch("semantic-input", $"secret-value:{result.Role}:{result.Name ?? result.AutomationId ?? result.Id}");
-            if (!result.Protected) SensitiveUiGuard.Shared.Mark(windowId, result.Id);
             await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "injected", cancellationToken);
             return new
             {
@@ -136,7 +139,11 @@ public sealed class DesktopSemanticTools(
                 target = new { result.Id, result.Role, result.Name, result.AutomationId, result.Protected }
             };
         }
-        finally { value = null; }
+        finally
+        {
+            value = null;
+            if (visibleGuardArmed && !injected) SensitiveUiGuard.Shared.Clear(windowId, selected.Id);
+        }
     }
 
     [McpServerTool(Name = "ui_focus", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
