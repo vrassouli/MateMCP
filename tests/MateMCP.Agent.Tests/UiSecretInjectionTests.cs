@@ -98,6 +98,17 @@ public sealed class UiSecretInjectionTests
         Assert.Contains("SensitiveUiGuard.Shared.Active", preview, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Secret_injection_failures_do_not_return_platform_or_page_exception_text()
+    {
+        var root = FindRepositoryRoot();
+        var desktop = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Tools", "DesktopSemanticTools.cs"));
+        var browser = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Tools", "BrowserTools.cs"));
+
+        Assert.Contains("UI secret injection failed after target validation. The local credential value was not included in the error details.", desktop, StringComparison.Ordinal);
+        Assert.Contains("Browser secret injection failed after target validation. The local credential value was not included in the error details.", browser, StringComparison.Ordinal);
+    }
+
     private static MateMCP.Agent.Desktop.UiSnapshot Snapshot(string windowId, bool truncated, string? value)
         => new(windowId, "test", truncated,
         [

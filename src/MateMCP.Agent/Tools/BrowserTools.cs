@@ -142,10 +142,10 @@ public sealed class BrowserTools(
             if (value is null) throw new McpException($"Named credential '{info.Name}' could not be resolved from the local secure store.");
             BrowserActionResult result;
             try { result = await _browser.FillBoundSecretAsync(target, value, cancellationToken); }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.BrowserFillSecretTool, auditTarget, "failed:target-or-browser", cancellationToken);
-                throw new McpException(ex.Message);
+                throw new McpException("Browser secret injection failed after target validation. The local credential value was not included in the error details.");
             }
 
             _computerUse.Touch("browser-input", $"secret-fill:{result.Role}:{result.Name}");

@@ -122,10 +122,10 @@ public sealed class DesktopSemanticTools(
         {
             UiElementInfo result;
             try { result = await _semantic.FillSecretAsync(windowId, selected, value, cancellationToken); }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 await audit.WriteCredentialUsageAsync(info.Name, UserSecretInfo.UiFillSecretTool, auditTarget, "failed:target-or-platform", cancellationToken);
-                throw new McpException(ex.Message);
+                throw new McpException("UI secret injection failed after target validation. The local credential value was not included in the error details.");
             }
 
             injected = true;
