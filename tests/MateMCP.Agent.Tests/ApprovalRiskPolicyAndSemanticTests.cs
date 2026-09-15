@@ -5,7 +5,7 @@ namespace MateMCP.Agent.Tests;
 public sealed class ApprovalRiskPolicyAndSemanticTests
 {
     [Fact]
-    public void DefaultPolicy_AllowsStoredRulesOnlyForLowAndMedium()
+    public void DefaultPolicy_AllowsStoredAndPersistentTrustForEveryNonDeniedRisk()
     {
         var options = new ApprovalRiskPolicyOptions();
 
@@ -19,15 +19,17 @@ public sealed class ApprovalRiskPolicyAndSemanticTests
         Assert.True(low.CanUseStoredRule);
         Assert.True(low.CanCreateBroadTrust);
         Assert.True(medium.CanUseStoredRule);
+        Assert.True(medium.CanCreateBroadTrust);
 
         Assert.Equal(ApprovalRiskBehavior.RequireApproval, high.Behavior);
-        Assert.False(high.CanUseStoredRule);
-        Assert.False(high.CanCreateBroadTrust);
+        Assert.True(high.CanUseStoredRule);
+        Assert.True(high.CanCreateBroadTrust);
         Assert.Equal(ApprovalRiskBehavior.RequireApproval, critical.Behavior);
-        Assert.False(critical.CanUseStoredRule);
-        Assert.False(critical.CanCreateBroadTrust);
+        Assert.True(critical.CanUseStoredRule);
+        Assert.True(critical.CanCreateBroadTrust);
         Assert.Equal(ApprovalRiskBehavior.RequireApproval, unknown.Behavior);
-        Assert.False(unknown.CanUseStoredRule);
+        Assert.True(unknown.CanUseStoredRule);
+        Assert.True(unknown.CanCreateBroadTrust);
     }
 
     [Fact]
@@ -39,19 +41,23 @@ public sealed class ApprovalRiskPolicyAndSemanticTests
             Critical = ApprovalRiskBehavior.Deny
         };
 
-        Assert.Equal(ApprovalRiskBehavior.AutoAllow,
-            ApprovalRiskPolicyEvaluator.Evaluate(Assessment(ActionRiskLevel.Low), options).Behavior);
-        Assert.Equal(ApprovalRiskBehavior.Deny,
-            ApprovalRiskPolicyEvaluator.Evaluate(Assessment(ActionRiskLevel.Critical), options).Behavior);
+        var autoAllowed = ApprovalRiskPolicyEvaluator.Evaluate(Assessment(ActionRiskLevel.Low), options);
+        var denied = ApprovalRiskPolicyEvaluator.Evaluate(Assessment(ActionRiskLevel.Critical), options);
+
+        Assert.Equal(ApprovalRiskBehavior.AutoAllow, autoAllowed.Behavior);
+        Assert.True(autoAllowed.CanCreateBroadTrust);
+        Assert.Equal(ApprovalRiskBehavior.Deny, denied.Behavior);
+        Assert.False(denied.CanUseStoredRule);
+        Assert.False(denied.CanCreateBroadTrust);
     }
 
     [Fact]
-    public void BroadTrust_ForHighRiskRequiresBothBehaviorAndExplicitRiskOptIn()
+    public void BroadTrustRisks_LegacySettingNoLongerPreventsHighRiskUserTrust()
     {
         var options = new ApprovalRiskPolicyOptions
         {
-            High = ApprovalRiskBehavior.AllowStoredRule,
-            BroadTrustRisks = [ActionRiskLevel.Low, ActionRiskLevel.Medium, ActionRiskLevel.High]
+            High = ApprovalRiskBehavior.RequireApproval,
+            BroadTrustRisks = [ActionRiskLevel.Low]
         };
 
         var decision = ApprovalRiskPolicyEvaluator.Evaluate(Assessment(ActionRiskLevel.High), options);
