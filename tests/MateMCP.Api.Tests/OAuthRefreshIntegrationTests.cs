@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MateMCP.Api.Data;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
@@ -211,6 +212,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
     {
         _client?.Dispose();
         if (_factory is not null) await _factory.DisposeAsync();
+        SqliteConnection.ClearAllPools();
         foreach (var (key, value) in _originalEnvironment) Environment.SetEnvironmentVariable(key, value);
         if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
     }
