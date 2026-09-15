@@ -12,6 +12,7 @@ public sealed class SemanticUiToolTests
             "ui_snapshot",
             "ui_click",
             "ui_type",
+            "ui_fill_secret",
             "ui_focus",
             "ui_toggle",
             "ui_select",

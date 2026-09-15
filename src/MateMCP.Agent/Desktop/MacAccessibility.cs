@@ -179,6 +179,31 @@ internal static class MacAccessibility
         }
     }
 
+    public static UiElementInfo FillSecret(DesktopWindowInfo window, UiElementInfo expected, string secret)
+    {
+        EnsureTrusted();
+        var root = CopyWindow(window.ProcessId, window.Title);
+        IntPtr element = IntPtr.Zero;
+        try
+        {
+            element = ResolvePath(root, expected.Id);
+            var selected = BuildInfo(element, expected.Id, ParentElementId(expected.Id));
+            if (!SameBinding(selected, expected))
+                throw new InvalidOperationException("The bound UI element identity changed before secret injection.");
+            if (!selected.Enabled) throw new InvalidOperationException("The bound UI element is disabled.");
+            if (selected.Role is not ("textbox" or "password"))
+                throw new InvalidOperationException("The bound UI element is not an editable text/password control.");
+            SetString(element, AxValue, secret, selected, "set-secret-value");
+            var updated = BuildInfo(element, selected.Id, selected.ParentId);
+            return updated with { Value = null };
+        }
+        finally
+        {
+            if (element != IntPtr.Zero) CFRelease(element);
+            CFRelease(root);
+        }
+    }
+
     public static UiElementInfo Act(
         DesktopWindowInfo window,
         UiElementInfo selected,
@@ -242,6 +267,14 @@ internal static class MacAccessibility
             CFRelease(root);
         }
     }
+
+    private static bool SameBinding(UiElementInfo current, UiElementInfo expected)
+        => string.Equals(current.Id, expected.Id, StringComparison.Ordinal)
+           && string.Equals(current.ParentId ?? string.Empty, expected.ParentId ?? string.Empty, StringComparison.Ordinal)
+           && string.Equals(current.Role, expected.Role, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(current.Name ?? string.Empty, expected.Name ?? string.Empty, StringComparison.Ordinal)
+           && string.Equals(current.AutomationId ?? string.Empty, expected.AutomationId ?? string.Empty, StringComparison.Ordinal)
+           && current.Protected == expected.Protected;
 
     private static void Walk(
         IntPtr element,

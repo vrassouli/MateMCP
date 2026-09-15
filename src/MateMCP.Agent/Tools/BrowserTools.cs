@@ -38,6 +38,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         [Description("Maximum elements returned, clamped to 1..1500.")] int maxElements = 500,
         CancellationToken cancellationToken = default)
     {
+        if (SensitiveUiGuard.Shared.Active) throw new McpException(SensitiveUiGuard.CaptureBlockedMessage);
         await RequireRiskApprovalAsync("browser.view", "dom-inspection", "view", null, "Inspect the active browser DOM, accessible names, geometry, selected styles, and non-password form values.", cancellationToken);
         EnsureComputerUseAvailable();
         var snapshot = await _browser.SnapshotAsync(maxElements, cancellationToken);
@@ -86,6 +87,7 @@ public sealed class BrowserTools(ApprovalService approvals, AuditLog audit)
         [Description("Capture beyond the current viewport where Chromium supports it.")] bool fullPage = false,
         CancellationToken cancellationToken = default)
     {
+        if (SensitiveUiGuard.Shared.Active) throw new McpException(SensitiveUiGuard.CaptureBlockedMessage);
         await RequireRiskApprovalAsync("browser.view", "visual-inspection", "view", null, $"Capture {(fullPage ? "the full browser page" : "the browser viewport")} as pixels.", cancellationToken);
         EnsureComputerUseAvailable();
         var shot = await _browser.ScreenshotAsync(fullPage, cancellationToken);

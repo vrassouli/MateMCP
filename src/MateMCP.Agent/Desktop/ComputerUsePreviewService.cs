@@ -129,6 +129,12 @@ public sealed class ComputerUsePreviewService : IDisposable
 
     public async Task<DesktopCaptureResult?> CaptureFrameAsync(CancellationToken cancellationToken = default)
     {
+        if (SensitiveUiGuard.Shared.Active)
+        {
+            if (OperatingSystem.IsMacOS()) _macStream.Stop();
+            if (OperatingSystem.IsWindows()) _windowsStream.Stop();
+            return null;
+        }
         var state = GetState();
         if (!state.Active || string.IsNullOrWhiteSpace(state.WindowId)) return null;
 

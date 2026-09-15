@@ -17,6 +17,7 @@ public sealed record UserSecretInfo(
     IReadOnlyList<string>? AllowedTools = null)
 {
     public const string ShellSessionSendSecretTool = "shell_session_send_secret";
+    public const string UiFillSecretTool = "ui_fill_secret";
 
     public IReadOnlyList<string> EffectiveAllowedTools =>
         AllowedTools is null ? [ShellSessionSendSecretTool] : AllowedTools;

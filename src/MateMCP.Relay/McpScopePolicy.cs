@@ -62,6 +62,7 @@ public static class McpScopePolicy
         "window_focus" or
         "ui_click" or
         "ui_type" or
+        "ui_fill_secret" or
         "ui_focus" or
         "ui_toggle" or
         "ui_select" or

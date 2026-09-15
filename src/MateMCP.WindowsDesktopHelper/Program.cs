@@ -37,6 +37,7 @@ namespace MateMCP.WindowsDesktopHelper
             {
                 case "snapshot": return Response.ForSnapshot(Snapshot(request.WindowId, Math.Max(1, Math.Min(request.MaxElements <= 0 ? 400 : request.MaxElements, 1000))));
                 case "act": return Response.ForElement(Act(request));
+                case "fill-secret": return Response.ForElement(FillSecret(request));
                 case "click-at": return Response.ForElement(ClickAt(request));
                 default: throw new ArgumentException("Unsupported Windows desktop helper command.");
             }
@@ -73,6 +74,46 @@ namespace MateMCP.WindowsDesktopHelper
                 default: throw new ArgumentException("Unsupported semantic UI action.");
             }
             return BuildInfo(element, selected.Info.Id, selected.Info.ParentId);
+        }
+
+        private static Element FillSecret(Request request)
+        {
+            try
+            {
+                bool ignored;
+                var entries = Traverse(ResolveRoot(request.WindowId), 1000, out ignored);
+                var selected = entries.SingleOrDefault(x => string.Equals(x.Info.Id, request.ElementId, StringComparison.Ordinal))
+                    ?? throw new NotFoundException("The bound UI element is no longer available. Take a new ui_snapshot and retry.");
+                if (request.Expected == null || !SameBinding(selected.Info, request.Expected))
+                    throw new InvalidOperationException("The bound UI element identity changed before secret injection.");
+                if (!selected.Info.Enabled) throw new InvalidOperationException("The bound UI element is disabled.");
+                if (selected.Info.Role != "textbox" && selected.Info.Role != "password")
+                    throw new InvalidOperationException("The bound UI element is not an editable text/password control.");
+                Pattern<ValuePattern>(selected.Automation, ValuePattern.Pattern, "set-secret-value", selected.Info).SetValue(request.Text ?? "");
+                return Redact(BuildInfo(selected.Automation, selected.Info.Id, selected.Info.ParentId));
+            }
+            catch (AmbiguousException) { throw; }
+            catch (NotFoundException) { throw; }
+            catch (Exception)
+            {
+                throw new InvalidOperationException("Windows UI Automation could not set the selected secret value.");
+            }
+        }
+
+        private static Element Redact(Element item)
+        {
+            item.Value = null;
+            return item;
+        }
+
+        private static bool SameBinding(Element current, Element expected)
+        {
+            return string.Equals(current.Id, expected.Id, StringComparison.Ordinal)
+                && string.Equals(current.ParentId ?? "", expected.ParentId ?? "", StringComparison.Ordinal)
+                && string.Equals(current.Role ?? "", expected.Role ?? "", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(current.Name ?? "", expected.Name ?? "", StringComparison.Ordinal)
+                && string.Equals(current.AutomationId ?? "", expected.AutomationId ?? "", StringComparison.Ordinal)
+                && current.Protected == expected.Protected;
         }
 
         private static Element ClickAt(Request request)
@@ -252,7 +293,7 @@ namespace MateMCP.WindowsDesktopHelper
         private sealed class Entry { public Entry(AutomationElement a,Element i){Automation=a;Info=i;} public AutomationElement Automation{get;} public Element Info{get;} }
     }
 
-    public sealed class Request { public string Command{get;set;} public string WindowId{get;set;} public int MaxElements{get;set;} public string Action{get;set;} public Selector Selector{get;set;} public string Text{get;set;} public double X{get;set;} public double Y{get;set;} }
+    public sealed class Request { public string Command{get;set;} public string WindowId{get;set;} public int MaxElements{get;set;} public string Action{get;set;} public Selector Selector{get;set;} public string Text{get;set;} public string ElementId{get;set;} public Element Expected{get;set;} public double X{get;set;} public double Y{get;set;} }
     public sealed class Selector { public string Role{get;set;} public string Name{get;set;} public string AutomationId{get;set;} public string ParentId{get;set;} public int? Index{get;set;} }
     public sealed class Snapshot { public string WindowId{get;set;} public string Platform{get;set;} public bool Truncated{get;set;} public List<Element> Elements{get;set;} }
     public sealed class Element { public string Id{get;set;} public string ParentId{get;set;} public string Role{get;set;} public string Name{get;set;} public string AutomationId{get;set;} public string Value{get;set;} public bool Protected{get;set;} public bool Enabled{get;set;} public bool Focused{get;set;} public bool? Selected{get;set;} public bool? Checked{get;set;} public bool? Expanded{get;set;} public RectDto Bounds{get;set;} public List<string> Actions{get;set;} }
