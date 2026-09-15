@@ -15,6 +15,7 @@ public sealed record AgentAccessModeState(AgentAccessMode Mode, DateTimeOffset U
 public sealed class AgentAccessModeStore
 {
     public const string FileName = "agent-access-mode.json";
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path;
@@ -41,7 +42,7 @@ public sealed class AgentAccessModeStore
                 return new AgentAccessModeState(AgentAccessMode.Ask, DateTimeOffset.MinValue);
 
             await using var stream = File.OpenRead(_path);
-            return await JsonSerializer.DeserializeAsync<AgentAccessModeState>(stream, cancellationToken: cancellationToken)
+            return await JsonSerializer.DeserializeAsync<AgentAccessModeState>(stream, Json, cancellationToken)
                 ?? new AgentAccessModeState(AgentAccessMode.Ask, DateTimeOffset.MinValue);
         }
         catch (JsonException)
@@ -63,7 +64,7 @@ public sealed class AgentAccessModeStore
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             var temporaryPath = _path + ".tmp";
             await using (var stream = File.Create(temporaryPath))
-                await JsonSerializer.SerializeAsync(stream, state, cancellationToken: cancellationToken);
+                await JsonSerializer.SerializeAsync(stream, state, Json, cancellationToken);
 
             File.Move(temporaryPath, _path, overwrite: true);
             if (!OperatingSystem.IsWindows())

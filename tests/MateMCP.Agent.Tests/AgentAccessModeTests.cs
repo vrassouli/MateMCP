@@ -22,6 +22,36 @@ public sealed class AgentAccessModeTests
         Assert.True(persisted.UpdatedAt > DateTimeOffset.MinValue);
     }
 
+    [Theory]
+    [InlineData("{\"mode\":2,\"updatedAt\":\"2026-09-15T16:09:02.398767+00:00\"}")]
+    [InlineData("{\"Mode\":2,\"UpdatedAt\":\"2026-09-15T16:09:02.398767+00:00\"}")]
+    public async Task AccessModeStore_ReadsCompanionAndLegacyJsonShapes(string json)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "matemcp-access-mode-tests", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, AgentAccessModeStore.FileName);
+        await File.WriteAllTextAsync(path, json);
+
+        var state = await new AgentAccessModeStore(path).GetAsync();
+
+        Assert.Equal(AgentAccessMode.FullAccess, state.Mode);
+        Assert.Equal(DateTimeOffset.Parse("2026-09-15T16:09:02.398767+00:00"), state.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task AccessModeStore_WritesCompanionCompatibleWebJson()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "matemcp-access-mode-tests", Guid.NewGuid().ToString("n"));
+        var path = Path.Combine(root, AgentAccessModeStore.FileName);
+
+        await new AgentAccessModeStore(path).SetAsync(AgentAccessMode.FullAccess);
+
+        var json = await File.ReadAllTextAsync(path);
+        Assert.Contains("\"mode\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"updatedAt\":", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Mode\":", json, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void DefaultStorePath_FollowsAgentConfigurationDataDirectory()
     {

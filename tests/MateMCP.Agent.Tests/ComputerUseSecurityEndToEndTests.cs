@@ -36,6 +36,7 @@ public sealed class ComputerUseSecurityEndToEndTests
                 new ApprovalPolicyStore(policyPath),
                 audit,
                 notifications,
+                new AgentAccessModeStore(Path.Combine(root, AgentAccessModeStore.FileName)),
                 NullLogger<ApprovalService>.Instance);
 
             const string privateSentinel = "PRIVATE-SUMMARY-SENTINEL";
