@@ -35,7 +35,7 @@ trap cleanup EXIT
 
 mkdir -p "$package"
 tar -xzf "$archive" -C "$package"
-printf '%s' "$MATEMCP_MACOS_P12_BASE64" | base64 --decode > "$p12"
+printf '%s' "$MATEMCP_MACOS_P12_BASE64" | base64 -D > "$p12"
 
 security create-keychain -p "$keychain_password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
@@ -74,7 +74,7 @@ if [[ "$kind" == "desktop" ]]; then
     echo "Companion app bundle was not found in Desktop package." >&2
     exit 1
   fi
-  codesign --force --deep --options runtime --timestamp --keychain "$keychain" --sign "$identity" "$app"
+  codesign --force --deep --options runtime --timestamp --preserve-metadata=entitlements --keychain "$keychain" --sign "$identity" "$app"
   codesign --verify --deep --strict --verbose=2 "$app"
   bundle_id="$(defaults read "$app/Contents/Info" CFBundleIdentifier)"
   if [[ "$bundle_id" != "com.matemcp.agent.companion" ]]; then
