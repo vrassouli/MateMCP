@@ -12,6 +12,7 @@ public sealed class McpScopePolicyTests
     [InlineData("shell_session_write")]
     [InlineData("shell_session_send_secret")]
     [InlineData("ui_fill_secret")]
+    [InlineData("browser_fill_secret")]
     [InlineData("shell_session_close")]
     [InlineData("mouse_click")]
     [InlineData("keyboard_type")]

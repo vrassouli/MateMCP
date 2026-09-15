@@ -72,6 +72,7 @@ public static class McpScopePolicy
         "browser_open" or
         "browser_click" or
         "browser_fill" or
+        "browser_fill_secret" or
         "browser_set_viewport" or
         "browser_reload" or
         "browser_back" or

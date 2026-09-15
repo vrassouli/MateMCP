@@ -32,6 +32,33 @@ public sealed class BrowserEndToEndWorkflowTests
         Assert.True(secure.Protected);
         Assert.Null(secure.Value);
 
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            browser.FillAsync(new BrowserSelector(Role: "password", Name: "Admin password"), "must-still-be-refused"));
+
+        var passwordTarget = await browser.BindSecretTargetAsync(new BrowserSelector(Role: "password", Name: "Admin password"));
+        Assert.True(passwordTarget.Protected);
+        var passwordResult = await browser.FillBoundSecretAsync(passwordTarget, "browser-e2e-password-secret");
+        Assert.True(passwordResult.Protected);
+        var afterPasswordSecret = await browser.SnapshotAsync(300);
+        var passwordAfterSecret = Assert.Single(afterPasswordSecret.Elements, e => e.Role == "password" && e.Name == "Admin password");
+        Assert.True(passwordAfterSecret.Protected);
+        Assert.Null(passwordAfterSecret.Value);
+
+        var visibleTarget = await browser.BindSecretTargetAsync(new BrowserSelector(Role: "textbox", Name: "Search devices"));
+        Assert.False(visibleTarget.Protected);
+        var visibleResult = await browser.FillBoundSecretAsync(visibleTarget, "browser-e2e-visible-secret");
+        Assert.False(visibleResult.Protected);
+        var whileGuarded = await browser.SnapshotAsync(300);
+        var guardedSearch = Assert.Single(whileGuarded.Elements, e => e.Role == "textbox" && e.Name == "Search devices");
+        Assert.True(guardedSearch.Protected);
+        Assert.Null(guardedSearch.Value);
+
+        await browser.FillAsync(new BrowserSelector(Role: "textbox", Name: "Search devices"), "router");
+        var afterGuardClear = await browser.SnapshotAsync(300);
+        var restoredSearch = Assert.Single(afterGuardClear.Elements, e => e.Role == "textbox" && e.Name == "Search devices");
+        Assert.False(restoredSearch.Protected);
+        Assert.Equal("router", restoredSearch.Value);
+
         var beforeDesktop = await visual.CaptureAsync(new VisualCaptureOptions(Preset: "desktop", SettleMs: 50, MaxElements: 300));
         var beforeMobile = await visual.CaptureAsync(new VisualCaptureOptions(Preset: "mobile", SettleMs: 50, MaxElements: 300));
         AssertCaptureBounded(beforeDesktop);

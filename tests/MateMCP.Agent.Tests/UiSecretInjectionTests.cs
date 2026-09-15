@@ -13,6 +13,7 @@ public sealed class UiSecretInjectionTests
             AllowedTools: [UserSecretInfo.UiFillSecretTool]);
         Assert.True(info.IsAllowedForTool("ui_fill_secret"));
         Assert.False(info.IsAllowedForTool("shell_session_send_secret"));
+        Assert.Equal("browser_fill_secret", UserSecretInfo.BrowserFillSecretTool);
     }
 
     [Fact]

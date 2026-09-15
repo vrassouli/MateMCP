@@ -680,7 +680,11 @@
         if (string.IsNullOrWhiteSpace(SecretName) || string.IsNullOrEmpty(SecretValue)) return;
         var allowed = new List<string>();
         if (SecretAllowShell) allowed.Add("shell_session_send_secret");
-        if (SecretAllowUi) allowed.Add("ui_fill_secret");
+        if (SecretAllowUi)
+        {
+            allowed.Add("ui_fill_secret");
+            allowed.Add("browser_fill_secret");
+        }
         await Api.SaveSecretAsync(SecretName.Trim(), SecretValue, string.IsNullOrWhiteSpace(SecretDescription) ? null : SecretDescription.Trim(), allowed, _disposeCts.Token);
         SecretValue = string.Empty;
         Secrets = await Api.GetSecretsAsync(_disposeCts.Token);

@@ -59,6 +59,7 @@ public sealed class BrowserAutomationTests
             "browser_snapshot",
             "browser_click",
             "browser_fill",
+            "browser_fill_secret",
             "browser_screenshot",
             "browser_set_viewport",
             "browser_reload",
