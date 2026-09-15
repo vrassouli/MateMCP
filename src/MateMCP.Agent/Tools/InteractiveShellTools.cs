@@ -34,7 +34,7 @@ public sealed class InteractiveShellTools(
         Idempotent = false,
         OpenWorld = true)]
     [Description("Starts any shell/command-line command in a real PTY/ConPTY and returns a session id plus initial terminal output. When proactive Skills & Memory is enabled and relevant durable context exists, the response also includes a bounded memoryContext. Use this instead of shell_exec whenever the command may prompt, wait for terminal input, open an interactive program, or require a credential. Continue with shell_session_read, shell_session_write, shell_session_send_secret, and shell_session_close.")]
-    public async Task<object> Start(
+    public async Task<ShellSessionStartResult> Start(
         [Description("Shell/command-line command to run. This is intentionally generic and may be any command supported by the local shell.")] string command,
         [Description("Optional configured MateMCP project whose directory, shell policy, and project-scoped Skills & Memory should be used. Omit to run from the Agent user's home directory.")] string? project = null,
         CancellationToken cancellationToken = default)
@@ -74,25 +74,7 @@ public sealed class InteractiveShellTools(
             var memoryContext = memory is null
                 ? null
                 : await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_session_start", project, command, options.Value.ProactiveMemory, cancellationToken);
-            return new
-            {
-                result.SessionId,
-                result.ProcessId,
-                result.Output,
-                result.NextOffset,
-                result.OutputTruncated,
-                result.Exited,
-                result.ExitCode,
-                result.WorkingDirectory,
-                result.CreatedAt,
-                result.LastTouched,
-                result.RequestedSequence,
-                result.FirstAvailableSequence,
-                result.NextSequence,
-                result.AcknowledgedSequence,
-                result.ReplayGap,
-                memoryContext
-            };
+            return ShellSessionStartResult.FromSnapshot(result, memoryContext);
         }
         catch (Exception ex) when (ex is not McpException)
         {
