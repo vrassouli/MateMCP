@@ -1,0 +1,31 @@
+name: macos-signing-check
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/sign-notarize-macos-package.sh'
+      - '.github/workflows/macos-release-signing.yml'
+      - '.github/workflows/macos-signing-check.yml'
+      - 'docs/macos-signing.md'
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/sign-notarize-macos-package.sh'
+      - '.github/workflows/macos-release-signing.yml'
+      - '.github/workflows/macos-signing-check.yml'
+      - 'docs/macos-signing.md'
+
+jobs:
+  validate:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate signing helper syntax
+        run: bash -n scripts/sign-notarize-macos-package.sh
+      - name: Verify signing helper identifiers and safeguards
+        run: |
+          grep -Fq 'com.matemcp.agent' scripts/sign-notarize-macos-package.sh
+          grep -Fq 'com.matemcp.agent.companion' scripts/sign-notarize-macos-package.sh
+          grep -Fq 'Developer ID Application' scripts/sign-notarize-macos-package.sh
+          grep -Fq 'notarytool submit' scripts/sign-notarize-macos-package.sh
+          grep -Fq 'TeamIdentifier=not set' scripts/sign-notarize-macos-package.sh

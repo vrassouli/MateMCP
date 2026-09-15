@@ -1,0 +1,107 @@
+name: macos-release-signing
+
+on:
+  workflow_run:
+    workflows: [build, companion-build]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      package_set:
+        description: Package set to sign
+        required: true
+        default: desktop
+        type: choice
+        options: [agent, desktop]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release-signing-${{ github.event.workflow_run.name || inputs.package_set }}
+  cancel-in-progress: false
+
+jobs:
+  sign-release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Check signing credentials
+        id: credentials
+        shell: bash
+        env:
+          P12: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ -n "$P12" && -n "$P12_PASSWORD" && -n "$APPLE_ID" && -n "$APPLE_PASSWORD" && -n "$TEAM_ID" ]]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            echo 'macOS Developer ID/notarization credentials are not configured; release assets will not be modified.'
+          fi
+
+      - name: Resolve package set
+        if: steps.credentials.outputs.configured == 'true'
+        id: package
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            kind="${{ inputs.package_set }}"
+          elif [[ "${{ github.event.workflow_run.name }}" == "build" ]]; then
+            kind="agent"
+          else
+            kind="desktop"
+          fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+
+      - name: Download current macOS release assets
+        if: steps.credentials.outputs.configured == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          if [[ "${{ steps.package.outputs.kind }}" == "agent" ]]; then
+            gh release download agent-latest --repo "$GITHUB_REPOSITORY" --pattern 'MateMCP-osx-arm64.tar.gz' --dir release
+            gh release download agent-latest --repo "$GITHUB_REPOSITORY" --pattern 'MateMCP-osx-x64.tar.gz' --dir release
+          else
+            gh release download agent-latest --repo "$GITHUB_REPOSITORY" --pattern 'MateMCP-Desktop-macos-arm64.tar.gz' --dir release
+          fi
+
+      - name: Sign and notarize macOS assets
+        if: steps.credentials.outputs.configured == 'true'
+        shell: bash
+        env:
+          MATEMCP_MACOS_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          MATEMCP_MACOS_P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          MATEMCP_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          MATEMCP_APPLE_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          MATEMCP_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/sign-notarize-macos-package.sh
+          if [[ "${{ steps.package.outputs.kind }}" == "agent" ]]; then
+            scripts/sign-notarize-macos-package.sh release/MateMCP-osx-arm64.tar.gz agent
+            scripts/sign-notarize-macos-package.sh release/MateMCP-osx-x64.tar.gz agent
+          else
+            scripts/sign-notarize-macos-package.sh release/MateMCP-Desktop-macos-arm64.tar.gz desktop
+          fi
+
+      - name: Replace release assets with signed/notarized packages
+        if: steps.credentials.outputs.configured == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ steps.package.outputs.kind }}" == "agent" ]]; then
+            gh release upload agent-latest release/MateMCP-osx-arm64.tar.gz release/MateMCP-osx-x64.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release upload agent-latest release/MateMCP-Desktop-macos-arm64.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
+          fi
