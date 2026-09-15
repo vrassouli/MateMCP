@@ -47,6 +47,7 @@ builder.Services.AddSingleton<ProjectConfigurationService>();
 builder.Services.AddSingleton(sp => new SkillMemoryStore(sp.GetRequiredService<ProjectRegistry>(), Path.Combine(Path.GetDirectoryName(userConfigPath)!, "skills-memory.json")));
 builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddSingleton<ApprovalPolicyStore>();
+builder.Services.AddSingleton<AgentAccessModeStore>();
 builder.Services.AddSingleton<CredentialInjectionRateLimiter>();
 builder.Services.AddSingleton<CompanionNotificationPresence>();
 builder.Services.AddSingleton<LocalNotificationService>();

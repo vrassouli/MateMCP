@@ -42,6 +42,7 @@ public sealed class ApprovalService(
     ApprovalPolicyStore policies,
     AuditLog audit,
     LocalNotificationService notifications,
+    AgentAccessModeStore accessModes,
     ILogger<ApprovalService> logger) : IApprovalService
 {
     private sealed class PendingState(PendingApproval approval, ActionImpactAssessment? assessment)
@@ -52,7 +53,7 @@ public sealed class ApprovalService(
     }
 
     private readonly ConcurrentDictionary<string, PendingState> _pending = new(StringComparer.Ordinal);
-    private readonly AgentAccessModeStore _accessModes = new();
+    private readonly AgentAccessModeStore _accessModes = accessModes;
     private readonly ActionAnalysisService _analysis = new(
         ActionImpactAnalyzerPacks.Snapshot(),
         new LocalOpenAiCompatibleSemanticAnalyzer(clients, options, logger),
