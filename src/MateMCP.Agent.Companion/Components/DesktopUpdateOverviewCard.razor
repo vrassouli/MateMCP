@@ -66,18 +66,71 @@
     </div>
 </div>
 
+<div class="panel dashboard-card @(AccessModeValue == FullAccessMode ? "needs-attention" : null)" aria-live="polite">
+    <div class="muted">Agent access</div>
+    <div class="dashboard-status-line">
+        <span class="status-dot @(AccessModeValue == FullAccessMode ? "attention" : "online")" aria-hidden="true"></span>
+        <strong>@AccessModeLabel</strong>
+    </div>
+    <div class="muted">@AccessModeDetail</div>
+
+    @if (!string.IsNullOrWhiteSpace(AccessModeError))
+    {
+        <div class="muted dashboard-card-note">@AccessModeError</div>
+    }
+
+    @if (ConfirmFullAccess && AccessModeValue != FullAccessMode)
+    {
+        <div class="dashboard-card-note">
+            <strong>Full Access disables interactive approval prompts.</strong>
+            <div class="muted">AI clients can execute every operation the Agent and OS already permit. Actions remain visible in Activity/Audit.</div>
+        </div>
+        <div class="actions">
+            <Button Text="Confirm Full Access" OnClick="() => SetAccessModeAsync(FullAccessMode)" />
+            <Button Text="Cancel" OnClick="CancelFullAccess" />
+        </div>
+    }
+    else
+    {
+        <div class="actions">
+            @if (AccessModeValue != SafeMode)
+            {
+                <Button Text="Safe / Ask" OnClick="() => SetAccessModeAsync(SafeMode)" />
+            }
+            @if (AccessModeValue != TrustedMode)
+            {
+                <Button Text="Trusted" OnClick="() => SetAccessModeAsync(TrustedMode)" />
+            }
+            @if (AccessModeValue != FullAccessMode)
+            {
+                <Button Text="Full Access" OnClick="BeginFullAccess" />
+            }
+        </div>
+    }
+</div>
+
 @code {
     private const int ComputerUseIdleSeconds = 45;
+    private const int SafeMode = 0;
+    private const int TrustedMode = 1;
+    private const int FullAccessMode = 2;
+    private const string AccessModeFileName = "agent-access-mode.json";
+
     private readonly CancellationTokenSource _cts = new();
     private Task? _computerUseLoop;
     private DesktopUpdateStatus? UpdateStatus { get; set; }
     private DesktopUpdateProgress? Progress { get; set; }
     private ComputerUseIndicator? ComputerUse { get; set; }
+    private AccessModeState? AccessMode { get; set; }
     private string? AgentDataDirectory { get; set; }
     private string? Error { get; set; }
     private string? ComputerUseError { get; set; }
+    private string? AccessModeError { get; set; }
     private bool Checking { get; set; }
     private bool Updating { get; set; }
+    private bool ConfirmFullAccess { get; set; }
+
+    private int AccessModeValue => AccessMode?.Mode ?? SafeMode;
 
     private string StatusLabel => Updating
         ? "Updating…"
@@ -88,6 +141,20 @@
                 : UpdateStatus is not null
                     ? "Up to date"
                     : "Update status unavailable";
+
+    private string AccessModeLabel => AccessModeValue switch
+    {
+        TrustedMode => "Trusted",
+        FullAccessMode => "FULL ACCESS / UNATTENDED",
+        _ => "Safe / Ask"
+    };
+
+    private string AccessModeDetail => AccessModeValue switch
+    {
+        TrustedMode => "Saved session/permanent trust rules are honored; unmatched operations still ask for approval.",
+        FullAccessMode => "Interactive approval prompts are bypassed. Use Safe / Ask to revoke unattended access immediately.",
+        _ => "Operations protected by approval policy ask unless a matching session/permanent trust rule already exists."
+    };
 
     private bool ComputerUseActive
         => ComputerUse is { Blocked: false, LastActivityAt: { } last }
@@ -111,6 +178,7 @@
     {
         await CheckAsync();
         await RefreshComputerUseAsync();
+        await RefreshAccessModeAsync();
         _computerUseLoop = PollComputerUseAsync();
     }
 
@@ -170,6 +238,7 @@
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), _cts.Token);
                 await RefreshComputerUseAsync();
+                await RefreshAccessModeAsync();
                 await InvokeAsync(StateHasChanged);
             }
             catch (OperationCanceledException) when (_cts.IsCancellationRequested) { break; }
@@ -180,16 +249,19 @@
         }
     }
 
+    private async Task EnsureAgentDataDirectoryAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(AgentDataDirectory)) return;
+        var status = await Api.GetStatusAsync(_cts.Token);
+        AgentDataDirectory = status is null ? null : System.IO.Path.GetDirectoryName(status.Configuration);
+    }
+
     private async Task RefreshComputerUseAsync()
     {
         try
         {
             ComputerUseError = null;
-            if (string.IsNullOrWhiteSpace(AgentDataDirectory))
-            {
-                var status = await Api.GetStatusAsync(_cts.Token);
-                AgentDataDirectory = status is null ? null : System.IO.Path.GetDirectoryName(status.Configuration);
-            }
+            await EnsureAgentDataDirectoryAsync();
 
             if (string.IsNullOrWhiteSpace(AgentDataDirectory))
             {
@@ -224,6 +296,75 @@
         catch (Exception ex)
         {
             ComputerUseError = $"Computer Use status unavailable: {ex.Message}";
+        }
+    }
+
+    private async Task RefreshAccessModeAsync()
+    {
+        try
+        {
+            AccessModeError = null;
+            await EnsureAgentDataDirectoryAsync();
+            if (string.IsNullOrWhiteSpace(AgentDataDirectory))
+            {
+                AccessMode = null;
+                return;
+            }
+
+            var path = System.IO.Path.Combine(AgentDataDirectory, AccessModeFileName);
+            if (!System.IO.File.Exists(path))
+            {
+                AccessMode = new AccessModeState(SafeMode, DateTimeOffset.MinValue);
+                return;
+            }
+
+            var json = await System.IO.File.ReadAllTextAsync(path, _cts.Token);
+            AccessMode = System.Text.Json.JsonSerializer.Deserialize<AccessModeState>(json,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+                ?? new AccessModeState(SafeMode, DateTimeOffset.MinValue);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            AccessModeError = $"Access mode unavailable: {ex.Message}";
+        }
+    }
+
+    private void BeginFullAccess()
+    {
+        ConfirmFullAccess = true;
+        AccessModeError = null;
+    }
+
+    private void CancelFullAccess() => ConfirmFullAccess = false;
+
+    private async Task SetAccessModeAsync(int mode)
+    {
+        try
+        {
+            await EnsureAgentDataDirectoryAsync();
+            if (string.IsNullOrWhiteSpace(AgentDataDirectory))
+                throw new InvalidOperationException("Agent data directory is unavailable.");
+
+            var state = new AccessModeState(mode, DateTimeOffset.UtcNow);
+            var path = System.IO.Path.Combine(AgentDataDirectory, AccessModeFileName);
+            var temporaryPath = path + ".tmp";
+            var json = System.Text.Json.JsonSerializer.Serialize(state,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            await System.IO.File.WriteAllTextAsync(temporaryPath, json, _cts.Token);
+            System.IO.File.Move(temporaryPath, path, overwrite: true);
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+            {
+                try { System.IO.File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); } catch { }
+            }
+
+            AccessMode = state;
+            AccessModeError = null;
+            ConfirmFullAccess = false;
+        }
+        catch (Exception ex)
+        {
+            AccessModeError = $"Could not change access mode: {ex.Message}";
         }
     }
 
@@ -286,4 +427,6 @@
         DateTimeOffset? StartedAt,
         DateTimeOffset? LastActivityAt,
         DateTimeOffset? RevokedAt);
+
+    private sealed record AccessModeState(int Mode, DateTimeOffset UpdatedAt);
 }

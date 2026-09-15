@@ -52,6 +52,7 @@ public sealed class ApprovalService(
     }
 
     private readonly ConcurrentDictionary<string, PendingState> _pending = new(StringComparer.Ordinal);
+    private readonly AgentAccessModeStore _accessModes = new();
     private readonly ActionAnalysisService _analysis = new(
         ActionImpactAnalyzerPacks.Snapshot(),
         new LocalOpenAiCompatibleSemanticAnalyzer(clients, options, logger),
@@ -103,6 +104,21 @@ public sealed class ApprovalService(
             $"analyzed{riskPolicyAudit}{assessmentAudit}",
             assessment,
             cancellationToken);
+
+        var accessMode = await _accessModes.GetAsync(cancellationToken);
+        if (accessMode.Mode == AgentAccessMode.FullAccess)
+        {
+            await audit.WriteAsync(
+                "approval",
+                $"{capability}:{target}",
+                $"allowed:full-access{riskPolicyAudit}{assessmentAudit}",
+                cancellationToken);
+            logger.LogWarning(
+                "MateMCP Full Access allowed {Capability} {Target} without an interactive approval.",
+                capability,
+                target);
+            return ApprovalDecision.AllowAlways;
+        }
 
         if (riskPolicy.Behavior == ApprovalRiskBehavior.Deny)
         {
@@ -192,7 +208,12 @@ public sealed class ApprovalService(
         if (!_pending.TryGetValue(id, out var state)) return false;
         if (decision == ApprovalDecision.AllowSession && !state.Approval.CanAllowSession) return false;
         if (decision == ApprovalDecision.AllowAlways && !state.Approval.CanAllowAlways) return false;
-        return state.Completion.TrySetResult(decision);
+        if (!state.Completion.TrySetResult(decision)) return false;
+
+        // Remove synchronously so Companion refreshes cannot observe a request that was already decided.
+        // RequestCore also removes in its finally block, making this safe against timeout/cancellation races.
+        _pending.TryRemove(id, out _);
+        return true;
     }
 
     private async Task PollRemoteDecisionAsync(PendingState state, CancellationToken cancellationToken)

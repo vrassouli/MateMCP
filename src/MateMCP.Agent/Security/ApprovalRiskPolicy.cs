@@ -17,8 +17,9 @@ public sealed class ApprovalRiskPolicyOptions
     public ApprovalRiskBehavior Unknown { get; set; } = ApprovalRiskBehavior.RequireApproval;
 
     /// <summary>
-    /// Risk levels for which a user-created session/persistent trust rule may be reused or created
-    /// when that level's behavior is AllowStoredRule. Critical/Unknown are excluded by default.
+    /// Retained for configuration compatibility. Persistent/session authorization is now a user trust decision
+    /// for every non-denied approval, including high/critical risk. Risk still controls whether an approval is
+    /// initially required and how prominently the operation is explained.
     /// </summary>
     public List<ActionRiskLevel> BroadTrustRisks { get; set; } = [ActionRiskLevel.Low, ActionRiskLevel.Medium];
 }
@@ -43,12 +44,17 @@ public static class ApprovalRiskPolicyEvaluator
             ActionRiskLevel.Critical => options.Critical,
             _ => options.Unknown
         };
-        var broadTrust = behavior == ApprovalRiskBehavior.AllowStoredRule
-            && options.BroadTrustRisks?.Contains(risk) == true;
+
+        // A hard deny remains a deny. Otherwise, if the operation can execute at all, the user may choose
+        // session-scoped or persistent trust for it. RequireApproval means "ask unless trusted", not
+        // "persistent trust is forbidden".
+        var canUseStoredRule = behavior is ApprovalRiskBehavior.AllowStoredRule or ApprovalRiskBehavior.RequireApproval;
+        var canCreateBroadTrust = behavior != ApprovalRiskBehavior.Deny;
+
         return new(
             behavior,
-            CanUseStoredRule: broadTrust,
-            CanCreateBroadTrust: broadTrust,
-            Reason: $"Risk policy for {risk}: {behavior}; broad trust {(broadTrust ? "allowed" : "not allowed")}.");
+            CanUseStoredRule: canUseStoredRule,
+            CanCreateBroadTrust: canCreateBroadTrust,
+            Reason: $"Risk policy for {risk}: {behavior}; stored trust {(canUseStoredRule ? "eligible" : "not used")}; persistent trust {(canCreateBroadTrust ? "allowed" : "denied")}.");
     }
 }
