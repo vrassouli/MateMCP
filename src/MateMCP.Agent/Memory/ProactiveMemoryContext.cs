@@ -4,7 +4,11 @@ using MateMCP.Agent.Configuration;
 
 namespace MateMCP.Agent.Memory;
 
-public sealed record ProactiveMemorySelection(string Context, int ItemCount, string TypeSummary);
+public sealed record ProactiveMemorySelection(
+    string Context,
+    int ItemCount,
+    string TypeSummary,
+    IReadOnlyList<string> ItemIds);
 
 public static class ProactiveMemoryContext
 {
@@ -32,7 +36,7 @@ public static class ProactiveMemoryContext
         var selection = await SelectAsync(store, project, query, options, cancellationToken);
         if (selection is null) return null;
 
-        await WriteUsageAuditAsync(audit, tool, project, options, selection, cancellationToken);
+        await WriteUsageAuditAsync(audit, tool, project, options, selection, null, cancellationToken);
         return selection.Context;
     }
 
@@ -66,13 +70,15 @@ public static class ProactiveMemoryContext
             .GroupBy(x => x.Type, StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
             .Select(x => $"{x.Key}:{x.Count()}"));
+        var itemIds = ranked.Select(x => x.Id).ToArray();
 
         if (mode == ProactiveMemoryMode.Suggested)
         {
             return new ProactiveMemorySelection(
                 $"MateMCP found {ranked.Length} relevant durable context item(s) ({typeSummary}). Consult Skills & Memory before continuing if the task depends on prior project decisions or procedures.",
                 ranked.Length,
-                typeSummary);
+                typeSummary,
+                itemIds);
         }
 
         var builder = new StringBuilder();
@@ -87,7 +93,7 @@ public static class ProactiveMemoryContext
             if (builder.Length >= maxChars) break;
         }
 
-        return new ProactiveMemorySelection(builder.ToString().TrimEnd(), ranked.Length, typeSummary);
+        return new ProactiveMemorySelection(builder.ToString().TrimEnd(), ranked.Length, typeSummary, itemIds);
     }
 
     public static Task WriteUsageAuditAsync(
@@ -96,16 +102,19 @@ public static class ProactiveMemoryContext
         string? project,
         ProactiveMemoryOptions options,
         ProactiveMemorySelection selection,
+        string? contextId = null,
         CancellationToken cancellationToken = default)
     {
         var target = string.IsNullOrWhiteSpace(project) ? tool : $"{tool}:{project}";
+        var correlation = string.IsNullOrWhiteSpace(contextId) ? string.Empty : $"context:{contextId};";
+        var ids = selection.ItemIds.Count == 0 ? string.Empty : $";ids:{string.Join(',', selection.ItemIds)}";
         if ((options?.Mode ?? ProactiveMemoryMode.Automatic) == ProactiveMemoryMode.Suggested)
-            return audit.WriteAsync("memory.suggest", target, $"items:{selection.ItemCount};types:{selection.TypeSummary}", cancellationToken);
+            return audit.WriteAsync("memory.suggest", target, $"{correlation}items:{selection.ItemCount};types:{selection.TypeSummary}{ids}", cancellationToken);
 
         return audit.WriteAsync(
             "memory.inject",
             target,
-            $"items:{selection.ItemCount};chars:{selection.Context.Length};types:{selection.TypeSummary}",
+            $"{correlation}items:{selection.ItemCount};chars:{selection.Context.Length};types:{selection.TypeSummary}{ids}",
             cancellationToken);
     }
 
