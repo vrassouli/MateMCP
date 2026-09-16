@@ -57,6 +57,7 @@ public sealed class FileSystemTools(ProjectRegistry projects, SkillMemoryStore m
                 contextLease = bootstrap.Lease,
                 contextHash = bootstrap.ContextHash,
                 contextSources = bootstrap.Sources,
+                contextId = bootstrap.ContextId,
                 context = bootstrap.Context,
                 written = false
             };
