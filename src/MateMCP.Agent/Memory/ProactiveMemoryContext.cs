@@ -84,17 +84,25 @@ public static class ProactiveMemoryContext
 
     private static int Score(SkillMemoryItem item, IReadOnlyList<string> terms)
     {
-        var score = string.Equals(item.Scope, "project", StringComparison.OrdinalIgnoreCase) ? 8 : 0;
-        if (item.Type is "rule" or "skill" or "procedure") score += 3;
+        var projectScoped = string.Equals(item.Scope, "project", StringComparison.OrdinalIgnoreCase);
+        var alwaysActive = string.Equals(item.Type, "rule", StringComparison.OrdinalIgnoreCase)
+            || item.Tags.Any(tag => tag.Equals("always", StringComparison.OrdinalIgnoreCase)
+                || tag.Equals("required", StringComparison.OrdinalIgnoreCase));
+        var score = projectScoped ? 4 : 0;
+        var matched = false;
 
         foreach (var term in terms)
         {
-            if (item.Title.Contains(term, StringComparison.OrdinalIgnoreCase)) score += 10;
-            if (item.Tags.Any(tag => tag.Contains(term, StringComparison.OrdinalIgnoreCase))) score += 8;
-            if (item.Description?.Contains(term, StringComparison.OrdinalIgnoreCase) == true) score += 5;
-            if (item.Content.Contains(term, StringComparison.OrdinalIgnoreCase)) score += 2;
+            if (item.Title.Contains(term, StringComparison.OrdinalIgnoreCase)) { score += 10; matched = true; }
+            if (item.Tags.Any(tag => tag.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || term.Contains(tag, StringComparison.OrdinalIgnoreCase))) { score += 8; matched = true; }
+            if (item.Description?.Contains(term, StringComparison.OrdinalIgnoreCase) == true) { score += 5; matched = true; }
+            if (item.Content.Contains(term, StringComparison.OrdinalIgnoreCase)) { score += 2; matched = true; }
         }
 
+        if (alwaysActive) return score + 20;
+        if (!matched) return 0;
+        if (item.Type is "skill" or "procedure") score += 3;
         return score;
     }
 
