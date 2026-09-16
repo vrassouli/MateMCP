@@ -4,6 +4,8 @@ using MateMCP.Agent.Configuration;
 
 namespace MateMCP.Agent.Memory;
 
+public sealed record ProactiveMemorySelection(string Context, int ItemCount, string TypeSummary);
+
 public static class ProactiveMemoryContext
 {
     public const int MaxItems = 3;
@@ -22,6 +24,20 @@ public static class ProactiveMemoryContext
         SkillMemoryStore store,
         AuditLog audit,
         string tool,
+        string? project,
+        string? query,
+        ProactiveMemoryOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        var selection = await SelectAsync(store, project, query, options, cancellationToken);
+        if (selection is null) return null;
+
+        await WriteUsageAuditAsync(audit, tool, project, options, selection, cancellationToken);
+        return selection.Context;
+    }
+
+    public static async Task<ProactiveMemorySelection?> SelectAsync(
+        SkillMemoryStore store,
         string? project,
         string? query,
         ProactiveMemoryOptions options,
@@ -53,12 +69,10 @@ public static class ProactiveMemoryContext
 
         if (mode == ProactiveMemoryMode.Suggested)
         {
-            await audit.WriteAsync(
-                "memory.suggest",
-                string.IsNullOrWhiteSpace(project) ? tool : $"{tool}:{project}",
-                $"items:{ranked.Length};types:{typeSummary}",
-                cancellationToken);
-            return $"MateMCP found {ranked.Length} relevant durable context item(s) ({typeSummary}). Consult Skills & Memory before continuing if the task depends on prior project decisions or procedures.";
+            return new ProactiveMemorySelection(
+                $"MateMCP found {ranked.Length} relevant durable context item(s) ({typeSummary}). Consult Skills & Memory before continuing if the task depends on prior project decisions or procedures.",
+                ranked.Length,
+                typeSummary);
         }
 
         var builder = new StringBuilder();
@@ -73,13 +87,26 @@ public static class ProactiveMemoryContext
             if (builder.Length >= maxChars) break;
         }
 
-        var result = builder.ToString().TrimEnd();
-        await audit.WriteAsync(
+        return new ProactiveMemorySelection(builder.ToString().TrimEnd(), ranked.Length, typeSummary);
+    }
+
+    public static Task WriteUsageAuditAsync(
+        AuditLog audit,
+        string tool,
+        string? project,
+        ProactiveMemoryOptions options,
+        ProactiveMemorySelection selection,
+        CancellationToken cancellationToken = default)
+    {
+        var target = string.IsNullOrWhiteSpace(project) ? tool : $"{tool}:{project}";
+        if ((options?.Mode ?? ProactiveMemoryMode.Automatic) == ProactiveMemoryMode.Suggested)
+            return audit.WriteAsync("memory.suggest", target, $"items:{selection.ItemCount};types:{selection.TypeSummary}", cancellationToken);
+
+        return audit.WriteAsync(
             "memory.inject",
-            string.IsNullOrWhiteSpace(project) ? tool : $"{tool}:{project}",
-            $"items:{ranked.Length};chars:{result.Length};types:{typeSummary}",
+            target,
+            $"items:{selection.ItemCount};chars:{selection.Context.Length};types:{selection.TypeSummary}",
             cancellationToken);
-        return result;
     }
 
     private static int Score(SkillMemoryItem item, IReadOnlyList<string> terms)
