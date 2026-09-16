@@ -131,7 +131,9 @@ public static class ProjectSkillContext
 
         var title = GetMetadata(metadata, "name", "title") ?? FirstHeading(body)
             ?? new DirectoryInfo(Path.GetDirectoryName(path) ?? root).Name;
-        var description = GetMetadata(metadata, "description") ?? FirstParagraph(body);
+        // Only an explicitly declared description is a strong matching signal. The Skill body
+        // remains a deliberately weak signal so incidental prose cannot activate an unrelated Skill.
+        var description = GetMetadata(metadata, "description");
         var triggerText = GetMetadata(metadata, "triggers", "tags", "keywords") ?? string.Empty;
         var triggers = SplitMetadataList(triggerText)
             .Concat(Tokenize(title))
@@ -181,25 +183,6 @@ public static class ProjectSkillContext
         => body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
             .Select(x => x.Trim())
             .FirstOrDefault(x => x.StartsWith("# ", StringComparison.Ordinal))?[2..].Trim();
-
-    private static string? FirstParagraph(string body)
-    {
-        var lines = body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        var paragraph = new List<string>();
-        foreach (var raw in lines)
-        {
-            var line = raw.Trim();
-            if (line.Length == 0)
-            {
-                if (paragraph.Count > 0) break;
-                continue;
-            }
-            if (line.StartsWith('#') || line.StartsWith("```", StringComparison.Ordinal)) continue;
-            paragraph.Add(line);
-            if (string.Join(' ', paragraph).Length >= 240) break;
-        }
-        return paragraph.Count == 0 ? null : string.Join(' ', paragraph);
-    }
 
     private static IReadOnlyList<string> Tokenize(string? value)
     {
