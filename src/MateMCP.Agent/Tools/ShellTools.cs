@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
+using MateMCP.Agent.Context;
 using MateMCP.Agent.Desktop;
 using MateMCP.Agent.Memory;
 using MateMCP.Agent.Projects;
@@ -24,10 +25,11 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         Destructive = true,
         Idempotent = false,
         OpenWorld = true)]
-    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. When proactive Skills & Memory is enabled and relevant durable context exists, a small bounded memoryContext is automatically included in the result so the AI does not need to remember to call memory_search first. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
+    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. For project-scoped work, MateMCP may first return status=context_required with repository instructions, relevant Skills & Memory, and a contextLease; read that context and retry the same call with the supplied contextLease before any command is executed. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
     public async Task<object> Exec(
         [Description("Shell/command-line command to run non-interactively.")] string command,
-        [Description("Optional configured MateMCP project whose directory, shell policy, and project-scoped Skills & Memory should be used. Omit to run from the Agent user's home directory with relevant global durable context only.")] string? project = null,
+        [Description("Optional configured MateMCP project whose directory, shell policy, and project context should be used. Omit to run from the Agent user's home directory with relevant global durable context only.")] string? project = null,
+        [Description("Context lease previously returned by MateMCP for this project. When status=context_required is returned, read the supplied context and retry with that lease.")] string? contextLease = null,
         [Description("Maximum execution time in seconds, clamped to 1..600.")] int timeoutSeconds = 60,
         CancellationToken cancellationToken = default)
     {
@@ -38,6 +40,23 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
             var definition = projects.Get(project!);
             if (!definition.Shell) { await audit.WriteAsync("shell.exec", project!, "denied:project-policy", cancellationToken); throw new McpException($"Shell access is disabled for project '{project}'."); }
             workingDirectory = definition.Root; scope = $"project:{project}";
+
+            var bootstrap = await ProjectContextBootstrap.RequireAsync(
+                projects, memory, audit, options, "shell_exec", project!, command, null, contextLease, cancellationToken);
+            if (bootstrap.Required)
+            {
+                return new
+                {
+                    status = "context_required",
+                    project,
+                    workingDirectory,
+                    contextLease = bootstrap.Lease,
+                    contextHash = bootstrap.ContextHash,
+                    contextSources = bootstrap.Sources,
+                    context = bootstrap.Context,
+                    executed = false
+                };
+            }
         }
         else workingDirectory = ResolveDefaultWorkingDirectory();
 
@@ -82,8 +101,10 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         }
         var stdout = Limit(await stdoutTask); var stderr = Limit(await stderrTask);
         await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
-        var memoryContext = await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_exec", project, command, options.Value.ProactiveMemory, cancellationToken);
-        return new { exitCode = process.ExitCode, stdout, stderr, workingDirectory, project = hasProject ? project : null, memoryContext };
+        var memoryContext = hasProject
+            ? null
+            : await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_exec", null, command, options.Value.ProactiveMemory, cancellationToken);
+        return new { status = "executed", exitCode = process.ExitCode, stdout, stderr, workingDirectory, project = hasProject ? project : null, contextLease = hasProject ? contextLease : null, memoryContext };
     }
 
     private IDisposable EnterActivity()
