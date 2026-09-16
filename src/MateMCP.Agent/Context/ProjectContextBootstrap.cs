@@ -204,6 +204,7 @@ public static class ProjectContextBootstrap
         }
 
         builder.AppendLine();
+        builder.AppendLine("After completing the task, if you learned a stable reusable project rule, procedure, decision, workaround, or configuration fact, search Skills & Memory for an existing matching item and update/deduplicate it before creating a new one. Do not store secrets, credentials, transient chat noise, or one-off status here.");
         builder.AppendLine($"Retry the same tool call with contextLease='{lease}'. The lease is accepted only while the applicable project context remains unchanged.");
         return builder.ToString().TrimEnd();
     }
