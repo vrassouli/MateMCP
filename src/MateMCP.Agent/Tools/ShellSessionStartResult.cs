@@ -2,7 +2,7 @@ namespace MateMCP.Agent.Tools;
 
 /// <summary>
 /// Stable wire/result contract for shell_session_start. Keeps the existing shell
-/// snapshot fields at the top level and adds optional proactive memory context.
+/// snapshot fields at the top level and adds optional proactive/context-preflight metadata.
 /// </summary>
 public sealed record ShellSessionStartResult(
     string SessionId,
@@ -20,7 +20,13 @@ public sealed record ShellSessionStartResult(
     int NextSequence,
     int AcknowledgedSequence,
     bool ReplayGap,
-    string? MemoryContext)
+    string? MemoryContext,
+    string Status = "started",
+    string? ContextLease = null,
+    string? ContextHash = null,
+    IReadOnlyList<string>? ContextSources = null,
+    string? Context = null,
+    bool Started = true)
 {
     public static ShellSessionStartResult FromSnapshot(ShellSessionSnapshot snapshot, string? memoryContext) => new(
         snapshot.SessionId,
@@ -39,4 +45,33 @@ public sealed record ShellSessionStartResult(
         snapshot.AcknowledgedSequence,
         snapshot.ReplayGap,
         memoryContext);
+
+    public static ShellSessionStartResult ContextRequired(
+        string workingDirectory,
+        string contextLease,
+        string contextHash,
+        IReadOnlyList<string> contextSources,
+        string context) => new(
+            SessionId: string.Empty,
+            ProcessId: 0,
+            Output: string.Empty,
+            NextOffset: 0,
+            OutputTruncated: false,
+            Exited: false,
+            ExitCode: null,
+            WorkingDirectory: workingDirectory,
+            CreatedAt: default,
+            LastTouched: default,
+            RequestedSequence: 0,
+            FirstAvailableSequence: 0,
+            NextSequence: 0,
+            AcknowledgedSequence: 0,
+            ReplayGap: false,
+            MemoryContext: null,
+            Status: "context_required",
+            ContextLease: contextLease,
+            ContextHash: contextHash,
+            ContextSources: contextSources,
+            Context: context,
+            Started: false);
 }
