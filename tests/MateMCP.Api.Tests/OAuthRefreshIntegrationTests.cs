@@ -83,6 +83,46 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/.well-known/oauth-authorization-server")]
+    [InlineData("/.well-known/oauth-authorization-server/")]
+    [InlineData("/.well-known/openid-configuration")]
+    [InlineData("/.well-known/openid-configuration/")]
+    public async Task OAuthDiscovery_IsConsistent_WithOrWithoutTrailingSlash(string path)
+    {
+        using var response = await _client!.GetAsync(path);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStreamAsync());
+        var root = json.RootElement;
+        Assert.Equal(ApiUrl + "/", root.GetProperty("issuer").GetString());
+        Assert.Equal(ApiUrl + "/connect/register", root.GetProperty("registration_endpoint").GetString());
+        Assert.Contains("none", root.GetProperty("token_endpoint_auth_methods_supported").EnumerateArray().Select(x => x.GetString()));
+        Assert.Contains("S256", root.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(x => x.GetString()));
+    }
+
+    [Fact]
+    public async Task DynamicClientRegistration_ReturnsRfc7591CreatedResponse()
+    {
+        using var response = await _client!.PostAsJsonAsync("/connect/register", new
+        {
+            client_name = "RFC 7591 registration probe",
+            redirect_uris = new[] { RedirectUri },
+            token_endpoint_auth_method = "none",
+            grant_types = new[] { "authorization_code", "refresh_token" },
+            response_types = new[] { "code" },
+            application_type = "web"
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        Assert.Contains(response.Headers.Pragma, value => string.Equals(value.Name, "no-cache", StringComparison.OrdinalIgnoreCase));
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStreamAsync());
+        Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("client_id").GetString()));
+        Assert.Equal("none", json.RootElement.GetProperty("token_endpoint_auth_method").GetString());
+    }
+
     [Fact]
     public async Task AuthorizationCode_WithOfflineAccess_IssuesRefreshToken_AndRefreshPreservesBinding()
     {
@@ -120,6 +160,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var authorizationQuery = QueryHelpers.ParseQuery(authorization.Headers.Location.Query);
         var code = authorizationQuery["code"].ToString();
         Assert.False(string.IsNullOrWhiteSpace(code));
+        Assert.Equal(ApiUrl + "/", authorizationQuery["iss"].ToString());
 
         using var token = await client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -127,7 +168,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
             ["client_id"] = clientId!,
             ["code"] = code,
             ["redirect_uri"] = RedirectUri,
-            ["code_verifier"] = verifier
+            ["code_verifier"] = verifier,
+            ["resource"] = resource
         }));
         token.EnsureSuccessStatusCode();
         using var tokenJson = JsonDocument.Parse(await token.Content.ReadAsStreamAsync());

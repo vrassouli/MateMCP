@@ -46,7 +46,8 @@ builder.Services.AddOpenIddict().AddCore(o => o.UseEntityFrameworkCore().UseDbCo
 var app = builder.Build(); app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
-    if (context.Request.Method == HttpMethods.Get && (context.Request.Path == "/.well-known/oauth-authorization-server" || context.Request.Path == "/.well-known/openid-configuration"))
+    var discoveryPath = context.Request.Path.Value?.TrimEnd('/');
+    if (context.Request.Method == HttpMethods.Get && (discoveryPath == "/.well-known/oauth-authorization-server" || discoveryPath == "/.well-known/openid-configuration"))
     {
         await context.Response.WriteAsJsonAsync(new { issuer = publicUrl + "/", authorization_endpoint = publicUrl + "/connect/authorize", token_endpoint = publicUrl + "/connect/token", registration_endpoint = publicUrl + "/connect/register", jwks_uri = publicUrl + "/.well-known/jwks", response_types_supported = new[] { "code" }, grant_types_supported = new[] { "authorization_code", "refresh_token" }, code_challenge_methods_supported = new[] { "S256" }, token_endpoint_auth_methods_supported = new[] { "none" }, scopes_supported = new[] { "mcp:read", "mcp:write", "mcp:shell", "offline_access" }, authorization_response_iss_parameter_supported = true }); return;
     }
@@ -154,7 +155,9 @@ app.MapPost("/connect/register", async (HttpContext context, IOpenIddictApplicat
     var r = await context.Request.ReadFromJsonAsync<ClientRegistration>(); if (r?.RedirectUris is null || r.RedirectUris.Length == 0 || r.RedirectUris.Any(x => !Uri.TryCreate(x, UriKind.Absolute, out _))) return Results.BadRequest(new { error = "invalid_client_metadata" });
     var d = new OpenIddictApplicationDescriptor { ClientId = Guid.NewGuid().ToString("N"), ClientType = OpenIddictConstants.ClientTypes.Public, ConsentType = OpenIddictConstants.ConsentTypes.Implicit, DisplayName = string.IsNullOrWhiteSpace(r.ClientName) ? "MCP Client" : r.ClientName }; foreach (var uri in r.RedirectUris) d.RedirectUris.Add(new Uri(uri));
     d.Permissions.UnionWith([OpenIddictConstants.Permissions.Endpoints.Authorization, OpenIddictConstants.Permissions.Endpoints.Token, OpenIddictConstants.Permissions.GrantTypes.AuthorizationCode, OpenIddictConstants.Permissions.GrantTypes.RefreshToken, OpenIddictConstants.Permissions.ResponseTypes.Code, OpenIddictConstants.Permissions.Prefixes.Scope + "mcp:read", OpenIddictConstants.Permissions.Prefixes.Scope + "mcp:write", OpenIddictConstants.Permissions.Prefixes.Scope + "mcp:shell", OpenIddictConstants.Permissions.Prefixes.Scope + OpenIddictConstants.Scopes.OfflineAccess]); await manager.CreateAsync(d);
-    return Results.Ok(new { client_id = d.ClientId, client_name = d.DisplayName, redirect_uris = r.RedirectUris, token_endpoint_auth_method = "none", grant_types = new[] { "authorization_code", "refresh_token" }, response_types = new[] { "code" } });
+    context.Response.Headers.CacheControl = "no-store";
+    context.Response.Headers.Pragma = "no-cache";
+    return Results.Json(new { client_id = d.ClientId, client_name = d.DisplayName, redirect_uris = r.RedirectUris, token_endpoint_auth_method = "none", grant_types = new[] { "authorization_code", "refresh_token" }, response_types = new[] { "code" } }, statusCode: StatusCodes.Status201Created);
 });
 
 app.MapPost("/internal/agents/authenticate", async (HttpContext c, AgentAuthentication r, ControlPlaneDbContext db) =>
