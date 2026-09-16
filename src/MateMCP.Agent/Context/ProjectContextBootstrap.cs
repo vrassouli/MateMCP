@@ -25,7 +25,7 @@ public static class ProjectContextBootstrap
 
     public static async Task<ProjectContextBootstrapResult> RequireAsync(
         ProjectRegistry projects,
-        SkillMemoryStore memory,
+        SkillMemoryStore? memory,
         AuditLog audit,
         IOptions<MateOptions> options,
         string tool,
@@ -65,14 +65,16 @@ public static class ProjectContextBootstrap
                 cancellationToken);
         }
 
-        var durableContext = await ProactiveMemoryContext.BuildAsync(
-            memory,
-            audit,
-            tool,
-            definition.Name,
-            query,
-            options.Value.ProactiveMemory,
-            cancellationToken);
+        var durableContext = memory is null
+            ? null
+            : await ProactiveMemoryContext.BuildAsync(
+                memory,
+                audit,
+                tool,
+                definition.Name,
+                query,
+                options.Value.ProactiveMemory,
+                cancellationToken);
 
         if (instructions.Length == 0 && string.IsNullOrWhiteSpace(durableContext))
             return new ProjectContextBootstrapResult(false, null, null, contextHash, Array.Empty<string>());
