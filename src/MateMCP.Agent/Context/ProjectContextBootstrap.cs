@@ -39,7 +39,21 @@ public static class ProjectContextBootstrap
         var instructions = definition.Read
             ? LoadInstructions(projects, definition, relativePath)
             : Array.Empty<InstructionSource>();
-        var contextHash = ComputeInstructionHash(definition.Id, instructions);
+        var skillContext = ProjectSkillContext.Build(definition, query, relativePath);
+        var memorySelection = memory is null
+            ? null
+            : await ProactiveMemoryContext.SelectAsync(
+                memory,
+                definition.Name,
+                query,
+                options.Value.ProactiveMemory,
+                cancellationToken);
+        var durableContext = memorySelection?.Context;
+        var contextHash = ComputeContextHash(definition.Id, instructions, skillContext.Context, durableContext);
+        var sources = instructions.Select(x => x.RelativePath)
+            .Concat(skillContext.Sources)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var now = DateTimeOffset.UtcNow;
 
         CleanupExpired(now);
@@ -55,7 +69,7 @@ public static class ProjectContextBootstrap
                     $"{tool}:{definition.Name}",
                     $"accepted;hash:{ShortHash(contextHash)}",
                     cancellationToken);
-                return new ProjectContextBootstrapResult(false, presentedLease, null, contextHash, instructions.Select(x => x.RelativePath).ToArray());
+                return new ProjectContextBootstrapResult(false, presentedLease, null, contextHash, sources);
             }
 
             await audit.WriteAsync(
@@ -65,29 +79,36 @@ public static class ProjectContextBootstrap
                 cancellationToken);
         }
 
-        var durableContext = memory is null
-            ? null
-            : await ProactiveMemoryContext.BuildAsync(
-                memory,
-                audit,
-                tool,
-                definition.Name,
-                query,
-                options.Value.ProactiveMemory,
-                cancellationToken);
-
-        if (instructions.Length == 0 && string.IsNullOrWhiteSpace(durableContext))
+        if (instructions.Length == 0 && skillContext.MatchedCount == 0 && string.IsNullOrWhiteSpace(durableContext))
             return new ProjectContextBootstrapResult(false, null, null, contextHash, Array.Empty<string>());
 
         var lease = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         Leases[lease] = new LeaseState(definition.Id, contextHash, now.Add(LeaseLifetime));
-        var context = BuildContext(definition, instructions, durableContext, lease);
-        var sources = instructions.Select(x => x.RelativePath).ToArray();
+        var context = BuildContext(definition, instructions, skillContext.Context, durableContext, lease);
+
+        foreach (var skillSource in skillContext.Sources)
+        {
+            await audit.WriteAsync(
+                "skill.apply",
+                $"{tool}:{definition.Name}",
+                $"source:{skillSource}",
+                cancellationToken);
+        }
+        if (memorySelection is not null)
+        {
+            await ProactiveMemoryContext.WriteUsageAuditAsync(
+                audit,
+                tool,
+                definition.Name,
+                options.Value.ProactiveMemory,
+                memorySelection,
+                cancellationToken);
+        }
 
         await audit.WriteAsync(
             "context.bootstrap",
             $"{tool}:{definition.Name}",
-            $"required;instructions:{instructions.Length};memory:{(!string.IsNullOrWhiteSpace(durableContext)).ToString().ToLowerInvariant()};chars:{context.Length};hash:{ShortHash(contextHash)}",
+            $"required;instructions:{instructions.Length};skills:{skillContext.MatchedCount};memory:{(memorySelection is not null).ToString().ToLowerInvariant()};chars:{context.Length};hash:{ShortHash(contextHash)}",
             cancellationToken);
 
         return new ProjectContextBootstrapResult(true, lease, context, contextHash, sources);
@@ -134,12 +155,13 @@ public static class ProjectContextBootstrap
     private static string BuildContext(
         ProjectDefinition definition,
         IReadOnlyList<InstructionSource> instructions,
+        string? skillContext,
         string? durableContext,
         string lease)
     {
         var builder = new StringBuilder();
         builder.AppendLine("MateMCP project context preflight. Read this context before retrying the requested mutation.");
-        builder.AppendLine("Host security, MateMCP policy/approvals, and the user's current explicit instructions take precedence over persisted repository or memory context.");
+        builder.AppendLine("Host security, MateMCP policy/approvals, and the user's current explicit instructions take precedence over persisted repository, Skill, or Memory context.");
         builder.AppendLine($"Project: {definition.Name} ({definition.Id})");
 
         var remaining = MaxInstructionChars;
@@ -155,6 +177,12 @@ public static class ProjectContextBootstrap
             remaining -= take;
         }
 
+        if (!string.IsNullOrWhiteSpace(skillContext))
+        {
+            builder.AppendLine();
+            builder.AppendLine(skillContext);
+        }
+
         if (!string.IsNullOrWhiteSpace(durableContext))
         {
             builder.AppendLine();
@@ -162,11 +190,15 @@ public static class ProjectContextBootstrap
         }
 
         builder.AppendLine();
-        builder.AppendLine($"Retry the same tool call with contextLease='{lease}'. The lease is accepted only while repository instruction sources remain unchanged.");
+        builder.AppendLine($"Retry the same tool call with contextLease='{lease}'. The lease is accepted only while the applicable project context remains unchanged.");
         return builder.ToString().TrimEnd();
     }
 
-    private static string ComputeInstructionHash(string projectId, IReadOnlyList<InstructionSource> instructions)
+    private static string ComputeContextHash(
+        string projectId,
+        IReadOnlyList<InstructionSource> instructions,
+        string? skillContext,
+        string? durableContext)
     {
         using var sha = SHA256.Create();
         using var buffer = new MemoryStream();
@@ -178,6 +210,10 @@ public static class ProjectContextBootstrap
                 writer.WriteLine(source.RelativePath);
                 writer.WriteLine(source.Content);
             }
+            writer.WriteLine("skills:");
+            writer.WriteLine(skillContext ?? string.Empty);
+            writer.WriteLine("memory:");
+            writer.WriteLine(durableContext ?? string.Empty);
         }
         return Convert.ToHexString(sha.ComputeHash(buffer.ToArray())).ToLowerInvariant();
     }
