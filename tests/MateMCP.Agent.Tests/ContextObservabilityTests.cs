@@ -52,8 +52,12 @@ triggers: [release, package]
         Assert.True(first.Required);
         Assert.NotNull(first.Lease);
         Assert.NotNull(first.ContextId);
+        Assert.NotNull(first.Context);
         Assert.StartsWith("ctx-", first.ContextId, StringComparison.Ordinal);
         Assert.DoesNotContain(first.Lease!, first.ContextId!, StringComparison.Ordinal);
+        Assert.Contains("search Skills & Memory", first.Context!, StringComparison.Ordinal);
+        Assert.Contains("update/deduplicate", first.Context!, StringComparison.Ordinal);
+        Assert.Contains("Do not store secrets", first.Context!, StringComparison.Ordinal);
 
         var events = await audit.ReadAsync();
         var instruction = Assert.Single(events, x => x.Capability == "instruction.apply");
