@@ -53,6 +53,7 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
                     contextLease = bootstrap.Lease,
                     contextHash = bootstrap.ContextHash,
                     contextSources = bootstrap.Sources,
+                    contextId = bootstrap.ContextId,
                     context = bootstrap.Context,
                     executed = false
                 };

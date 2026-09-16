@@ -25,6 +25,7 @@ public sealed record ShellSessionStartResult(
     string? ContextLease = null,
     string? ContextHash = null,
     IReadOnlyList<string>? ContextSources = null,
+    string? ContextId = null,
     string? Context = null,
     bool Started = true)
 {
@@ -51,6 +52,15 @@ public sealed record ShellSessionStartResult(
         string contextLease,
         string contextHash,
         IReadOnlyList<string> contextSources,
+        string context)
+        => ContextRequired(workingDirectory, contextLease, contextHash, contextSources, ExtractContextId(context), context);
+
+    public static ShellSessionStartResult ContextRequired(
+        string workingDirectory,
+        string contextLease,
+        string contextHash,
+        IReadOnlyList<string> contextSources,
+        string? contextId,
         string context) => new(
             SessionId: string.Empty,
             ProcessId: 0,
@@ -72,6 +82,16 @@ public sealed record ShellSessionStartResult(
             ContextLease: contextLease,
             ContextHash: contextHash,
             ContextSources: contextSources,
+            ContextId: contextId,
             Context: context,
             Started: false);
+
+    private static string? ExtractContextId(string context)
+    {
+        const string prefix = "Context ID: ";
+        foreach (var line in context.Split('\n', StringSplitOptions.TrimEntries))
+            if (line.StartsWith(prefix, StringComparison.Ordinal))
+                return line[prefix.Length..].Trim();
+        return null;
+    }
 }
