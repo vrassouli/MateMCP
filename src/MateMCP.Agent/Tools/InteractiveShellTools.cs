@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
+using MateMCP.Agent.Context;
 using MateMCP.Agent.Desktop;
 using MateMCP.Agent.Memory;
 using MateMCP.Agent.Projects;
@@ -33,14 +34,35 @@ public sealed class InteractiveShellTools(
         Destructive = true,
         Idempotent = false,
         OpenWorld = true)]
-    [Description("Starts any shell/command-line command in a real PTY/ConPTY and returns a session id plus initial terminal output. When proactive Skills & Memory is enabled and relevant durable context exists, the response also includes a bounded memoryContext. Use this instead of shell_exec whenever the command may prompt, wait for terminal input, open an interactive program, or require a credential. Continue with shell_session_read, shell_session_write, shell_session_send_secret, and shell_session_close.")]
-    public async Task<ShellSessionStartResult> Start(
+    [Description("Starts any shell/command-line command in a real PTY/ConPTY and returns a session id plus initial terminal output. For project-scoped work, MateMCP may first return status=context_required with repository instructions, relevant Skills & Memory, and a contextLease; read that context and retry the same call with the supplied contextLease before the process is started. Use this instead of shell_exec whenever the command may prompt, wait for terminal input, open an interactive program, or require a credential. Continue with shell_session_read, shell_session_write, shell_session_send_secret, and shell_session_close.")]
+    public async Task<object> Start(
         [Description("Shell/command-line command to run. This is intentionally generic and may be any command supported by the local shell.")] string command,
-        [Description("Optional configured MateMCP project whose directory, shell policy, and project-scoped Skills & Memory should be used. Omit to run from the Agent user's home directory.")] string? project = null,
+        [Description("Optional configured MateMCP project whose directory, shell policy, and project context should be used. Omit to run from the Agent user's home directory.")] string? project = null,
+        [Description("Context lease previously returned by MateMCP for this project. When status=context_required is returned, read the supplied context and retry with that lease.")] string? contextLease = null,
         CancellationToken cancellationToken = default)
     {
         using var activityLease = EnterActivity();
         var (workingDirectory, scope) = ResolveWorkingDirectory(project);
+        if (!string.IsNullOrWhiteSpace(project))
+        {
+            var bootstrap = await ProjectContextBootstrap.RequireAsync(
+                projects, memory, audit, options, "shell_session_start", project, command, null, contextLease, cancellationToken);
+            if (bootstrap.Required)
+            {
+                return new
+                {
+                    status = "context_required",
+                    project,
+                    workingDirectory,
+                    contextLease = bootstrap.Lease,
+                    contextHash = bootstrap.ContextHash,
+                    contextSources = bootstrap.Sources,
+                    context = bootstrap.Context,
+                    started = false
+                };
+            }
+        }
+
         if (options.Value.RequireShellApproval)
         {
             var decision = await approvals.RequestAsync(
@@ -71,9 +93,9 @@ public sealed class InteractiveShellTools(
         {
             var result = await sessions.StartAsync(command, workingDirectory, cancellationToken);
             await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", $"started:{result.SessionId}", cancellationToken);
-            var memoryContext = memory is null
-                ? null
-                : await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_session_start", project, command, options.Value.ProactiveMemory, cancellationToken);
+            var memoryContext = string.IsNullOrWhiteSpace(project) && memory is not null
+                ? await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_session_start", null, command, options.Value.ProactiveMemory, cancellationToken)
+                : null;
             return ShellSessionStartResult.FromSnapshot(result, memoryContext);
         }
         catch (Exception ex) when (ex is not McpException)
@@ -106,7 +128,7 @@ public sealed class InteractiveShellTools(
         Destructive = true,
         Idempotent = false,
         OpenWorld = true)]
-    [Description("Writes ordinary non-secret text to an existing interactive shell session. Use it for confirmations, menu choices, commands, REPL input, and other visible terminal input. Never place a password/token/secret value in this tool; use shell_session_send_secret with a credential name instead.")]
+    [Description("Writes ordinary non-secret text to an existing interactive shell session. Use it for confirmations, menu choices, commands, REPL input, and other visible terminal input. Never place a password/token/secret value in this tool; use shell_session_send_secret with a credential name instead. Project-scoped sessions have already passed project context preflight at shell_session_start.")]
     public async Task<object> Write(
         [Description("Session id returned by shell_session_start.")] string sessionId,
         [Description("Ordinary non-secret terminal input.")] string text,
