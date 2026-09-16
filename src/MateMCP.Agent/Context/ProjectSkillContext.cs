@@ -13,6 +13,7 @@ public static class ProjectSkillContext
     public const int MaxSkills = 3;
     public const int MaxChars = 6_000;
     private const int MaxDiscoveredFiles = 128;
+    private const int MinimumMatchScore = 5;
 
     private static readonly string[] SkillRoots =
     [
@@ -37,7 +38,7 @@ public static class ProjectSkillContext
         var terms = Tokenize(string.Join(' ', new[] { query, relativePath }.Where(x => !string.IsNullOrWhiteSpace(x))));
         var ranked = documents
             .Select(document => new { Document = document, Score = Score(document, terms) })
-            .Where(x => x.Document.Required || x.Score > 0)
+            .Where(x => x.Document.Required || x.Score >= MinimumMatchScore)
             .OrderByDescending(x => x.Document.Required)
             .ThenByDescending(x => x.Score)
             .ThenBy(x => x.Document.RelativePath, StringComparer.OrdinalIgnoreCase)
