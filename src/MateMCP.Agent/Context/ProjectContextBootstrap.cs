@@ -16,18 +16,18 @@ public sealed record ProjectContextBootstrapResult(
     string ContextHash,
     IReadOnlyList<string> Sources);
 
-public sealed class ProjectContextBootstrap(
-    ProjectRegistry projects,
-    SkillMemoryStore memory,
-    AuditLog audit,
-    IOptions<MateOptions> options)
+public static class ProjectContextBootstrap
 {
     public const int MaxInstructionChars = 6_000;
     public static readonly TimeSpan LeaseLifetime = TimeSpan.FromMinutes(30);
 
-    private readonly ConcurrentDictionary<string, LeaseState> _leases = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, LeaseState> Leases = new(StringComparer.Ordinal);
 
-    public async Task<ProjectContextBootstrapResult> RequireAsync(
+    public static async Task<ProjectContextBootstrapResult> RequireAsync(
+        ProjectRegistry projects,
+        SkillMemoryStore memory,
+        AuditLog audit,
+        IOptions<MateOptions> options,
         string tool,
         string project,
         string? query,
@@ -37,7 +37,7 @@ public sealed class ProjectContextBootstrap(
     {
         var definition = projects.Get(project);
         var instructions = definition.Read
-            ? LoadInstructions(definition, relativePath)
+            ? LoadInstructions(projects, definition, relativePath)
             : Array.Empty<InstructionSource>();
         var contextHash = ComputeInstructionHash(definition.Id, instructions);
         var now = DateTimeOffset.UtcNow;
@@ -45,7 +45,7 @@ public sealed class ProjectContextBootstrap(
         CleanupExpired(now);
         if (!string.IsNullOrWhiteSpace(presentedLease))
         {
-            if (_leases.TryGetValue(presentedLease, out var existing)
+            if (Leases.TryGetValue(presentedLease, out var existing)
                 && existing.ExpiresAt > now
                 && string.Equals(existing.ProjectId, definition.Id, StringComparison.Ordinal)
                 && string.Equals(existing.ContextHash, contextHash, StringComparison.Ordinal))
@@ -78,7 +78,7 @@ public sealed class ProjectContextBootstrap(
             return new ProjectContextBootstrapResult(false, null, null, contextHash, Array.Empty<string>());
 
         var lease = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
-        _leases[lease] = new LeaseState(definition.Id, contextHash, now.Add(LeaseLifetime));
+        Leases[lease] = new LeaseState(definition.Id, contextHash, now.Add(LeaseLifetime));
         var context = BuildContext(definition, instructions, durableContext, lease);
         var sources = instructions.Select(x => x.RelativePath).ToArray();
 
@@ -91,7 +91,7 @@ public sealed class ProjectContextBootstrap(
         return new ProjectContextBootstrapResult(true, lease, context, contextHash, sources);
     }
 
-    private InstructionSource[] LoadInstructions(ProjectDefinition definition, string? relativePath)
+    private static InstructionSource[] LoadInstructions(ProjectRegistry projects, ProjectDefinition definition, string? relativePath)
     {
         var root = Path.GetFullPath(definition.Root);
         var targetDirectory = root;
@@ -180,11 +180,11 @@ public sealed class ProjectContextBootstrap(
         return Convert.ToHexString(sha.ComputeHash(buffer.ToArray())).ToLowerInvariant();
     }
 
-    private void CleanupExpired(DateTimeOffset now)
+    private static void CleanupExpired(DateTimeOffset now)
     {
-        foreach (var pair in _leases)
+        foreach (var pair in Leases)
             if (pair.Value.ExpiresAt <= now)
-                _leases.TryRemove(pair.Key, out _);
+                Leases.TryRemove(pair.Key, out _);
     }
 
     private static string ShortHash(string hash) => hash.Length <= 12 ? hash : hash[..12];
