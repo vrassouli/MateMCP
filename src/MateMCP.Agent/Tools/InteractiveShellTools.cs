@@ -35,7 +35,7 @@ public sealed class InteractiveShellTools(
         Idempotent = false,
         OpenWorld = true)]
     [Description("Starts any shell/command-line command in a real PTY/ConPTY and returns a session id plus initial terminal output. For project-scoped work, MateMCP may first return status=context_required with repository instructions, relevant Skills & Memory, and a contextLease; read that context and retry the same call with the supplied contextLease before the process is started. Use this instead of shell_exec whenever the command may prompt, wait for terminal input, open an interactive program, or require a credential. Continue with shell_session_read, shell_session_write, shell_session_send_secret, and shell_session_close.")]
-    public async Task<object> Start(
+    public async Task<ShellSessionStartResult> Start(
         [Description("Shell/command-line command to run. This is intentionally generic and may be any command supported by the local shell.")] string command,
         [Description("Optional configured MateMCP project whose directory, shell policy, and project context should be used. Omit to run from the Agent user's home directory.")] string? project = null,
         [Description("Context lease previously returned by MateMCP for this project. When status=context_required is returned, read the supplied context and retry with that lease.")] string? contextLease = null,
@@ -49,17 +49,12 @@ public sealed class InteractiveShellTools(
                 projects, memory, audit, options, "shell_session_start", project, command, null, contextLease, cancellationToken);
             if (bootstrap.Required)
             {
-                return new
-                {
-                    status = "context_required",
-                    project,
+                return ShellSessionStartResult.ContextRequired(
                     workingDirectory,
-                    contextLease = bootstrap.Lease,
-                    contextHash = bootstrap.ContextHash,
-                    contextSources = bootstrap.Sources,
-                    context = bootstrap.Context,
-                    started = false
-                };
+                    bootstrap.Lease!,
+                    bootstrap.ContextHash,
+                    bootstrap.Sources,
+                    bootstrap.Context!);
             }
         }
 
@@ -195,7 +190,7 @@ public sealed class InteractiveShellTools(
     private IDisposable EnterActivity()
     {
         if (!_activity.TryEnter(out var lease) || lease is null)
-            throw new McpException("MateMCP Agent is preparing a verified Desktop update. Retry after the Agent restarts.");
+            throw new McpException("MateMCP Agent is preparing a verified Desktop update. Retry the shell command after the Agent restarts.");
         return lease;
     }
 
