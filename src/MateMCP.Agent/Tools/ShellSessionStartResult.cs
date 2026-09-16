@@ -25,6 +25,7 @@ public sealed record ShellSessionStartResult(
     string? ContextLease = null,
     string? ContextHash = null,
     IReadOnlyList<string>? ContextSources = null,
+    string? ContextId = null,
     string? Context = null,
     bool Started = true)
 {
@@ -51,6 +52,7 @@ public sealed record ShellSessionStartResult(
         string contextLease,
         string contextHash,
         IReadOnlyList<string> contextSources,
+        string? contextId,
         string context) => new(
             SessionId: string.Empty,
             ProcessId: 0,
@@ -72,6 +74,7 @@ public sealed record ShellSessionStartResult(
             ContextLease: contextLease,
             ContextHash: contextHash,
             ContextSources: contextSources,
+            ContextId: contextId,
             Context: context,
             Started: false);
 }
