@@ -1,5 +1,4 @@
 using System.Text;
-using MateMCP.Agent.Audit;
 using MateMCP.Agent.Projects;
 
 namespace MateMCP.Agent.Context;
@@ -23,13 +22,10 @@ public static class ProjectSkillContext
         "skills"
     ];
 
-    public static async Task<ProjectSkillContextResult> BuildAsync(
+    public static ProjectSkillContextResult Build(
         ProjectDefinition project,
-        AuditLog audit,
-        string tool,
         string? query,
-        string? relativePath,
-        CancellationToken cancellationToken = default)
+        string? relativePath)
     {
         if (!project.Read || !project.Available)
             return new ProjectSkillContextResult(null, Array.Empty<string>(), 0);
@@ -64,12 +60,6 @@ public static class ProjectSkillContext
                 AppendBounded(builder, $"Description: {skill.Description}\n", MaxChars);
             AppendBounded(builder, skill.Body.Trim(), MaxChars);
             if (builder.Length < MaxChars) builder.AppendLine();
-
-            await audit.WriteAsync(
-                "skill.apply",
-                $"{tool}:{project.Name}",
-                $"source:{skill.RelativePath};required:{skill.Required.ToString().ToLowerInvariant()}",
-                cancellationToken);
         }
 
         return new ProjectSkillContextResult(
