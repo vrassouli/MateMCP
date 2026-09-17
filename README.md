@@ -127,7 +127,7 @@ Companion is the user's local control surface. Current functionality includes:
 - **Agent Logs** and diagnostics.
 - **Skills & Memory** inspection and management.
 - **Computer Use** preview/status.
-- **Prevent Sleep While Using** controls.
+- **Prevent Sleep While Using** controls, with a 15-minute idle grace period after the latest Agent activity.
 - Manual update checks and optional automatic Desktop updates on supported platforms.
 
 ## Self-host API + Relay
