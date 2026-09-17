@@ -290,6 +290,14 @@ jobs:
           test -d "$HOME/Applications/MateMCP Agent Companion.app"
           test -f "$HOME/Library/LaunchAgents/com.matemcp.agent.plist"
           test ! -e "$HOME/Library/LaunchAgents/com.matemcp.agent.companion.plist"
+          marker="$HOME/Library/Application Support/MateMCP Companion/.desktop-release-asset"
+          test -s "$marker"
+          release_json="$(mktemp)"
+          curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: MateMCP-CI/1.0' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${MATEMCP_DESKTOP_RELEASE_TAG}" -o "$release_json"
+          expected="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(next(a["id"] for a in r["assets"] if a["name"] == "MateMCP-Desktop-macos-arm64.tar.gz"))' "$release_json")"
+          test "$(cat "$marker")" = "$expected"
+          rm -f "$release_json"
           "$HOME/Library/Application Support/MateMCP/uninstall-desktop-macos.sh"
       - name: Bootstrap install and uninstall on Windows
         if: matrix.platform == 'windows'
@@ -305,4 +313,10 @@ jobs:
           if (-not (Test-Path (Join-Path $startup 'MateMCP Agent.lnk'))) { throw 'Bootstrap did not configure Agent background startup.' }
           if (Test-Path (Join-Path $startup 'MateMCP Agent Companion.lnk')) { throw 'Bootstrap left Companion in Startup.' }
           if (-not (Test-Path (Join-Path $programs 'MateMCP Agent Companion.lnk'))) { throw 'Bootstrap did not add Companion to Start Menu.' }
+          $marker = Join-Path $env:LOCALAPPDATA 'MateMCP-Companion\.desktop-release-asset'
+          if (-not (Test-Path $marker)) { throw 'Bootstrap did not establish the Companion Desktop release baseline.' }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$env:MATEMCP_DESKTOP_RELEASE_TAG" -Headers @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'MateMCP-CI/1.0' } -UseBasicParsing
+          $expected = [string](@($release.assets | Where-Object { $_.name -eq 'MateMCP-Desktop-win-x64.zip' })[0].id)
+          $actual = (Get-Content $marker -Raw).Trim()
+          if ($actual -ne $expected) { throw "Bootstrap recorded Desktop asset $actual but current release asset is $expected." }
           & (Join-Path $root 'uninstall-desktop-windows.ps1')

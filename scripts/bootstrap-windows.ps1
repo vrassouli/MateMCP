@@ -37,7 +37,20 @@ if ($desktop) {
     Write-Warning 'The native MateMCP Companion is not published for Windows ARM64 yet. Installing the Agent-only package.'
 }
 
-$url = "https://github.com/$repo/releases/download/$tag/$asset"
+$releaseApi = "https://api.github.com/repos/$repo/releases/tags/$tag"
+$headers = @{
+    Accept = 'application/vnd.github+json'
+    'User-Agent' = 'MateMCP-Bootstrap/1.0'
+}
+$release = Invoke-RestMethod -Uri $releaseApi -Headers $headers -UseBasicParsing
+$releaseAsset = @($release.assets | Where-Object { $_.name -eq $asset }) | Select-Object -First 1
+if (-not $releaseAsset) {
+    throw "Release asset $asset was not found in $tag."
+}
+$url = [string]$releaseAsset.browser_download_url
+$assetId = [Int64]$releaseAsset.id
+$assetDigest = [string]$releaseAsset.digest
+
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("matemcp-install-" + [Guid]::NewGuid().ToString('N'))
 $zipPath = Join-Path $tempRoot $asset
 $extractPath = Join-Path $tempRoot 'package'
@@ -47,6 +60,14 @@ New-Item -ItemType Directory -Force -Path $tempRoot, $extractPath | Out-Null
 try {
     Write-Host "Downloading $productName ($rid) from $tag..."
     Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+
+    if ($assetDigest -match '^sha256:([0-9a-fA-F]{64})$') {
+        $expectedSha256 = $Matches[1]
+        $actualSha256 = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash
+        if (-not $actualSha256.Equals($expectedSha256, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Downloaded package SHA-256 verification failed.'
+        }
+    }
 
     Write-Host 'Extracting package...'
     Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
@@ -69,6 +90,15 @@ try {
     $processParts = @($env:Path -split ';' | Where-Object { $_ })
     if ($processParts -notcontains $bin) {
         $env:Path = (($processParts + $bin) -join ';').Trim(';')
+    }
+
+    if ($desktop) {
+        # The Companion update checker compares the installed Desktop package with
+        # the current GitHub release asset id. Bootstrap knows exactly which asset
+        # it installed, so establish that baseline before Companion checks updates.
+        $desktopState = Join-Path $env:LOCALAPPDATA 'MateMCP-Companion'
+        New-Item -ItemType Directory -Force -Path $desktopState | Out-Null
+        [IO.File]::WriteAllText((Join-Path $desktopState '.desktop-release-asset'), [string]$assetId)
     }
 
     Write-Host ''
