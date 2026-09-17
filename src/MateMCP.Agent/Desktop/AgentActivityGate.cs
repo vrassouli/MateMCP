@@ -11,6 +11,7 @@ public sealed class AgentActivityGate
     private int _active;
     private int _draining;
     private long _activeSinceUnixMilliseconds;
+    private long _lastActivityUnixMilliseconds;
 
     public int ActiveCount => Volatile.Read(ref _active);
     public bool IsActive => ActiveCount > 0;
@@ -25,14 +26,25 @@ public sealed class AgentActivityGate
         }
     }
 
+    public DateTimeOffset? LastActivityAt
+    {
+        get
+        {
+            var value = Volatile.Read(ref _lastActivityUnixMilliseconds);
+            return value <= 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(value);
+        }
+    }
+
     public bool TryEnter(out IDisposable? lease)
     {
         lease = null;
         if (IsDraining) return false;
 
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var active = Interlocked.Increment(ref _active);
+        Interlocked.Exchange(ref _lastActivityUnixMilliseconds, now);
         if (active == 1)
-            Interlocked.Exchange(ref _activeSinceUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            Interlocked.Exchange(ref _activeSinceUnixMilliseconds, now);
 
         if (IsDraining)
         {
@@ -60,6 +72,7 @@ public sealed class AgentActivityGate
 
     private void Exit()
     {
+        Interlocked.Exchange(ref _lastActivityUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         if (Interlocked.Decrement(ref _active) == 0)
             Interlocked.Exchange(ref _activeSinceUnixMilliseconds, 0);
     }

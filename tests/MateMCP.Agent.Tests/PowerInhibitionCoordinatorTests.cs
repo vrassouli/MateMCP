@@ -63,6 +63,50 @@ public sealed class PowerInhibitionCoordinatorTests
         Assert.False(coordinator.IsActive);
     }
 
+
+    [Fact]
+    public void Recent_activity_keeps_inhibitor_acquired_during_idle_grace()
+    {
+        var inhibitor = new FakePowerInhibitor();
+        var coordinator = new PowerInhibitionCoordinator(inhibitor);
+        var now = new DateTimeOffset(2026, 9, 17, 20, 0, 0, TimeSpan.Zero);
+
+        coordinator.Reconcile(
+            enabled: true,
+            inUse: false,
+            lastActivityAt: now - TimeSpan.FromMinutes(10),
+            now);
+
+        Assert.True(coordinator.IsActive);
+        Assert.Equal(1, inhibitor.AcquireCalls);
+    }
+
+    [Fact]
+    public void Expired_idle_grace_releases_inhibitor()
+    {
+        var inhibitor = new FakePowerInhibitor();
+        var coordinator = new PowerInhibitionCoordinator(inhibitor);
+        var now = new DateTimeOffset(2026, 9, 17, 20, 0, 0, TimeSpan.Zero);
+        coordinator.Reconcile(enabled: true, inUse: true);
+
+        coordinator.Reconcile(
+            enabled: true,
+            inUse: false,
+            lastActivityAt: now - PowerInhibitionCoordinator.IdleGracePeriod,
+            now);
+
+        Assert.False(coordinator.IsActive);
+    }
+
+    [Fact]
+    public void Future_or_missing_activity_does_not_start_idle_grace()
+    {
+        var now = new DateTimeOffset(2026, 9, 17, 20, 0, 0, TimeSpan.Zero);
+
+        Assert.False(PowerInhibitionCoordinator.IsWithinIdleGrace(null, now));
+        Assert.False(PowerInhibitionCoordinator.IsWithinIdleGrace(now + TimeSpan.FromSeconds(1), now));
+    }
+
     [Fact]
     public void Failed_acquire_does_not_report_sleep_prevention_active()
     {
