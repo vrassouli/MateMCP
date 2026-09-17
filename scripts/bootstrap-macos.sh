@@ -25,15 +25,46 @@ case "$(uname -m)" in
 esac
 
 command -v curl >/dev/null 2>&1 || { echo "curl is required." >&2; exit 1; }
+command -v plutil >/dev/null 2>&1 || { echo "plutil is required." >&2; exit 1; }
+command -v shasum >/dev/null 2>&1 || { echo "shasum is required." >&2; exit 1; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ARCHIVE_NAME}"
+RELEASE_API="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_TAG}"
+RELEASE_JSON="$TMP/release.json"
 ARCHIVE="$TMP/$ARCHIVE_NAME"
 
+echo "Resolving ${ARCHIVE_NAME} from release ${RELEASE_TAG}..."
+curl -fsSL \
+  -H "Accept: application/vnd.github+json" \
+  -H "User-Agent: MateMCP-Bootstrap/1.0" \
+  "$RELEASE_API" -o "$RELEASE_JSON"
+
+ASSET_COUNT="$(plutil -extract assets raw "$RELEASE_JSON")"
+ASSET_ID=""
+ASSET_URL=""
+ASSET_DIGEST=""
+for ((i = 0; i < ASSET_COUNT; i++)); do
+  name="$(plutil -extract "assets.${i}.name" raw "$RELEASE_JSON")"
+  if [[ "$name" == "$ARCHIVE_NAME" ]]; then
+    ASSET_ID="$(plutil -extract "assets.${i}.id" raw "$RELEASE_JSON")"
+    ASSET_URL="$(plutil -extract "assets.${i}.browser_download_url" raw "$RELEASE_JSON")"
+    ASSET_DIGEST="$(plutil -extract "assets.${i}.digest" raw "$RELEASE_JSON" 2>/dev/null || true)"
+    break
+  fi
+done
+
+[[ -n "$ASSET_ID" && -n "$ASSET_URL" ]] || { echo "Release asset ${ARCHIVE_NAME} was not found in ${RELEASE_TAG}." >&2; exit 1; }
+
 echo "Downloading ${ARCHIVE_NAME} from release ${RELEASE_TAG}..."
-curl -fL "$URL" -o "$ARCHIVE"
+curl -fL "$ASSET_URL" -o "$ARCHIVE"
+
+if [[ "$ASSET_DIGEST" == sha256:* ]]; then
+  EXPECTED_SHA256="${ASSET_DIGEST#sha256:}"
+  ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+  [[ "$ACTUAL_SHA256" == "$EXPECTED_SHA256" ]] || { echo "Downloaded package SHA-256 verification failed." >&2; exit 1; }
+fi
 
 mkdir -p "$TMP/package"
 tar -xzf "$ARCHIVE" -C "$TMP/package"
@@ -45,6 +76,16 @@ if [[ "$DESKTOP" == true ]]; then
   [[ -f "$INSTALLER" ]] || { echo "Downloaded package does not contain install-desktop-macos.sh" >&2; exit 1; }
   chmod +x "$INSTALLER"
   "$INSTALLER"
+
+  # The Companion update checker compares the installed Desktop package with the
+  # current GitHub release asset id. Bootstrap knows exactly which release asset
+  # it installed, so establish that baseline immediately and avoid a false
+  # "update available" prompt on first launch.
+  DESKTOP_STATE_DIR="$HOME/Library/Application Support/MateMCP Companion"
+  mkdir -p "$DESKTOP_STATE_DIR"
+  printf '%s' "$ASSET_ID" > "$DESKTOP_STATE_DIR/.desktop-release-asset"
+  chmod 600 "$DESKTOP_STATE_DIR/.desktop-release-asset" 2>/dev/null || true
+
   echo
   echo "MateMCP Desktop installation complete."
   echo "The Agent and native Companion are running and will start automatically when you sign in."

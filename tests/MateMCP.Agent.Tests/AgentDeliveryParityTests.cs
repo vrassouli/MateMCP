@@ -15,6 +15,24 @@ public sealed class AgentDeliveryParityTests
     }
 
     [Fact]
+    public void Desktop_bootstrap_records_the_installed_release_asset_for_companion_update_checks()
+    {
+        var root = FindRepositoryRoot();
+        var mac = File.ReadAllText(Path.Combine(root, "scripts", "bootstrap-macos.sh"));
+        var windows = File.ReadAllText(Path.Combine(root, "scripts", "bootstrap-windows.ps1"));
+
+        Assert.Contains("api.github.com/repos/${REPO}/releases/tags/${RELEASE_TAG}", mac, StringComparison.Ordinal);
+        Assert.Contains(".desktop-release-asset", mac, StringComparison.Ordinal);
+        Assert.Contains("MateMCP Companion", mac, StringComparison.Ordinal);
+        Assert.Contains("$ASSET_ID", mac, StringComparison.Ordinal);
+
+        Assert.Contains("api.github.com/repos/$repo/releases/tags/$tag", windows, StringComparison.Ordinal);
+        Assert.Contains(".desktop-release-asset", windows, StringComparison.Ordinal);
+        Assert.Contains("MateMCP-Companion", windows, StringComparison.Ordinal);
+        Assert.Contains("$assetId", windows, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Platform_installers_support_normal_and_elevated_background_modes()
     {
         var root = FindRepositoryRoot();
