@@ -283,6 +283,40 @@ html, body {
     margin-top: 10px;
 }
 
+.audit-filters {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    margin-top: 14px;
+}
+
+.audit-filters .field {
+    margin-bottom: 0;
+}
+
+.audit-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.audit-filter-actions .actions {
+    margin-top: 0;
+}
+
+.audit-live-status {
+    margin-top: 8px;
+}
+
+.audit-row-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
 a.link {
     color: var(--colorBrandForegroundLink, inherit);
     text-decoration: underline;
@@ -436,6 +470,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     .content-scroll { padding: 0 16px 20px; }
     .dashboard-primary-grid { grid-template-columns: 1fr; }
     .workspace-path-row { grid-template-columns: 1fr; }
+    .audit-filters { grid-template-columns: 1fr; }
+    .audit-filter-actions { align-items: flex-start; }
     .session-layout { grid-template-columns: 1fr; }
     #blazor-error-ui { left: 12px; right: 12px; bottom: 12px; }
     #blazor-error-ui .blazor-error-content { align-items: flex-start; }

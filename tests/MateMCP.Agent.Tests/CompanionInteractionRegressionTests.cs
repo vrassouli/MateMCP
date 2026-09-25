@@ -117,17 +117,33 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
-    public void Companion_activity_defaults_to_a_date_range_and_requires_cleanup_confirmation()
+    public void Companion_activity_filters_at_storage_layer_and_live_refreshes_only_while_active()
     {
-        var main = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
-        var client = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var client = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
 
         Assert.Contains("DateOnly.FromDateTime(DateTime.Now)", main, StringComparison.Ordinal);
         Assert.Contains("type=\"date\"", main, StringComparison.Ordinal);
+        Assert.Contains("id=\"audit-project-filter\"", main, StringComparison.Ordinal);
+        Assert.Contains("id=\"audit-capability-filter\"", main, StringComparison.Ordinal);
+        Assert.Contains("ClearAuditFiltersAsync", main, StringComparison.Ordinal);
+        Assert.Contains("AuditLiveRefresh", main, StringComparison.Ordinal);
+        Assert.Contains("Section == \"audit\"", main, StringComparison.Ordinal);
+        Assert.Contains("_auditPollTicks >= 5", main, StringComparison.Ordinal);
+        Assert.Contains("AuditDate == DateOnly.FromDateTime(DateTime.Now)", main, StringComparison.Ordinal);
+        Assert.Contains("No activity matches the current filters.", main, StringComparison.Ordinal);
+        Assert.Contains("project: @item.Project", main, StringComparison.Ordinal);
         Assert.Contains("ConfirmAuditCleanup", main, StringComparison.Ordinal);
         Assert.Contains("Api.CleanupAuditAsync", main, StringComparison.Ordinal);
+
         Assert.Contains("&from=", client, StringComparison.Ordinal);
         Assert.Contains("&to=", client, StringComparison.Ordinal);
+        Assert.Contains("&project=", client, StringComparison.Ordinal);
+        Assert.Contains("&capability=", client, StringComparison.Ordinal);
+        Assert.Contains(".audit-filters {", styles, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)@media \(max-width: 760px\).*?\.audit-filters\s*\{\s*grid-template-columns:\s*1fr;", styles);
     }
 
     [Fact]
@@ -156,6 +172,8 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("<label for=\"secret-value\">Secret value</label><input id=\"secret-value\"", main, StringComparison.Ordinal);
         Assert.Contains("role=\"group\" aria-labelledby=\"secret-allowed-use-label\"", main, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Activity date\"", main, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"audit-project-filter\">Project</label>", main, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"audit-capability-filter\">Action / capability</label>", main, StringComparison.Ordinal);
     }
 
     [Fact]
