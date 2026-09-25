@@ -48,6 +48,67 @@ public sealed class UserSecretStorePlatformTests
     }
 
     [Fact]
+    public async Task Metadata_update_preserves_the_platform_secret_value()
+    {
+        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsWindows())
+            return;
+
+        var directory = Path.Combine(Path.GetTempPath(), "matemcp-tests", Guid.NewGuid().ToString("N"));
+        var indexPath = Path.Combine(directory, "secrets.json");
+        var store = new UserSecretStore(indexPath);
+        var name = $"metadata-test-{Guid.NewGuid():N}";
+        var value = $"secret-{Guid.NewGuid():N}";
+
+        try
+        {
+            await store.SaveAsync(
+                name,
+                value,
+                "Before",
+                CredentialKind.Password,
+                [UserSecretInfo.ShellSessionSendSecretTool],
+                CancellationToken.None);
+
+            var updated = await store.UpdateMetadataAsync(
+                name,
+                "After",
+                CredentialKind.Generic,
+                [UserSecretInfo.UiFillSecretTool, UserSecretInfo.BrowserFillSecretTool],
+                CancellationToken.None);
+
+            Assert.NotNull(updated);
+            Assert.Equal("After", updated!.Description);
+            Assert.Equal(CredentialKind.Generic, updated.Kind);
+            Assert.True(updated.IsAllowedForTool(UserSecretInfo.UiFillSecretTool));
+            Assert.True(updated.IsAllowedForTool(UserSecretInfo.BrowserFillSecretTool));
+            Assert.Equal(value, await store.ResolveAsync(name, CancellationToken.None));
+        }
+        finally
+        {
+            await store.DeleteAsync(name, CancellationToken.None);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Secret_metadata_update_path_never_reads_or_rewrites_plaintext()
+    {
+        var root = FindRepositoryRoot();
+        var store = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Security", "UserSecretStore.cs"));
+        var program = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Program.cs"));
+
+        var methodStart = store.IndexOf("public async Task<UserSecretInfo?> UpdateMetadataAsync", StringComparison.Ordinal);
+        var methodEnd = store.IndexOf("public async Task<string?> ResolveAsync", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var method = store[methodStart..methodEnd];
+
+        Assert.DoesNotContain("ReadPlatformSecretAsync", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("SavePlatformSecretAsync", method, StringComparison.Ordinal);
+        Assert.Contains("app.MapPut(\"/secrets/{name}\"", program, StringComparison.Ordinal);
+        Assert.Contains("SecretMetadataUpdate(string? Description, CredentialKind Kind", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Desktop_installers_preserve_the_user_secret_store_identity()
     {
         var root = FindRepositoryRoot();

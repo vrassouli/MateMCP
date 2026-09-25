@@ -384,6 +384,18 @@ app.MapPost("/secrets", async (SecretUpdate update, HttpContext context, UserSec
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
 });
+app.MapPut("/secrets/{name}", async (string name, SecretMetadataUpdate update, HttpContext context, UserSecretStore secrets, AuditLog audit, CancellationToken ct) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    try
+    {
+        var updated = await secrets.UpdateMetadataAsync(name, update.Description, update.Kind, update.AllowedTools, ct);
+        if (updated is null) return Results.NotFound();
+        await audit.WriteAsync("secret.manage", name, "metadata-updated", ct);
+        return Results.Ok(updated);
+    }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
+});
 app.MapDelete("/secrets/{name}", async (string name, HttpContext context, UserSecretStore secrets, AuditLog audit, CancellationToken ct) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
@@ -402,6 +414,8 @@ app.Run();
 static bool IsLoopback(HttpContext context) { var remote = context.Connection.RemoteIpAddress; return remote is not null && IPAddress.IsLoopback(remote); }
 
 public sealed record SecretUpdate(string Name, string Value, string? Description, CredentialKind Kind = CredentialKind.Password,
+    IReadOnlyCollection<string>? AllowedTools = null);
+public sealed record SecretMetadataUpdate(string? Description, CredentialKind Kind = CredentialKind.Password,
     IReadOnlyCollection<string>? AllowedTools = null);
 public sealed record ShellInput(string? Text, bool Submit = true);
 public sealed record DesktopAutoUpdateUpdate(bool Enabled);
