@@ -384,8 +384,17 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     outline-offset: 2px;
 }
 
-.memory-toolbar {
+.memory-toolbar,
+.secret-toolbar {
     margin-bottom: 10px;
+}
+
+.secret-replace-toggle {
+    margin-bottom: 6px;
+}
+
+.secret-replace-note {
+    margin-bottom: 12px;
 }
 
 .memory-filters {
