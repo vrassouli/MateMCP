@@ -51,6 +51,22 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_header_stays_outside_the_only_content_scroll_region()
+    {
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+
+        var headerIndex = main.IndexOf("<header class=\"content-header\">", StringComparison.Ordinal);
+        var scrollIndex = main.IndexOf("<div class=\"content-scroll\">", StringComparison.Ordinal);
+        Assert.True(headerIndex >= 0 && scrollIndex > headerIndex);
+        Assert.DoesNotContain("<div class=\"content-scroll\" tabindex=", main, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.content\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);[^}]*overflow:\s*hidden;", styles);
+        Assert.Matches(@"(?s)\.content-scroll\s*\{[^}]*overflow-y:\s*auto;[^}]*scroll-padding-block:\s*16px;", styles);
+        Assert.Contains("html, body { overflow: hidden; }", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Companion_terminal_follow_pauses_when_user_scrolls_up_and_resumes_at_bottom()
     {
         var index = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
