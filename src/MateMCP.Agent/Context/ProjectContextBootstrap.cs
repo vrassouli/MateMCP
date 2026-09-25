@@ -204,7 +204,7 @@ public static class ProjectContextBootstrap
         }
 
         builder.AppendLine();
-        builder.AppendLine("After completing the task, if you learned a stable reusable project rule, procedure, decision, workaround, or configuration fact, search Skills & Memory for an existing matching item and update/deduplicate it before creating a new one. Do not store secrets, credentials, transient chat noise, or one-off status here.");
+        builder.AppendLine("After completing the task, if you learned durable project-specific knowledge, keep it in the repository as a task-matched SKILL.md (prefer .matemcp/skills/<name>/SKILL.md) so it travels with Git. Use MateMCP Skills & Memory only for durable global/cross-project knowledge. Update or deduplicate existing repository Skills instead of creating near-duplicates. Never store secrets, credentials, transient chat noise, or one-off status in either location.");
         builder.AppendLine($"Retry the same tool call with contextLease='{lease}'. The lease is accepted only while the applicable project context remains unchanged.");
         return builder.ToString().TrimEnd();
     }

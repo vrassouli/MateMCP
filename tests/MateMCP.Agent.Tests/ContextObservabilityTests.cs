@@ -41,7 +41,7 @@ triggers: [release, package]
         var projects = new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options));
         var memory = new SkillMemoryStore(projects, Path.Combine(_root, "skills-memory.json"));
         var memoryItem = await memory.CreateAsync(new(
-            "Release memory", "memory", "project", "Demo", ["release"], null, memoryContent, "user"));
+            "Release memory", "memory", "global", null, ["release"], null, memoryContent, "user"));
         var auditPath = Path.Combine(_root, "audit.jsonl");
         var audit = new AuditLog(auditPath);
 
@@ -55,9 +55,9 @@ triggers: [release, package]
         Assert.NotNull(first.Context);
         Assert.StartsWith("ctx-", first.ContextId, StringComparison.Ordinal);
         Assert.DoesNotContain(first.Lease!, first.ContextId!, StringComparison.Ordinal);
-        Assert.Contains("search Skills & Memory", first.Context!, StringComparison.Ordinal);
-        Assert.Contains("update/deduplicate", first.Context!, StringComparison.Ordinal);
-        Assert.Contains("Do not store secrets", first.Context!, StringComparison.Ordinal);
+        Assert.Contains(".matemcp/skills", first.Context!, StringComparison.Ordinal);
+        Assert.Contains("Update or deduplicate", first.Context!, StringComparison.Ordinal);
+        Assert.Contains("Never store secrets", first.Context!, StringComparison.Ordinal);
 
         var events = await audit.ReadAsync();
         var instruction = Assert.Single(events, x => x.Capability == "instruction.apply");

@@ -59,11 +59,10 @@
                     <div>@project.Root</div>
                     <div class="muted">ID: @project.Id · Read: @YesNo(project.Read) · Write: @YesNo(project.Write) · Shell: @YesNo(project.Shell)</div>
                     <div class="actions">
-                        <Button Text="Skills & Memory" OnClick="() => OpenSkillsMemory.InvokeAsync(project.Id)" />
                         <Button Text="Edit" OnClick="() => BeginEdit(project)" />
                         @if (ConfirmRemoveName == project.Name)
                         {
-                            <span class="muted">Unregister only; source files and associated Skills & Memory will not be deleted.</span>
+                            <span class="muted">Unregister only; source files and repository Skills will not be deleted.</span>
                             <Button Text="Confirm unregister" OnClick="() => RemoveAsync(project.Name)" />
                             <Button Text="Cancel" OnClick="() => ConfirmRemoveName = null" />
                         }
@@ -79,8 +78,6 @@
 </div>
 
 @code {
-    [Parameter] public EventCallback<string> OpenSkillsMemory { get; set; }
-
     private readonly HttpClient _http;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private IReadOnlyList<ProjectInfo> Projects { get; set; } = [];

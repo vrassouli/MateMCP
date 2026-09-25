@@ -92,7 +92,7 @@ public sealed class ProjectContextBootstrapTests : IDisposable
     }
 
     [Fact]
-    public async Task Matching_project_skill_and_memory_are_automatic_but_unrelated_context_is_not()
+    public async Task Matching_project_skill_and_global_memory_are_automatic_but_unrelated_context_is_not()
     {
         var (options, projects, memory, audit) = CreateServices();
         var releaseSkill = Path.Combine(_root, ".agents", "skills", "release");
@@ -116,10 +116,10 @@ triggers: [finance, invoice]
 Never include this in a release task.
 """);
         await memory.CreateAsync(new(
-            "Release signing requirement", "memory", "project", "Demo", ["release", "signing"], null,
+            "Release signing requirement", "memory", "global", null, ["release", "signing"], null,
             "Release artifacts must be signed before publication.", "user"));
         await memory.CreateAsync(new(
-            "Quarterly finance reminder", "memory", "project", "Demo", ["finance"], null,
+            "Quarterly finance reminder", "memory", "global", null, ["finance"], null,
             "Prepare the quarterly finance spreadsheet.", "user"));
 
         var first = await ProjectContextBootstrap.RequireAsync(
@@ -175,11 +175,11 @@ Never include this in a release task.
     }
 
     [Fact]
-    public async Task Unrelated_project_memory_does_not_force_context_injection()
+    public async Task Unrelated_global_memory_does_not_force_context_injection()
     {
         var (options, projects, memory, audit) = CreateServices();
         await memory.CreateAsync(new(
-            "Finance-only note", "memory", "project", "Demo", ["finance"], null,
+            "Finance-only note", "memory", "global", null, ["finance"], null,
             "Only relevant to invoices and finance reports.", "user"));
 
         var result = await ProjectContextBootstrap.RequireAsync(

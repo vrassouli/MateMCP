@@ -16,7 +16,7 @@ The normal user experience is simple: install MateMCP Desktop, enroll the device
 - **Approvals** — require local or remote approval for sensitive actions and keep decisions auditable.
 - **Secret Manager** — keep user-managed credentials in the operating system credential store instead of model context or project files.
 - **Activity, audit, and diagnostics** — see what the Agent is doing, inspect approval/credential activity, and diagnose connectivity or execution failures.
-- **Skills & Memory** — maintain reusable project knowledge and workflow guidance across sessions.
+- **Skills & Memory** — keep global cross-project knowledge in the Agent, while project-specific knowledge lives as versioned repository `SKILL.md` files and travels with Git.
 - **Multi-device access** — enroll multiple independently revocable Agents under one account.
 - **Resilient connectivity** — logical sessions survive short Agent/Relay disconnects, operations use stable identities, and supported streams/transfers can resume safely.
 
@@ -125,7 +125,7 @@ Companion is the user's local control surface. Current functionality includes:
 - **Secret Manager** backed by the OS credential store.
 - **Activity & Audit** history.
 - **Agent Logs** and diagnostics.
-- **Skills & Memory** inspection and management.
+- **Global Skills & Memory** inspection and management; project Skills are ordinary versioned files inside each repository.
 - **Computer Use** preview/status.
 - **Prevent Sleep While Using** controls.
 - Manual update checks and optional automatic Desktop updates on supported platforms.
@@ -171,6 +171,7 @@ Relay reverse-proxy guidance is in [`deploy/relay/README.md`](deploy/relay/READM
 | Credential injection | [`docs/credential-injection.md`](docs/credential-injection.md) |
 | Connectivity / chaos coverage | [`docs/connectivity-chaos-testing.md`](docs/connectivity-chaos-testing.md) |
 | ChatGPT tool refresh | [`docs/chatgpt-tool-refresh.md`](docs/chatgpt-tool-refresh.md) |
+| Project context & repository Skills | [`docs/project-context-bootstrap.md`](docs/project-context-bootstrap.md) |
 | Development workflow | [`docs/development-workflow.md`](docs/development-workflow.md) |
 | Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
 
@@ -181,7 +182,7 @@ MateMCP is under active development. Some areas intentionally remain conservativ
 - Native Companion packaging is currently focused on Windows x64 and macOS Apple Silicon.
 - Windows ARM64 uses screenshot fallback rather than the native WGC preview helper.
 - macOS production signing/TCC identity still needs hardening so permissions survive every production update reliably.
-- Skills & Memory exists today, but proactive automatic context use across different AI clients is still evolving.
+- Global Skills & Memory and repository Skills exist today, but proactive automatic context use across different AI clients is still evolving.
 - Third-party MCP/OAuth clients can have provider-specific interoperability differences and need real external validation.
 - Safe & Informed Approvals is being expanded so approval dialogs explain consequences and risk rather than relying only on raw command syntax.
 

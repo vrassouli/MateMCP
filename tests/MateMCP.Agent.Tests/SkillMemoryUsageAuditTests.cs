@@ -28,10 +28,10 @@ public sealed class SkillMemoryUsageAuditTests : IDisposable
         var tools = new SkillMemoryTools(store, audit);
         const string privateContent = "PRIVATE DURABLE MEMORY CONTENT";
         const string privateQuery = "PRIVATE-QUERY-TEXT";
-        var item = await store.CreateAsync(new("Deployment rule", "rule", "project", "Demo", ["deploy"], null, privateContent, "user"));
+        var item = await store.CreateAsync(new("Deployment rule", "rule", "global", null, ["deploy"], null, privateContent, "user"));
 
-        var searched = await tools.Search(project: "Demo", type: "rule", text: privateQuery);
-        var applicable = await tools.Applicable("Demo");
+        var searched = await tools.Search(type: "rule", text: privateQuery);
+        var applicable = await tools.Applicable();
         var read = await tools.Read(item.Id);
 
         Assert.Empty(searched);
@@ -42,17 +42,17 @@ public sealed class SkillMemoryUsageAuditTests : IDisposable
         var search = Assert.Single(events, x => x.Capability == "memory.search");
         Assert.Contains("matches:0", search.Result, StringComparison.Ordinal);
         Assert.Contains($"queryChars:{privateQuery.Length}", search.Result, StringComparison.Ordinal);
-        Assert.Contains("project:Demo", search.Target, StringComparison.Ordinal);
+        Assert.Contains("global", search.Target, StringComparison.Ordinal);
         Assert.Contains("type:rule", search.Target, StringComparison.Ordinal);
 
         var applicableEvent = Assert.Single(events, x => x.Capability == "memory.applicable");
-        Assert.Equal("project:Demo", applicableEvent.Target);
+        Assert.Equal("global", applicableEvent.Target);
         Assert.Contains("items:", applicableEvent.Result, StringComparison.Ordinal);
 
         var readEvent = Assert.Single(events, x => x.Capability == "memory.read");
         Assert.Equal(item.Id, readEvent.Target);
         Assert.Contains("type:rule", readEvent.Result, StringComparison.Ordinal);
-        Assert.Contains("scope:project", readEvent.Result, StringComparison.Ordinal);
+        Assert.Contains("scope:global", readEvent.Result, StringComparison.Ordinal);
 
         var rawAudit = await File.ReadAllTextAsync(auditPath);
         Assert.DoesNotContain(privateContent, rawAudit, StringComparison.Ordinal);

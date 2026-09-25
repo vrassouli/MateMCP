@@ -36,7 +36,7 @@ public sealed class FileSystemTools(ProjectRegistry projects, SkillMemoryStore m
         return new string(buffer, 0, count);
     }
 
-    [McpServerTool(Name = "filesystem_write"), Description("Writes a UTF-8 text file relative to a configured project root. Before the first project mutation, MateMCP may return status=context_required with repository instructions, relevant Skills & Memory, and a contextLease; read that context and retry the same call with the supplied contextLease. Creates parent directories when needed only after context preflight succeeds.")]
+    [McpServerTool(Name = "filesystem_write"), Description("Writes a UTF-8 text file relative to a configured project root. Before the first project mutation, MateMCP may return status=context_required with repository instructions, relevant repository Skills and global Skills & Memory, and a contextLease; read that context and retry the same call with the supplied contextLease. Creates parent directories when needed only after context preflight succeeds.")]
     public async Task<object> Write(
         string project,
         string path,

@@ -25,7 +25,7 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         Destructive = true,
         Idempotent = false,
         OpenWorld = true)]
-    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. For project-scoped work, MateMCP may first return status=context_required with repository instructions, relevant Skills & Memory, and a contextLease; read that context and retry the same call with the supplied contextLease before any command is executed. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
+    [Description("Executes a shell/command-line command non-interactively and returns stdout/stderr after it exits. For project-scoped work, MateMCP may first return status=context_required with repository instructions, relevant repository Skills and global Skills & Memory, and a contextLease; read that context and retry the same call with the supplied contextLease before any command is executed. Use shell_session_start instead whenever the command may prompt for input, request confirmation or credentials, open a REPL/interactive program, or otherwise need terminal interaction.")]
     public async Task<object> Exec(
         [Description("Shell/command-line command to run non-interactively.")] string command,
         [Description("Optional configured MateMCP project whose directory, shell policy, and project context should be used. Omit to run from the Agent user's home directory with relevant global durable context only.")] string? project = null,

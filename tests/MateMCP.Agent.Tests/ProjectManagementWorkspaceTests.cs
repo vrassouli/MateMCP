@@ -18,9 +18,9 @@ public sealed class ProjectManagementWorkspaceTests
         Assert.Contains("Guid.NewGuid().ToString(\"N\")", config, StringComparison.Ordinal);
         Assert.Contains("already registered", config, StringComparison.Ordinal);
         Assert.Contains("project = project with { Id = existingId }", config, StringComparison.Ordinal);
-        Assert.Contains("MigrateSkillMemoryProjectReferences", config, StringComparison.Ordinal);
-        Assert.Contains("return projects.Get(project.Trim()).Id", memory, StringComparison.Ordinal);
-        Assert.Contains("MatchesProject", memory, StringComparison.Ordinal);
+        Assert.DoesNotContain("MigrateSkillMemoryProjectReferences", config, StringComparison.Ordinal);
+        Assert.Contains("global scope only", memory, StringComparison.Ordinal);
+        Assert.Contains(".matemcp/skills", memory, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -43,16 +43,16 @@ public sealed class ProjectManagementWorkspaceTests
         Assert.Contains("Add Project", panel, StringComparison.Ordinal);
         Assert.Contains("Search projects", panel, StringComparison.Ordinal);
         Assert.Contains("Edit Project", panel, StringComparison.Ordinal);
-        Assert.Contains("associated Skills & Memory will not be deleted", panel, StringComparison.Ordinal);
-        Assert.Contains("OpenSkillsMemory.InvokeAsync(project.Id)", panel, StringComparison.Ordinal);
+        Assert.Contains("repository Skills will not be deleted", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenSkillsMemory.InvokeAsync(project.Id)", panel, StringComparison.Ordinal);
         Assert.Contains("project.Available", panel, StringComparison.Ordinal);
         Assert.Contains("GetProjectsAsync", api, StringComparison.Ordinal);
-        Assert.Contains("Select a registered project", memoryPanel, StringComparison.Ordinal);
-        Assert.Contains("ProjectContext", memoryPanel, StringComparison.Ordinal);
-        Assert.Contains("project: string.IsNullOrWhiteSpace(FilterProject)", memoryPanel, StringComparison.Ordinal);
+        Assert.Contains("Global Skills & Memory", memoryPanel, StringComparison.Ordinal);
+        Assert.Contains(".matemcp/skills", memoryPanel, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProjectContext", memoryPanel, StringComparison.Ordinal);
         Assert.Contains("Section == \"projects\"", main, StringComparison.Ordinal);
-        Assert.Contains("<ProjectsPanel OpenSkillsMemory=\"OpenProjectSkillsMemory\" />", main, StringComparison.Ordinal);
-        Assert.Contains("<SkillsMemoryPanel ProjectContext=\"@MemoryProjectContext\" />", main, StringComparison.Ordinal);
+        Assert.Contains("<ProjectsPanel />", main, StringComparison.Ordinal);
+        Assert.Contains("<SkillsMemoryPanel />", main, StringComparison.Ordinal);
         Assert.Contains("\"projects\" => \"Projects\"", main, StringComparison.Ordinal);
     }
 

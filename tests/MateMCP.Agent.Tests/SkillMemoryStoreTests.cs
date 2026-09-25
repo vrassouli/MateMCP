@@ -1,4 +1,6 @@
+using System.Text.Json;
 using MateMCP.Agent.Configuration;
+using MateMCP.Agent.Context;
 using MateMCP.Agent.Memory;
 using MateMCP.Agent.Projects;
 using Microsoft.Extensions.Options;
@@ -10,7 +12,7 @@ public sealed class SkillMemoryStoreTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "matemcp-memory-tests-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task Persists_global_and_project_items_and_returns_applicable_precedence()
+    public async Task Persists_global_items_and_returns_only_global_applicable_context()
     {
         Directory.CreateDirectory(_root);
         var projectRoot = Path.Combine(_root, "project");
@@ -18,31 +20,122 @@ public sealed class SkillMemoryStoreTests : IDisposable
         var store = CreateStore(projectRoot);
 
         await store.CreateAsync(new("Global rule", "rule", "global", null, ["style"], null, "Use concise commit messages.", "ai"));
-        await store.CreateAsync(new("Project rule", "rule", "project", "Demo", ["style"], null, "Use feature folders.", "user"));
 
         var reopened = CreateStore(projectRoot);
         var applicable = await reopened.ApplicableAsync("Demo");
 
-        Assert.Equal(2, applicable.Count);
-        Assert.Equal("project", applicable[0].Scope);
-        Assert.Equal("global", applicable[1].Scope);
+        var item = Assert.Single(applicable);
+        Assert.Equal("global", item.Scope);
+        Assert.Null(item.Project);
     }
 
     [Fact]
-    public async Task Project_scope_requires_configured_project_and_isolated_search()
+    public async Task Project_scope_is_rejected_and_points_to_repository_skills()
     {
         Directory.CreateDirectory(_root);
         var projectRoot = Path.Combine(_root, "project");
         Directory.CreateDirectory(projectRoot);
         var store = CreateStore(projectRoot);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => store.CreateAsync(new("Bad", "memory", "project", "Other", null, null, "x", "ai")));
-        await store.CreateAsync(new("Demo", "memory", "project", "Demo", null, null, "demo-only", "ai"));
+        var create = await Assert.ThrowsAsync<ArgumentException>(() => store.CreateAsync(
+            new("Project note", "memory", "project", "Demo", null, null, "demo-only", "ai")));
+        Assert.Contains("repository", create.Message, StringComparison.OrdinalIgnoreCase);
 
-        var project = await store.SearchAsync("project", "Demo");
-        var global = await store.SearchAsync("global");
-        Assert.Single(project);
-        Assert.Empty(global);
+        var search = await Assert.ThrowsAsync<ArgumentException>(() => store.SearchAsync("project", "Demo"));
+        Assert.Contains("repository", search.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Legacy_project_items_migrate_to_repository_skills_and_are_removed_from_active_store()
+    {
+        Directory.CreateDirectory(_root);
+        var projectRoot = Path.Combine(_root, "project");
+        Directory.CreateDirectory(projectRoot);
+        var path = Path.Combine(_root, "skills-memory.json");
+        var now = DateTimeOffset.UtcNow;
+        var items = new[]
+        {
+            new SkillMemoryItem("global1", "Global rule", "rule", "global", null, ["style"], null, "Global content", "user", "user", true, now, now),
+            new SkillMemoryItem("project12345678", "Release signing", "procedure", "project", "demo-stable-id", ["release", "signing"], "Release procedure", "Artifacts must be signed before publication.", "user", "user", true, now, now)
+        };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(items, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+
+        var store = CreateStore(projectRoot);
+        var result = await store.MigrateLegacyProjectItemsAsync();
+
+        Assert.Equal(1, result.Found);
+        Assert.Equal(1, result.MigratedToRepository);
+        Assert.Equal(0, result.ArchivedOnly);
+        Assert.NotNull(result.ArchivePath);
+        Assert.True(File.Exists(result.ArchivePath));
+
+        var active = await store.SearchAsync(includeDisabled: true);
+        var global = Assert.Single(active);
+        Assert.Equal("global1", global.Id);
+
+        var skillPath = Assert.Single(Directory.GetFiles(Path.Combine(projectRoot, ".matemcp", "skills"), "SKILL.md", SearchOption.AllDirectories));
+        var skill = await File.ReadAllTextAsync(skillPath);
+        Assert.Contains("Release signing", skill, StringComparison.Ordinal);
+        Assert.Contains("Artifacts must be signed before publication.", skill, StringComparison.Ordinal);
+        Assert.Contains("release", skill, StringComparison.OrdinalIgnoreCase);
+
+        var project = CreateProjects(projectRoot).Get("Demo");
+        var selected = ProjectSkillContext.Build(project, "package release", null);
+        Assert.Contains("Artifacts must be signed before publication.", selected.Context, StringComparison.Ordinal);
+
+        var archived = await File.ReadAllTextAsync(result.ArchivePath!);
+        Assert.Contains("project12345678", archived, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Legacy_project_items_for_unavailable_project_are_archived_without_data_loss()
+    {
+        Directory.CreateDirectory(_root);
+        var projectRoot = Path.Combine(_root, "project");
+        Directory.CreateDirectory(projectRoot);
+        var path = Path.Combine(_root, "skills-memory.json");
+        var now = DateTimeOffset.UtcNow;
+        var items = new[]
+        {
+            new SkillMemoryItem("orphan1", "Orphan project note", "memory", "project", "missing-project-id", ["legacy"], null, "Keep this content recoverable.", "user", "user", true, now, now)
+        };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(items, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+
+        var store = CreateStore(projectRoot);
+        var result = await store.MigrateLegacyProjectItemsAsync();
+
+        Assert.Equal(1, result.Found);
+        Assert.Equal(0, result.MigratedToRepository);
+        Assert.Equal(1, result.ArchivedOnly);
+        Assert.Empty(await store.SearchAsync(includeDisabled: true));
+        Assert.Contains("Keep this content recoverable.", await File.ReadAllTextAsync(result.ArchivePath!), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Disabled_or_archived_legacy_project_items_are_archived_but_not_activated_as_repository_skills()
+    {
+        Directory.CreateDirectory(_root);
+        var projectRoot = Path.Combine(_root, "project");
+        Directory.CreateDirectory(projectRoot);
+        var path = Path.Combine(_root, "skills-memory.json");
+        var now = DateTimeOffset.UtcNow;
+        var items = new[]
+        {
+            new SkillMemoryItem("disabled1", "Disabled project note", "rule", "project", "Demo", ["always"], null, "Must stay inactive.", "user", "user", false, now, now),
+            new SkillMemoryItem("archived1", "Archived project note", "rule", "project", "Demo", ["always"], null, "Must stay archived.", "user", "user", true, now, now, true)
+        };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(items, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+
+        var store = CreateStore(projectRoot);
+        var result = await store.MigrateLegacyProjectItemsAsync();
+
+        Assert.Equal(2, result.Found);
+        Assert.Equal(0, result.MigratedToRepository);
+        Assert.Equal(2, result.ArchivedOnly);
+        Assert.False(Directory.Exists(Path.Combine(projectRoot, ".matemcp", "skills")));
+        var archive = await File.ReadAllTextAsync(result.ArchivePath!);
+        Assert.Contains("disabled1", archive, StringComparison.Ordinal);
+        Assert.Contains("archived1", archive, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -80,7 +173,7 @@ public sealed class SkillMemoryStoreTests : IDisposable
 
         Assert.True(archived.Archived);
         Assert.Single(await store.SearchAsync(includeDisabled: true));
-        Assert.Empty(await store.ApplicableAsync(null));
+        Assert.Empty(await store.ApplicableAsync());
 
         var reopened = CreateStore(projectRoot);
         var persisted = await reopened.GetAsync(item.Id);
@@ -88,9 +181,12 @@ public sealed class SkillMemoryStoreTests : IDisposable
     }
 
     private SkillMemoryStore CreateStore(string projectRoot)
+        => new(CreateProjects(projectRoot), Path.Combine(_root, "skills-memory.json"));
+
+    private static ProjectRegistry CreateProjects(string projectRoot)
     {
-        var options = new MateOptions { Projects = [new ProjectOptions { Name = "Demo", Root = projectRoot, Read = true, Write = true, Shell = true }] };
-        return new SkillMemoryStore(new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options)), Path.Combine(_root, "skills-memory.json"));
+        var options = new MateOptions { Projects = [new ProjectOptions { Id = "demo-stable-id", Name = "Demo", Root = projectRoot, Read = true, Write = true, Shell = true }] };
+        return new ProjectRegistry(new StaticOptionsMonitor<MateOptions>(options));
     }
 
     public void Dispose() { try { Directory.Delete(_root, true); } catch { } }

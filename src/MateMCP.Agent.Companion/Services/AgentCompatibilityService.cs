@@ -19,6 +19,8 @@ public sealed class AgentCompatibilityService : IDisposable
     [
         "projects-stable-id",
         "skills-memory",
+        "global-skills-memory",
+        "repository-skills",
         "desktop-update",
         "agent-logs",
         "computer-use-preview"

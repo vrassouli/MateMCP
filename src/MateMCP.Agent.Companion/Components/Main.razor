@@ -40,7 +40,7 @@
             </button>
             <button class="@(Section == "memory" ? "active" : null)" @onclick="OpenGlobalSkillsMemory">
                 <Icon Value="@FluentIcons.Document" />
-                <span>Skills &amp; Memory</span>
+                <span>Global Skills &amp; Memory</span>
             </button>
             <button class="@(Section == "logs" ? "active" : null)" @onclick='() => Section = "logs"'>
                 <Icon Value="@FluentIcons.Document" />
@@ -333,11 +333,11 @@
         }
         else if (Section == "projects")
         {
-            <ProjectsPanel OpenSkillsMemory="OpenProjectSkillsMemory" />
+            <ProjectsPanel />
         }
         else if (Section == "memory")
         {
-            <SkillsMemoryPanel ProjectContext="@MemoryProjectContext" />
+            <SkillsMemoryPanel />
         }
         else if (Section == "logs")
         {
@@ -398,7 +398,6 @@
     private readonly CancellationTokenSource _disposeCts = new();
     private Task? _pollTask;
     private string Section { get; set; } = "dashboard";
-    private string? MemoryProjectContext { get; set; }
     private string? Error { get; set; }
     private AgentStatus? Status { get; set; }
     private bool AgentRunning { get; set; }
@@ -450,7 +449,7 @@
         "shell" => "Interactive Shell",
         "secrets" => "Secret Manager",
         "projects" => "Projects",
-        "memory" => MemoryProjectContext is null ? "Skills & Memory" : "Project Skills & Memory",
+        "memory" => "Global Skills & Memory",
         "logs" => "Agent Logs",
         "audit" => "Activity & Audit",
         _ => "Dashboard"
@@ -464,13 +463,6 @@
 
     private void OpenGlobalSkillsMemory()
     {
-        MemoryProjectContext = null;
-        Section = "memory";
-    }
-
-    private void OpenProjectSkillsMemory(string projectId)
-    {
-        MemoryProjectContext = projectId;
         Section = "memory";
     }
 

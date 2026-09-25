@@ -11,18 +11,16 @@ public sealed class ProactiveMemoryContextTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "matemcp-proactive-memory-tests-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task Project_context_is_automatic_isolated_and_audited()
+    public async Task Global_context_is_available_during_project_work_and_is_audited()
     {
         var (store, audit) = CreateServices();
-        await store.CreateAsync(new("Demo deployment", "procedure", "project", "Demo", ["deploy"], null, "Run the Demo release checklist before deploying.", "user"));
-        await store.CreateAsync(new("Other deployment", "procedure", "project", "Other", ["deploy"], null, "This belongs only to Other.", "user"));
+        await store.CreateAsync(new("Deployment convention", "procedure", "global", null, ["deploy"], null, "Run the shared release checklist before deploying.", "user"));
         await store.CreateAsync(new("Unrelated note", "memory", "global", null, ["finance"], null, "Quarterly budget note.", "user"));
 
         var context = await ProactiveMemoryContext.BuildAsync(store, audit, "shell_exec", "Demo", "dotnet publish && deploy", CancellationToken.None);
 
         Assert.NotNull(context);
-        Assert.Contains("Demo release checklist", context, StringComparison.Ordinal);
-        Assert.DoesNotContain("belongs only to Other", context, StringComparison.Ordinal);
+        Assert.Contains("shared release checklist", context, StringComparison.Ordinal);
         Assert.DoesNotContain("Quarterly budget", context, StringComparison.Ordinal);
         Assert.Contains("current user instructions override", context, StringComparison.Ordinal);
 

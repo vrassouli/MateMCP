@@ -69,6 +69,20 @@ builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("mcp", limiter => {
 builder.Services.AddMcpServer().WithHttpTransport(o => o.SessionMode = HttpServerSessionMode.Stateless).WithToolsFromAssembly();
 
 var app = builder.Build();
+try
+{
+    var migration = await app.Services.GetRequiredService<SkillMemoryStore>().MigrateLegacyProjectItemsAsync(CancellationToken.None);
+    if (migration.Found > 0)
+    {
+        app.Logger.LogInformation(
+            "Migrated {Migrated}/{Found} legacy project Skills & Memory items into repository SKILL.md files; {ArchivedOnly} remain archive-only at {ArchivePath}.",
+            migration.MigratedToRepository, migration.Found, migration.ArchivedOnly, migration.ArchivePath);
+    }
+}
+catch (Exception ex)
+{
+    app.Logger.LogError(ex, "Could not migrate legacy project-scoped Skills & Memory. Existing data was left in place for a later retry.");
+}
 app.UseRateLimiter(); app.UseMiddleware<BearerTokenMiddleware>();
 app.Use(async (context, next) =>
 {
@@ -115,7 +129,7 @@ app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOption
         version = agentVersion,
         endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp",
         management = $"http://127.0.0.1:{current.Port}/ui",
-        managementApi = new { revision = 4, capabilities = new[] { "projects-stable-id", "skills-memory", "desktop-update", "agent-logs", "power-inhibition", "computer-use-preview" } },
+        managementApi = new { revision = 5, capabilities = new[] { "projects-stable-id", "skills-memory", "global-skills-memory", "repository-skills", "desktop-update", "agent-logs", "power-inhibition", "computer-use-preview" } },
         configuration = userConfigPath,
         projects = projects.All.Select(p => p.Name).ToArray(),
         shellApproval = current.RequireShellApproval,
