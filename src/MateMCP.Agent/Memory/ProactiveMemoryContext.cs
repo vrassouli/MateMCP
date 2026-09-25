@@ -109,13 +109,14 @@ public static class ProactiveMemoryContext
         var correlation = string.IsNullOrWhiteSpace(contextId) ? string.Empty : $"context:{contextId};";
         var ids = selection.ItemIds.Count == 0 ? string.Empty : $";ids:{string.Join(',', selection.ItemIds)}";
         if ((options?.Mode ?? ProactiveMemoryMode.Automatic) == ProactiveMemoryMode.Suggested)
-            return audit.WriteAsync("memory.suggest", target, $"{correlation}items:{selection.ItemCount};types:{selection.TypeSummary}{ids}", cancellationToken);
+            return audit.WriteAsync("memory.suggest", target, $"{correlation}items:{selection.ItemCount};types:{selection.TypeSummary}{ids}", cancellationToken, project);
 
         return audit.WriteAsync(
             "memory.inject",
             target,
             $"{correlation}items:{selection.ItemCount};chars:{selection.Context.Length};types:{selection.TypeSummary}{ids}",
-            cancellationToken);
+            cancellationToken,
+            project);
     }
 
     private static int Score(SkillMemoryItem item, IReadOnlyList<string> terms)
