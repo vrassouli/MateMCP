@@ -1,64 +1,49 @@
 @implements IAsyncDisposable
 @inject AgentApiClient Api
 @inject AgentProcessController AgentProcess
+@inject IJSRuntime JS
 
 <div class="shell">
     <aside class="sidebar">
         <div class="brand">MateMCP Companion</div>
-        <nav class="nav" aria-label="Companion navigation">
-            <button class="@(Section == "dashboard" ? "active" : null)" @onclick='() => Section = "dashboard"'>
-                <Icon Value="@FluentIcons.Home" />
-                <span>Dashboard</span>
-            </button>
-            <button class="@(Section == "devices" ? "active" : null)" @onclick='() => Section = "devices"'>
-                <Icon Value="@FluentIcons.Settings" />
-                <span>Devices</span>
-            </button>
-            <button class="@(Section == "approvals" ? "active" : null)" @onclick='() => Section = "approvals"'>
-                <Icon Value="@FluentIcons.Checkmark" />
-                <span>Approvals</span>
-                @if (Approvals.Count > 0)
-                {
-                    <Badge Text="@Approvals.Count.ToString()" />
-                }
-            </button>
-            <button class="@(Section == "shell" ? "active" : null)" @onclick='() => Section = "shell"'>
-                <Icon Value="@FluentIcons.Code" />
-                <span>Shell</span>
-                @if (ActiveShellCount > 0)
-                {
-                    <Badge Text="@ActiveShellCount.ToString()" />
-                }
-            </button>
-            <button class="@(Section == "secrets" ? "active" : null)" @onclick='() => Section = "secrets"'>
-                <Icon Value="@FluentIcons.Settings" />
-                <span>Secrets</span>
-            </button>
-            <button class="@(Section == "projects" ? "active" : null)" @onclick='() => Section = "projects"'>
-                <Icon Value="@FluentIcons.Document" />
-                <span>Projects</span>
-            </button>
-            <button class="@(Section == "memory" ? "active" : null)" @onclick="OpenGlobalSkillsMemory">
-                <Icon Value="@FluentIcons.Document" />
-                <span>Global Skills &amp; Memory</span>
-            </button>
-            <button class="@(Section == "logs" ? "active" : null)" @onclick='() => Section = "logs"'>
-                <Icon Value="@FluentIcons.Document" />
-                <span>Agent Logs</span>
-            </button>
-            <button class="@(Section == "audit" ? "active" : null)" @onclick='() => Section = "audit"'>
-                <Icon Value="@FluentIcons.Document" />
-                <span>Activity</span>
-            </button>
-        </nav>
+        <CompanionNavigation ActiveSection="@Section"
+                             ApprovalsCount="@Approvals.Count"
+                             ActiveShellCount="@ActiveShellCount"
+                             OnNavigate="NavigateAsync" />
     </aside>
+
+    <dialog id="companion-nav-drawer" class="nav-drawer" aria-labelledby="companion-nav-drawer-title">
+        <aside class="nav-drawer-panel">
+            <div class="nav-drawer-header">
+                <strong id="companion-nav-drawer-title">MateMCP Companion</strong>
+                <button type="button"
+                        class="nav-drawer-close"
+                        data-nav-close
+                        aria-label="Close navigation"
+                        @onclick="CloseNavigationAsync">×</button>
+            </div>
+            <CompanionNavigation ActiveSection="@Section"
+                                 ApprovalsCount="@Approvals.Count"
+                                 ActiveShellCount="@ActiveShellCount"
+                                 OnNavigate="NavigateFromDrawerAsync" />
+        </aside>
+    </dialog>
 
     <main class="content">
         <header class="content-header">
             <div class="toolbar">
-                <div>
-                    <h1>@Title</h1>
-                    <div class="muted">Local Agent management</div>
+                <div class="content-title-row">
+                    <button id="companion-nav-menu-button"
+                            type="button"
+                            class="mobile-nav-trigger"
+                            aria-label="Open navigation"
+                            aria-controls="companion-nav-drawer"
+                            aria-expanded="false"
+                            @onclick="OpenNavigationAsync">☰</button>
+                    <div>
+                        <h1>@Title</h1>
+                        <div class="muted">Local Agent management</div>
+                    </div>
                 </div>
                 <Button Text="Refresh" Icon="@FluentIcons.ArrowSyncCircle" OnClick="RefreshAllAsync" />
             </div>
@@ -465,10 +450,23 @@
         _pollTask = PollAsync(_disposeCts.Token);
     }
 
-    private void OpenGlobalSkillsMemory()
+    private Task NavigateAsync(string section)
     {
-        Section = "memory";
+        Section = section;
+        return Task.CompletedTask;
     }
+
+    private async Task NavigateFromDrawerAsync(string section)
+    {
+        Section = section;
+        await CloseNavigationAsync();
+    }
+
+    private async Task OpenNavigationAsync()
+        => await JS.InvokeVoidAsync("mateMcpNavDrawer.open", "companion-nav-drawer", "companion-nav-menu-button");
+
+    private async Task CloseNavigationAsync()
+        => await JS.InvokeVoidAsync("mateMcpNavDrawer.close", "companion-nav-drawer");
 
     private async Task RefreshAllAsync()
     {
