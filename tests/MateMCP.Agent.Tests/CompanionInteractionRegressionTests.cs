@@ -159,6 +159,33 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_skills_memory_editor_is_modal_keyboard_scoped_and_refreshes_after_save()
+    {
+        var root = FindRepositoryRoot();
+        var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "SkillsMemoryPanel.razor"));
+        var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+
+        Assert.Contains("<dialog id=\"skills-memory-editor\"", panel, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Add item\"", panel, StringComparison.Ordinal);
+        Assert.Contains("await JS.InvokeVoidAsync(\"mateMcpModal.open\", \"skills-memory-editor\", \"#memory-title\")", panel, StringComparison.Ordinal);
+        Assert.Contains("<input id=\"memory-title\" autofocus", panel, StringComparison.Ordinal);
+        Assert.Contains("await LoadAsync();", panel, StringComparison.Ordinal);
+        Assert.Contains("await CloseEditorAsync();", panel, StringComparison.Ordinal);
+        Assert.Contains("Title and Content are required.", panel, StringComparison.Ordinal);
+
+        Assert.Contains("window.mateMcpModal", index, StringComparison.Ordinal);
+        Assert.Contains("dialog.showModal()", index, StringComparison.Ordinal);
+        Assert.Contains("dialog.addEventListener('close'", index, StringComparison.Ordinal);
+        Assert.Contains("const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;", index, StringComparison.Ordinal);
+        Assert.Contains("root.querySelectorAll(selector)", index, StringComparison.Ordinal);
+
+        Assert.Contains(".companion-dialog {", styles, StringComparison.Ordinal);
+        Assert.Contains("class=\"companion-dialog skills-memory-dialog\"", panel, StringComparison.Ordinal);
+        Assert.Contains(".memory-filters {", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Projects_uses_native_folder_picker_and_reloads_after_mutations_without_local_refresh_button()
     {
         var root = FindRepositoryRoot();
