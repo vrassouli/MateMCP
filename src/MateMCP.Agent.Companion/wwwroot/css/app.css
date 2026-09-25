@@ -92,11 +92,30 @@ html, body {
     min-width: 0;
     min-height: 0;
     height: 100%;
-    padding: 24px;
-    overflow: auto;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+}
+
+.content-header {
+    min-width: 0;
+    padding: 24px 24px 0;
+    background: var(--colorNeutralBackground2, #f6f7f8);
+    z-index: 1;
+}
+
+.content-scroll {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
+    scroll-padding-block: 16px;
+    padding: 0 24px 24px;
+    outline: none;
 }
+
 
 .toolbar {
     display: flex;
@@ -401,9 +420,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 
 @media (max-width: 760px) {
-    html, body { overflow: auto; }
-    #app { height: auto; min-height: 100vh; overflow: visible; }
-    .shell { grid-template-columns: 1fr; height: auto; min-height: 100vh; overflow: visible; }
+    html, body { overflow: hidden; }
+    #app { height: 100vh; min-height: 0; overflow: hidden; }
+    .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: 100vh; min-height: 0; overflow: hidden; }
     .sidebar {
         height: auto;
         overflow-x: auto;
@@ -412,7 +431,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
         border-bottom: 1px solid var(--colorNeutralStroke2, rgba(0, 0, 0, .08));
     }
     .nav { grid-template-columns: repeat(5, minmax(max-content, 1fr)); overflow-x: auto; }
-    .content { height: auto; overflow: visible; }
+    .content { height: 100%; min-height: 0; overflow: hidden; }
+    .content-header { padding: 18px 16px 0; }
+    .content-scroll { padding: 0 16px 20px; }
     .dashboard-primary-grid { grid-template-columns: 1fr; }
     .workspace-path-row { grid-template-columns: 1fr; }
     .session-layout { grid-template-columns: 1fr; }

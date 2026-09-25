@@ -54,14 +54,17 @@
     </aside>
 
     <main class="content">
-        <div class="toolbar">
-            <div>
-                <h1>@Title</h1>
-                <div class="muted">Local Agent management</div>
+        <header class="content-header">
+            <div class="toolbar">
+                <div>
+                    <h1>@Title</h1>
+                    <div class="muted">Local Agent management</div>
+                </div>
+                <Button Text="Refresh" Icon="@FluentIcons.ArrowSyncCircle" OnClick="RefreshAllAsync" />
             </div>
-            <Button Text="Refresh" Icon="@FluentIcons.ArrowSyncCircle" OnClick="RefreshAllAsync" />
-        </div>
+        </header>
 
+        <div class="content-scroll">
         @if (!string.IsNullOrWhiteSpace(Error))
         {
             <div class="error">@Error</div>
@@ -389,6 +392,7 @@
                 }
             </div>
         }
+        </div>
     </main>
 </div>
 <Containers />
