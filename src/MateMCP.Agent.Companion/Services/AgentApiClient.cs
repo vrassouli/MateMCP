@@ -108,6 +108,19 @@ public sealed class AgentApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<UserSecretInfo?> UpdateSecretMetadataAsync(string name, string? description,
+        IReadOnlyCollection<string>? allowedTools, CancellationToken ct = default)
+    {
+        using var response = await _http.PutAsJsonAsync($"secrets/{Uri.EscapeDataString(name)}", new
+        {
+            Description = description,
+            Kind = 0,
+            AllowedTools = allowedTools
+        }, Json, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<UserSecretInfo>(Json, ct);
+    }
+
     public async Task DeleteSecretAsync(string name, CancellationToken ct = default)
     {
         using var response = await _http.DeleteAsync($"secrets/{Uri.EscapeDataString(name)}", ct);

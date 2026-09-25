@@ -112,6 +112,33 @@ public sealed class UserSecretStore : ICredentialStore
         finally { _gate.Release(); }
     }
 
+    public async Task<UserSecretInfo?> UpdateMetadataAsync(string name, string? description, CredentialKind kind,
+        IReadOnlyCollection<string>? allowedTools, CancellationToken ct)
+    {
+        name = NormalizeName(name);
+        var normalizedTools = NormalizeAllowedTools(allowedTools);
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var items = await ReadIndexAsync(ct);
+            var existing = items.FindIndex(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (existing < 0) return null;
+
+            var updated = items[existing] with
+            {
+                Description = CleanDescription(description),
+                UpdatedAt = DateTimeOffset.UtcNow,
+                Kind = kind,
+                AllowedTools = normalizedTools
+            };
+            items[existing] = updated;
+            await WriteIndexAsync(items, ct);
+            return updated;
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task<string?> ResolveAsync(string name, CancellationToken ct)
     {
         name = NormalizeName(name);
