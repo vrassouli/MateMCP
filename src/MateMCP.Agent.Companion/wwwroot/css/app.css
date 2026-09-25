@@ -282,6 +282,14 @@ input, textarea, select {
     color: var(--colorNeutralForeground1, inherit);
 }
 
+input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    margin-inline-end: 8px;
+    padding: 0;
+    vertical-align: middle;
+}
+
 input:focus-visible, textarea:focus-visible, select:focus-visible {
     outline: 2px solid var(--colorStrokeFocus2, currentColor);
     outline-offset: 1px;

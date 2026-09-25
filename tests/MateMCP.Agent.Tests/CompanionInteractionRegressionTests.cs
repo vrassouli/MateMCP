@@ -66,6 +66,17 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_checkboxes_keep_labels_inline_with_shared_rtl_safe_spacing()
+    {
+        var styles = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+
+        Assert.Contains("input[type=\"checkbox\"] {", styles, StringComparison.Ordinal);
+        Assert.Contains("width: auto;", styles, StringComparison.Ordinal);
+        Assert.Contains("margin-inline-end: 8px;", styles, StringComparison.Ordinal);
+        Assert.Contains("vertical-align: middle;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Companion_terminal_follow_pauses_when_user_scrolls_up_and_resumes_at_bottom()
     {
         var index = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
