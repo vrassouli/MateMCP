@@ -124,7 +124,8 @@ public sealed class CompanionInteractionRegressionTests
         var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
 
         Assert.Contains("<label for=\"project-name\">Name</label><input id=\"project-name\"", projects, StringComparison.Ordinal);
-        Assert.Contains("<label for=\"project-workspace-path\">Workspace path</label><input id=\"project-workspace-path\"", projects, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"project-workspace-path\">Workspace path</label>", projects, StringComparison.Ordinal);
+        Assert.Contains("<input id=\"project-workspace-path\"", projects, StringComparison.Ordinal);
         Assert.Contains("<label for=\"agent-log-level\">Minimum level</label>", logs, StringComparison.Ordinal);
         Assert.Contains("<select id=\"agent-log-level\"", logs, StringComparison.Ordinal);
         Assert.Contains("<label for=\"agent-log-search\">Search</label>", logs, StringComparison.Ordinal);
@@ -139,6 +140,26 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("<label for=\"secret-value\">Secret value</label><input id=\"secret-value\"", main, StringComparison.Ordinal);
         Assert.Contains("role=\"group\" aria-labelledby=\"secret-allowed-use-label\"", main, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Activity date\"", main, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Projects_uses_native_folder_picker_and_reloads_after_mutations_without_local_refresh_button()
+    {
+        var root = FindRepositoryRoot();
+        var projects = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "ProjectsPanel.razor"));
+        var program = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "MauiProgram.cs"));
+        var projectFile = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "MateMCP.Agent.Companion.csproj"));
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+
+        Assert.DoesNotContain("<Button Text=\"Refresh\" OnClick=\"LoadAsync\" />", projects, StringComparison.Ordinal);
+        Assert.Contains("@inject IFolderPicker FolderPicker", projects, StringComparison.Ordinal);
+        Assert.Contains("<Button Text=\"Browse...\" OnClick=\"PickWorkspaceAsync\" />", projects, StringComparison.Ordinal);
+        Assert.Contains("EditRoot = result.Folder.Path;", projects, StringComparison.Ordinal);
+        Assert.Contains("await LoadAsync();", projects, StringComparison.Ordinal);
+        Assert.Contains(".UseMauiCommunityToolkit()", program, StringComparison.Ordinal);
+        Assert.Contains("AddSingleton<IFolderPicker>(FolderPicker.Default)", program, StringComparison.Ordinal);
+        Assert.Contains("CommunityToolkit.Maui", projectFile, StringComparison.Ordinal);
+        Assert.Contains(".workspace-path-row", styles, StringComparison.Ordinal);
     }
 
     [Fact]
