@@ -26,7 +26,8 @@ public sealed class SkillMemoryToolMetadataTests
         Assert.Equal(idempotent, tool.Idempotent);
         Assert.False(tool.OpenWorld);
         Assert.NotNull(description);
-        Assert.Contains("user-managed persistent knowledge store", description!.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("global knowledge store", description!.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".matemcp/skills", description.Description, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Never store passwords", description.Description, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -45,9 +46,10 @@ public sealed class SkillMemoryToolMetadataTests
         var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "SkillsMemoryPanel.razor"));
         Assert.Contains("Skills &amp; Memory", main, StringComparison.Ordinal);
         Assert.Contains("<SkillsMemoryPanel", main, StringComparison.Ordinal);
-        Assert.Contains("ProjectContext=", main, StringComparison.Ordinal);
-        Assert.Contains("Global", panel, StringComparison.Ordinal);
-        Assert.Contains("Project", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProjectContext=", main, StringComparison.Ordinal);
+        Assert.Contains("Global Skills & Memory", panel, StringComparison.Ordinal);
+        Assert.Contains(".matemcp/skills", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("Select a registered project", panel, StringComparison.Ordinal);
         Assert.Contains("Enabled", panel, StringComparison.Ordinal);
         Assert.Contains("source:", panel, StringComparison.Ordinal);
         Assert.Contains("last modified by:", panel, StringComparison.Ordinal);

@@ -2,25 +2,19 @@
 @inject ILogger<SkillsMemoryPanel> Logger
 @inject IJSRuntime JS
 
+<div class="panel" style="margin-bottom:12px">
+    <strong>Global Skills & Memory</strong>
+    <div class="muted" style="margin-top:6px">
+        This store is global only. Project-specific knowledge belongs in the repository as <code>SKILL.md</code> files,
+        preferably under <code>.matemcp/skills/&lt;name&gt;/SKILL.md</code>, so it travels with Git when work moves to another MateMCP Agent.
+    </div>
+</div>
+
 <div class="grid">
     <div class="panel">
-        <strong>@(EditingId is null ? "Add Skills / Memory item" : "Edit Skills / Memory item")</strong>
+        <strong>@(EditingId is null ? "Add global Skills / Memory item" : "Edit global Skills / Memory item")</strong>
         <div class="field"><label>Title</label><input @bind="Title" /></div>
         <div class="field"><label>Type</label><select @bind="Type"><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select></div>
-        <div class="field"><label>Scope</label><select @bind="Scope"><option value="global">Global</option><option value="project">Project</option></select></div>
-        @if (Scope == "project")
-        {
-            <div class="field">
-                <label>Project</label>
-                <select @bind="Project">
-                    <option value="">Select a registered project</option>
-                    @foreach (var project in Projects.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
-                    {
-                        <option value="@project.Id">@project.Name@(project.Available ? "" : " (missing)")</option>
-                    }
-                </select>
-            </div>
-        }
         <div class="field"><label>Tags (comma separated)</label><input @bind="Tags" /></div>
         <div class="field"><label>Description</label><input @bind="Description" /></div>
         <div class="field"><label>Content (Markdown)</label><textarea rows="12" @bind="Content"></textarea></div>
@@ -29,7 +23,7 @@
             <Button Text="Save" OnClick="SaveAsync" />
             @if (EditingId is not null) { <Button Text="Cancel" OnClick="CancelEdit" /> }
         </div>
-        <div class="muted" style="margin-top:10px">Project-scoped items are bound to the selected registered project's stable ID. Unregistering a project does not delete these items. Never store credentials here; use Secret Manager.</div>
+        <div class="muted" style="margin-top:10px">Use this only for durable cross-project knowledge. Never store credentials here; use Secret Manager.</div>
         @if (!string.IsNullOrWhiteSpace(Message)) { <div class="muted" style="margin-top:8px">@Message</div> }
         @if (!string.IsNullOrWhiteSpace(ErrorMessage))
         {
@@ -38,16 +32,8 @@
     </div>
 
     <div class="panel">
-        <strong>Stored Skills & Memory</strong>
+        <strong>Stored global Skills & Memory</strong>
         <div class="actions" style="margin-top:10px">
-            <select @bind="FilterScope" @bind:after="LoadAsync"><option value="">All scopes</option><option value="global">Global</option><option value="project">Project</option></select>
-            <select @bind="FilterProject" @bind:after="LoadAsync">
-                <option value="">All projects</option>
-                @foreach (var project in Projects.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
-                {
-                    <option value="@project.Id">@project.Name</option>
-                }
-            </select>
             <select @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
             <select @bind="FilterArchived"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All states</option></select>
             <select @bind="SortBy"><option value="updated-desc">Recently updated</option><option value="updated-asc">Oldest updated</option><option value="title">Title</option><option value="created-desc">Recently created</option></select>
@@ -66,7 +52,7 @@
         {
             <div class="row" @key="item.Id">
                 <strong>@item.Title</strong>
-                <div class="muted">@item.Type · @item.Scope@(item.Project is null ? "" : $":{ProjectLabel(item.Project)}") · source: @item.Source · last modified by: @item.UpdatedBy · @(item.Archived ? "archived" : item.Enabled ? "enabled" : "disabled")</div>
+                <div class="muted">@item.Type · global · source: @item.Source · last modified by: @item.UpdatedBy · @(item.Archived ? "archived" : item.Enabled ? "enabled" : "disabled")</div>
                 <div class="muted">Created @FormatTime(item.CreatedAt) · Updated @FormatTime(item.UpdatedAt)</div>
                 @if (item.Tags is { Count: > 0 }) { <div class="muted">@string.Join(", ", item.Tags)</div> }
                 @if (!string.IsNullOrWhiteSpace(item.Description)) { <div>@item.Description</div> }
@@ -83,22 +69,15 @@
 </div>
 
 @code {
-    [Parameter] public string? ProjectContext { get; set; }
-
     private IReadOnlyList<SkillMemoryItem> Items { get; set; } = [];
-    private IReadOnlyList<CompanionProjectInfo> Projects { get; set; } = [];
     private string? EditingId { get; set; }
     private string Title { get; set; } = "";
     private string Type { get; set; } = "memory";
-    private string Scope { get; set; } = "global";
-    private string Project { get; set; } = "";
     private string Tags { get; set; } = "";
     private string Description { get; set; } = "";
     private string Content { get; set; } = "";
     private bool Enabled { get; set; } = true;
     private bool Archived { get; set; }
-    private string FilterScope { get; set; } = "";
-    private string FilterProject { get; set; } = "";
     private string FilterType { get; set; } = "";
     private string FilterArchived { get; set; } = "active";
     private string SortBy { get; set; } = "updated-desc";
@@ -106,8 +85,6 @@
     private string? Message { get; set; }
     private string? ErrorMessage { get; set; }
     private bool IsLoading { get; set; }
-    private bool Initialized { get; set; }
-    private string? AppliedProjectContext { get; set; }
 
     private IEnumerable<SkillMemoryItem> VisibleItems
     {
@@ -130,45 +107,7 @@
         }
     }
 
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadProjectsAsync();
-        ApplyProjectContext();
-        await LoadAsync();
-        Initialized = true;
-    }
-
-    protected override async Task OnParametersSetAsync()
-    {
-        if (!Initialized || string.Equals(ProjectContext, AppliedProjectContext, StringComparison.OrdinalIgnoreCase)) return;
-        ApplyProjectContext();
-        await LoadAsync();
-    }
-
-    private async Task LoadProjectsAsync()
-    {
-        try
-        {
-            Projects = await Api.GetProjectsAsync();
-        }
-        catch (Exception ex) when (IsRecoverableApiFailure(ex))
-        {
-            Projects = [];
-            ErrorMessage = $"Could not load registered projects: {ex.Message}";
-            Logger.LogError(ex, "Failed to load Projects for Skills & Memory.");
-        }
-    }
-
-    private void ApplyProjectContext()
-    {
-        AppliedProjectContext = ProjectContext;
-        if (string.IsNullOrWhiteSpace(ProjectContext)) return;
-        var resolved = ResolveProjectReference(ProjectContext);
-        Scope = "project";
-        Project = resolved;
-        FilterScope = "project";
-        FilterProject = resolved;
-    }
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
@@ -177,8 +116,7 @@
         try
         {
             Items = await Api.GetSkillMemoryAsync(
-                string.IsNullOrWhiteSpace(FilterScope) ? null : FilterScope,
-                project: string.IsNullOrWhiteSpace(FilterProject) ? null : FilterProject,
+                scope: "global",
                 type: string.IsNullOrWhiteSpace(FilterType) ? null : FilterType,
                 text: string.IsNullOrWhiteSpace(FilterText) ? null : FilterText);
         }
@@ -186,7 +124,7 @@
         {
             Items = [];
             ErrorMessage = BuildApiErrorMessage(ex, "load");
-            Logger.LogError(ex, "Failed to load Skills & Memory from the local Agent API.");
+            Logger.LogError(ex, "Failed to load global Skills & Memory from the local Agent API.");
         }
         finally
         {
@@ -197,17 +135,12 @@
     private async Task SaveAsync()
     {
         if (string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Content)) return;
-        if (Scope == "project" && string.IsNullOrWhiteSpace(Project))
-        {
-            ErrorMessage = "Select a registered project for project-scoped Skills & Memory.";
-            return;
-        }
 
         ErrorMessage = null;
         try
         {
             var tags = Tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            var edit = new SkillMemoryEdit(Title.Trim(), Type, Scope, Scope == "project" ? Project : null, tags,
+            var edit = new SkillMemoryEdit(Title.Trim(), Type, "global", null, tags,
                 string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled, Archived);
             var wasCreating = EditingId is null;
             await Api.SaveSkillMemoryAsync(EditingId, edit);
@@ -218,32 +151,28 @@
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
             ErrorMessage = BuildApiErrorMessage(ex, "save");
-            Logger.LogError(ex, "Failed to save Skills & Memory item through the local Agent API.");
+            Logger.LogError(ex, "Failed to save global Skills & Memory item through the local Agent API.");
         }
     }
 
     private void Edit(SkillMemoryItem item)
     {
-        EditingId = item.Id; Title = item.Title; Type = item.Type; Scope = item.Scope; Project = ResolveProjectReference(item.Project);
+        EditingId = item.Id; Title = item.Title; Type = item.Type;
         Tags = string.Join(", ", item.Tags ?? []); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Archived = item.Archived; Message = null; ErrorMessage = null;
     }
 
     private async Task ToggleEnabledAsync(SkillMemoryItem item)
-    {
-        await UpdateStateAsync(item, !item.Enabled, item.Archived, item.Enabled ? "Item disabled." : "Item enabled.");
-    }
+        => await UpdateStateAsync(item, !item.Enabled, item.Archived, item.Enabled ? "Item disabled." : "Item enabled.");
 
     private async Task ToggleArchiveAsync(SkillMemoryItem item)
-    {
-        await UpdateStateAsync(item, item.Enabled, !item.Archived, item.Archived ? "Item unarchived." : "Item archived.");
-    }
+        => await UpdateStateAsync(item, item.Enabled, !item.Archived, item.Archived ? "Item unarchived." : "Item archived.");
 
     private async Task UpdateStateAsync(SkillMemoryItem item, bool enabled, bool archived, string message)
     {
         ErrorMessage = null;
         try
         {
-            var edit = new SkillMemoryEdit(item.Title, item.Type, item.Scope, item.Project, item.Tags, item.Description, item.Content, "user", enabled, archived);
+            var edit = new SkillMemoryEdit(item.Title, item.Type, "global", null, item.Tags, item.Description, item.Content, "user", enabled, archived);
             await Api.SaveSkillMemoryAsync(item.Id, edit);
             Message = message;
             await LoadAsync();
@@ -251,35 +180,15 @@
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
             ErrorMessage = BuildApiErrorMessage(ex, "update");
-            Logger.LogError(ex, "Failed to update Skills & Memory item {SkillMemoryId} state.", item.Id);
+            Logger.LogError(ex, "Failed to update global Skills & Memory item {SkillMemoryId} state.", item.Id);
         }
-    }
-
-    private string ResolveProjectReference(string? reference)
-    {
-        if (string.IsNullOrWhiteSpace(reference)) return "";
-        var project = Projects.FirstOrDefault(x => string.Equals(x.Id, reference, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(x.Name, reference, StringComparison.OrdinalIgnoreCase));
-        return project?.Id ?? reference;
-    }
-
-    private string ProjectLabel(string reference)
-    {
-        var project = Projects.FirstOrDefault(x => string.Equals(x.Id, reference, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(x.Name, reference, StringComparison.OrdinalIgnoreCase));
-        return project?.Name ?? reference;
     }
 
     private static string FormatTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
     private void CancelEdit()
     {
-        EditingId = null; Title = ""; Type = "memory"; Scope = "global"; Project = ""; Tags = ""; Description = ""; Content = ""; Enabled = true; Archived = false;
-        if (!string.IsNullOrWhiteSpace(ProjectContext))
-        {
-            Scope = "project";
-            Project = ResolveProjectReference(ProjectContext);
-        }
+        EditingId = null; Title = ""; Type = "memory"; Tags = ""; Description = ""; Content = ""; Enabled = true; Archived = false;
     }
 
     private async Task DeleteAsync(SkillMemoryItem item)
@@ -297,7 +206,7 @@
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
             ErrorMessage = BuildApiErrorMessage(ex, "delete");
-            Logger.LogError(ex, "Failed to delete Skills & Memory item {SkillMemoryId} through the local Agent API.", item.Id);
+            Logger.LogError(ex, "Failed to delete global Skills & Memory item {SkillMemoryId} through the local Agent API.", item.Id);
         }
     }
 

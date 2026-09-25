@@ -11,6 +11,8 @@ public sealed class DesktopUpdateCompatibilityTests
         Assert.Contains("version = agentVersion", program, StringComparison.Ordinal);
         Assert.Contains("managementApi = new", program, StringComparison.Ordinal);
         Assert.Contains("skills-memory", program, StringComparison.Ordinal);
+        Assert.Contains("global-skills-memory", program, StringComparison.Ordinal);
+        Assert.Contains("repository-skills", program, StringComparison.Ordinal);
         Assert.Contains("projects-stable-id", program, StringComparison.Ordinal);
         Assert.Contains("app.MapGet(\"/skills-memory\"", program, StringComparison.Ordinal);
         Assert.Contains("app.MapPost(\"/skills-memory\"", program, StringComparison.Ordinal);
@@ -28,6 +30,8 @@ public sealed class DesktopUpdateCompatibilityTests
         Assert.Contains("mcpTools", service, StringComparison.Ordinal);
         Assert.Contains("managementApi", service, StringComparison.Ordinal);
         Assert.Contains("RequiredManagementCapabilities", service, StringComparison.Ordinal);
+        Assert.Contains("global-skills-memory", service, StringComparison.Ordinal);
+        Assert.Contains("repository-skills", service, StringComparison.Ordinal);
         Assert.Contains("skills-memory?includeDisabled=true", service, StringComparison.Ordinal);
         Assert.Contains("\"projects\"", service, StringComparison.Ordinal);
         Assert.Contains("\"desktop-update\"", service, StringComparison.Ordinal);

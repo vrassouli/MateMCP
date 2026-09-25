@@ -36,7 +36,7 @@ public sealed class ProjectTools(ProjectRegistry registry, ProjectConfigurationS
     }
 
     [McpServerTool(Name = "project_update", Title = "Update MateMCP project", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description(Guidance + " Updates project metadata by stable ID or name while preserving its stable identity and project-scoped Skills & Memory references.")]
+    [Description(Guidance + " Updates project metadata by stable ID or name while preserving its stable identity. Repository Skills move with the project files themselves.")]
     public async Task<ProjectDefinition> Update(string project, string name, string root, bool read = true, bool write = true, bool shell = true,
         CancellationToken cancellationToken = default)
     {

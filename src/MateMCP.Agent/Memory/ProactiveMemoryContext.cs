@@ -120,11 +120,10 @@ public static class ProactiveMemoryContext
 
     private static int Score(SkillMemoryItem item, IReadOnlyList<string> terms)
     {
-        var projectScoped = string.Equals(item.Scope, "project", StringComparison.OrdinalIgnoreCase);
         var alwaysActive = string.Equals(item.Type, "rule", StringComparison.OrdinalIgnoreCase)
             || item.Tags.Any(tag => tag.Equals("always", StringComparison.OrdinalIgnoreCase)
                 || tag.Equals("required", StringComparison.OrdinalIgnoreCase));
-        var score = projectScoped ? 4 : 0;
+        var score = 0;
         var matched = false;
 
         foreach (var term in terms)

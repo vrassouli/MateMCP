@@ -8,63 +8,61 @@ namespace MateMCP.Agent.Tools;
 [McpServerToolType]
 public sealed class SkillMemoryTools(SkillMemoryStore store, AuditLog audit)
 {
-    private const string Guidance = "MateMCP Skills & Memory is a transparent user-managed persistent knowledge store for stable rules, project conventions, reusable procedures, and lessons worth reusing across future sessions. Read relevant items when prior context may matter; prefer targeted search over loading everything. Project-scoped items apply only to that configured project, while global items are reusable across projects. Current direct user instructions override persisted items and project items normally override global items. Never store passwords, tokens, API keys, or other credentials here; use MateMCP Secret Management instead. Prefer updating an existing item over creating duplicates, and avoid transient/noisy facts.";
+    private const string Guidance = "MateMCP Skills & Memory is a transparent user-managed global knowledge store for durable cross-project rules, preferences, reusable procedures, and lessons. Project-specific durable knowledge must live in that project's repository as SKILL.md files, preferably under .matemcp/skills/<name>/SKILL.md, so it travels with Git to every MateMCP Agent. Current direct user instructions override persisted context. Never store passwords, tokens, API keys, or other credentials here; use MateMCP Secret Management instead. Prefer updating an existing global item over creating duplicates, and avoid transient/noisy facts.";
 
-    [McpServerTool(Name = "memory_search", Title = "Search Skills & Memory", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description(Guidance + " Search by scope/project/type/text and return compact metadata plus content for matching enabled items.")]
+    [McpServerTool(Name = "memory_search", Title = "Search global Skills & Memory", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description(Guidance + " Search global items by type/text and return compact metadata plus content for matching enabled items.")]
     public async Task<IReadOnlyList<SkillMemoryItem>> Search(
-        [Description("Optional scope: global or project.")] string? scope = null,
-        [Description("Configured MateMCP project name when filtering project-scoped knowledge.")] string? project = null,
         [Description("Optional item type such as memory, skill, rule, or procedure.")] string? type = null,
         [Description("Optional free-text query matched against title, description, content, and tags.")] string? text = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await store.SearchAsync(scope, project, type, text, false, cancellationToken);
-        await audit.WriteAsync("memory.search", ScopeTarget(scope, project, type), $"matches:{result.Count};queryChars:{text?.Length ?? 0}", cancellationToken);
+        var result = await store.SearchAsync(type: type, text: text, cancellationToken: cancellationToken);
+        await audit.WriteAsync("memory.search", ScopeTarget(type), $"matches:{result.Count};queryChars:{text?.Length ?? 0}", cancellationToken);
         return result;
     }
 
-    [McpServerTool(Name = "memory_applicable", Title = "List applicable Skills & Memory", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description(Guidance + " Returns enabled global items plus enabled items for one configured project. Project items are ordered before global items to make precedence explicit.")]
-    public async Task<IReadOnlyList<SkillMemoryItem>> Applicable([Description("Optional configured MateMCP project name for current work.")] string? project = null,
-        CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "memory_applicable", Title = "List applicable global Skills & Memory", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description(Guidance + " Returns enabled, non-archived global items. Repository project skills are discovered automatically when project-scoped tools run.")]
+    public async Task<IReadOnlyList<SkillMemoryItem>> Applicable(CancellationToken cancellationToken = default)
     {
-        var result = await store.ApplicableAsync(project, cancellationToken);
-        await audit.WriteAsync("memory.applicable", string.IsNullOrWhiteSpace(project) ? "global" : $"project:{project}", $"items:{result.Count}", cancellationToken);
+        var result = await store.ApplicableAsync(cancellationToken: cancellationToken);
+        await audit.WriteAsync("memory.applicable", "global", $"items:{result.Count}", cancellationToken);
         return result;
     }
 
-    [McpServerTool(Name = "memory_read", Title = "Read Skills & Memory item", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description(Guidance + " Reads one item by id.")]
+    [McpServerTool(Name = "memory_read", Title = "Read global Skills & Memory item", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description(Guidance + " Reads one global item by id.")]
     public async Task<SkillMemoryItem> Read(string id, CancellationToken cancellationToken = default)
     {
         var item = await store.GetAsync(id, cancellationToken);
-        await audit.WriteAsync("memory.read", item.Id, $"type:{item.Type};scope:{item.Scope}", cancellationToken);
+        await audit.WriteAsync("memory.read", item.Id, $"type:{item.Type};scope:global", cancellationToken);
         return item;
     }
 
-    [McpServerTool(Name = "memory_create", Title = "Create Skills & Memory item", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description(Guidance + " Create only durable information likely to help future sessions. Use source=ai for AI-created entries.")]
-    public async Task<SkillMemoryItem> Create(string title, string content, string type = "memory", string scope = "global", string? project = null,
+    [McpServerTool(Name = "memory_create", Title = "Create global Skills & Memory item", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description(Guidance + " Create only durable information useful across projects or devices. Use source=ai for AI-created entries.")]
+    public async Task<SkillMemoryItem> Create(string title, string content, string type = "memory",
         string? description = null, string[]? tags = null, string source = "ai", bool enabled = true, CancellationToken cancellationToken = default)
     {
-        var item = await store.CreateAsync(new SkillMemoryUpdate(title, type, scope, project, tags, description, content, source, enabled), cancellationToken);
-        await audit.WriteAsync("memory.create", item.Id, $"{item.Source}:{item.Scope}:{item.Project ?? "global"}", cancellationToken);
+        var item = await store.CreateAsync(new SkillMemoryUpdate(title, type, "global", null, tags, description, content, source, enabled), cancellationToken);
+        await audit.WriteAsync("memory.create", item.Id, $"{item.Source}:global", cancellationToken);
         return item;
     }
 
-    [McpServerTool(Name = "memory_update", Title = "Update Skills & Memory item", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description(Guidance + " Prefer this over creating a near-duplicate when an existing item should be corrected, consolidated, enabled/disabled, or moved in scope.")]
-    public async Task<SkillMemoryItem> Update(string id, string title, string content, string type = "memory", string scope = "global", string? project = null,
+    [McpServerTool(Name = "memory_update", Title = "Update global Skills & Memory item", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description(Guidance + " Prefer this over creating a near-duplicate when an existing global item should be corrected, consolidated, enabled, or disabled.")]
+    public async Task<SkillMemoryItem> Update(string id, string title, string content, string type = "memory",
         string? description = null, string[]? tags = null, string source = "ai", bool enabled = true, CancellationToken cancellationToken = default)
     {
-        var item = await store.UpdateAsync(id, new SkillMemoryUpdate(title, type, scope, project, tags, description, content, source, enabled), cancellationToken);
-        await audit.WriteAsync("memory.update", item.Id, $"{item.Source}:{item.Scope}:{item.Project ?? "global"}", cancellationToken);
+        var existing = await store.GetAsync(id, cancellationToken);
+        var item = await store.UpdateAsync(id, new SkillMemoryUpdate(title, type, "global", null, tags, description, content, source, enabled, existing.Archived), cancellationToken);
+        await audit.WriteAsync("memory.update", item.Id, $"{item.Source}:global", cancellationToken);
         return item;
     }
 
-    [McpServerTool(Name = "memory_delete", Title = "Delete Skills & Memory item", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false)]
-    [Description(Guidance + " Permanently deletes one user-visible item. Use only when deletion is intended; disabling through memory_update is preferable when the knowledge may be useful later.")]
+    [McpServerTool(Name = "memory_delete", Title = "Delete global Skills & Memory item", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false)]
+    [Description(Guidance + " Permanently deletes one user-visible global item. Use only when deletion is intended; disabling through memory_update is preferable when the knowledge may be useful later.")]
     public async Task<object> Delete(string id, CancellationToken cancellationToken = default)
     {
         var removed = await store.DeleteAsync(id, cancellationToken);
@@ -72,14 +70,8 @@ public sealed class SkillMemoryTools(SkillMemoryStore store, AuditLog audit)
         return new { removed };
     }
 
-    private static string ScopeTarget(string? scope, string? project, string? type)
-    {
-        var parts = new List<string>(3);
-        if (!string.IsNullOrWhiteSpace(scope)) parts.Add($"scope:{Bound(scope, 32)}");
-        if (!string.IsNullOrWhiteSpace(project)) parts.Add($"project:{Bound(project, 120)}");
-        if (!string.IsNullOrWhiteSpace(type)) parts.Add($"type:{Bound(type, 32)}");
-        return parts.Count == 0 ? "all" : string.Join(';', parts);
-    }
+    private static string ScopeTarget(string? type)
+        => string.IsNullOrWhiteSpace(type) ? "global" : $"global;type:{Bound(type, 32)}";
 
     private static string Bound(string value, int max) => value.Length <= max ? value : value[..max] + "…";
 }
