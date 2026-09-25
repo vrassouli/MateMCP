@@ -5,15 +5,17 @@ public sealed class CompanionInteractionRegressionTests
     [Fact]
     public void Companion_navigation_uses_zero_hidden_badges_for_approval_and_active_shell_counts()
     {
-        var main = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var navigation = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "CompanionNavigation.razor"));
 
         Assert.Contains("private int ActiveShellCount => ShellSessions.Count(x => !x.Exited);", main, StringComparison.Ordinal);
-        Assert.Contains("@if (Approvals.Count > 0)", main, StringComparison.Ordinal);
-        Assert.Contains("<Badge Text=\"@Approvals.Count.ToString()\" />", main, StringComparison.Ordinal);
-        Assert.Contains("@if (ActiveShellCount > 0)", main, StringComparison.Ordinal);
-        Assert.Contains("<Badge Text=\"@ActiveShellCount.ToString()\" />", main, StringComparison.Ordinal);
-        Assert.DoesNotContain("Approvals (@Approvals.Count)", main, StringComparison.Ordinal);
-        Assert.DoesNotContain("Shell@(ActiveShellCount", main, StringComparison.Ordinal);
+        Assert.Contains("@if (ApprovalsCount > 0)", navigation, StringComparison.Ordinal);
+        Assert.Contains("<Badge Text=\"@ApprovalsCount.ToString()\" />", navigation, StringComparison.Ordinal);
+        Assert.Contains("@if (ActiveShellCount > 0)", navigation, StringComparison.Ordinal);
+        Assert.Contains("<Badge Text=\"@ActiveShellCount.ToString()\" />", navigation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Approvals (@ApprovalsCount)", navigation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Shell@(ActiveShellCount", navigation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -48,6 +50,33 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("event.shiftKey", index, StringComparison.Ordinal);
         Assert.Contains("focusable[next].focus()", index, StringComparison.Ordinal);
         Assert.Contains("event.preventDefault()", index, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Companion_narrow_navigation_uses_a_modal_drawer_and_scopes_focus_to_it()
+    {
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var navigation = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "CompanionNavigation.razor"));
+        var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+
+        Assert.Equal(2, main.Split("<CompanionNavigation", StringSplitOptions.None).Length - 1);
+        Assert.Contains("id=\"companion-nav-menu-button\"", main, StringComparison.Ordinal);
+        Assert.Contains("<dialog id=\"companion-nav-drawer\"", main, StringComparison.Ordinal);
+        Assert.Contains("aria-controls=\"companion-nav-drawer\"", main, StringComparison.Ordinal);
+        Assert.Contains("OnNavigate=\"NavigateFromDrawerAsync\"", main, StringComparison.Ordinal);
+        Assert.Contains("EventCallback<string> OnNavigate", navigation, StringComparison.Ordinal);
+
+        Assert.Contains("dialog.showModal()", index, StringComparison.Ordinal);
+        Assert.Contains("dialog.addEventListener('close'", index, StringComparison.Ordinal);
+        Assert.Contains("opener.focus()", index, StringComparison.Ordinal);
+        Assert.Contains("const root = modal ?? document;", index, StringComparison.Ordinal);
+        Assert.Contains("root.querySelectorAll(selector)", index, StringComparison.Ordinal);
+
+        Assert.Matches(@"(?s)@media \(max-width: 760px\).*?\.sidebar\s*\{\s*display:\s*none;", styles);
+        Assert.Contains(".mobile-nav-trigger { display: grid; }", styles, StringComparison.Ordinal);
+        Assert.Contains(":dir(rtl) .nav-drawer-panel", styles, StringComparison.Ordinal);
     }
 
     [Fact]
