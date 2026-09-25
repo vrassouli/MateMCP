@@ -51,6 +51,21 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_live_preview_can_collapse_and_does_not_overlay_narrow_controls()
+    {
+        var root = FindRepositoryRoot();
+        var preview = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "ComputerUsePreviewCard.razor"));
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+
+        Assert.Contains("aria-controls=\"computer-use-preview-body\"", preview, StringComparison.Ordinal);
+        Assert.Contains("aria-expanded=\"@(!Collapsed)\"", preview, StringComparison.Ordinal);
+        Assert.Contains("private void ToggleCollapsed()", preview, StringComparison.Ordinal);
+        Assert.Contains("if (Collapsed || IsSelfPreview)", preview, StringComparison.Ordinal);
+        Assert.Contains("avoid recursive self-preview", preview, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)@media \(max-width: 760px\).*?\.computer-use-preview-card\s*\{[^}]*position:\s*static;", styles);
+    }
+
+    [Fact]
     public void Companion_terminal_follow_pauses_when_user_scrolls_up_and_resumes_at_bottom()
     {
         var index = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
