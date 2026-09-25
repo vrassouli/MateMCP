@@ -21,6 +21,7 @@ public sealed class AgentActivityGateTests
         Assert.False(gate.IsActive);
         Assert.Equal(0, gate.ActiveCount);
         Assert.Null(gate.ActiveSince);
+        Assert.NotNull(gate.LastActivityAt);
         Assert.True(gate.TryBeginDrain());
         Assert.True(gate.IsDraining);
     }
