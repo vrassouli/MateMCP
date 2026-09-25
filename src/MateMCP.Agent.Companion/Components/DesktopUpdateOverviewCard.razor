@@ -11,7 +11,7 @@
 
     @if (UpdateStatus?.UpdatedAt is { } updatedAt)
     {
-        <div class="muted">Latest package: @updatedAt.LocalDateTime:g</div>
+        <div class="muted">Latest package: @updatedAt.LocalDateTime.ToString("g")</div>
     }
     else if (!string.IsNullOrWhiteSpace(Error))
     {
