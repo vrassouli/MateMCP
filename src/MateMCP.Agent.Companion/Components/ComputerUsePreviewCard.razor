@@ -19,16 +19,33 @@
                 }
                 <button type="button"
                         class="computer-use-preview-size-button"
-                        @onclick="ToggleExpanded"
-                        title="@(Expanded ? "Make preview compact" : "Expand preview")"
-                        aria-label="@(Expanded ? "Make preview compact" : "Expand preview")">
-                    @(Expanded ? "↙" : "↗")
+                        @onclick="ToggleCollapsed"
+                        title="@(Collapsed ? "Show live preview" : "Collapse live preview")"
+                        aria-label="@(Collapsed ? "Show live preview" : "Collapse live preview")"
+                        aria-expanded="@(!Collapsed)"
+                        aria-controls="computer-use-preview-body">
+                    @(Collapsed ? "▾" : "▴")
                 </button>
+                @if (!Collapsed)
+                {
+                    <button type="button"
+                            class="computer-use-preview-size-button"
+                            @onclick="ToggleExpanded"
+                            title="@(Expanded ? "Make preview compact" : "Expand preview")"
+                            aria-label="@(Expanded ? "Make preview compact" : "Expand preview")">
+                        @(Expanded ? "↙" : "↗")
+                    </button>
+                }
             </div>
         </div>
 
-        <div class="computer-use-preview-frame" title="MateMCP virtual Computer Use cursor; your physical mouse is independent during semantic actions.">
-            @if (!string.IsNullOrWhiteSpace(FrameDataUrl))
+        <div id="computer-use-preview-body" class="computer-use-preview-body" hidden="@Collapsed">
+            <div class="computer-use-preview-frame" title="MateMCP virtual Computer Use cursor; your physical mouse is independent during semantic actions.">
+            @if (IsSelfPreview)
+            {
+                <div class="computer-use-preview-placeholder">Live image hidden while AI is working in MateMCP Companion to avoid recursive self-preview.</div>
+            }
+            else if (!string.IsNullOrWhiteSpace(FrameDataUrl))
             {
                 <img src="@FrameDataUrl" alt="Live preview of the window currently used by AI" />
             }
@@ -37,7 +54,7 @@
                 <div class="computer-use-preview-placeholder">Waiting for the next window frame…</div>
             }
 
-            @if (Preview.CursorX is { } cursorX && Preview.CursorY is { } cursorY)
+            @if (!IsSelfPreview && Preview.CursorX is { } cursorX && Preview.CursorY is { } cursorY)
             {
                 <div class="computer-use-virtual-cursor"
                      style="--cursor-x:@(Percent(cursorX)); --cursor-y:@(Percent(cursorY));"
@@ -46,19 +63,20 @@
                     <span class="computer-use-cursor-label">AI</span>
                 </div>
             }
-        </div>
-
-        @if (Expanded)
-        {
-            <div class="computer-use-preview-footer">
-                <span class="muted">@CaptureBackendLabel</span>
-                <span class="muted">Your physical pointer stays independent for semantic actions.</span>
-                @if (!string.IsNullOrWhiteSpace(Preview.CaptureError))
-                {
-                    <span class="computer-use-preview-warning" title="@Preview.CaptureError">Capture fallback active</span>
-                }
             </div>
-        }
+
+            @if (Expanded)
+            {
+                <div class="computer-use-preview-footer">
+                    <span class="muted">@CaptureBackendLabel</span>
+                    <span class="muted">Your physical pointer stays independent for semantic actions.</span>
+                    @if (!string.IsNullOrWhiteSpace(Preview.CaptureError))
+                    {
+                        <span class="computer-use-preview-warning" title="@Preview.CaptureError">Capture fallback active</span>
+                    }
+                </div>
+            }
+        </div>
     </div>
 }
 
@@ -68,12 +86,19 @@
     private ComputerUsePreviewState? Preview { get; set; }
     private string? FrameDataUrl { get; set; }
     private bool Expanded { get; set; }
+    private bool Collapsed { get; set; }
 
     private string DockClass
-        => $"panel computer-use-preview-card {(Expanded ? "expanded" : "compact")}";
+        => $"panel computer-use-preview-card {(Collapsed ? "collapsed" : Expanded ? "expanded" : "compact")}";
 
     private string PreviewTitle
         => string.Join(" · ", new[] { Preview?.Application, Preview?.WindowTitle }.Where(x => !string.IsNullOrWhiteSpace(x))!);
+
+    private bool IsSelfPreview
+        => new[] { Preview?.Application, Preview?.WindowTitle }
+            .Any(value => !string.IsNullOrWhiteSpace(value)
+                && value.Contains("MateMCP", StringComparison.OrdinalIgnoreCase)
+                && value.Contains("Companion", StringComparison.OrdinalIgnoreCase));
 
     private string CaptureBackendLabel
         => Preview?.CaptureBackend == "macos-screencapturekit-stream"
@@ -126,10 +151,22 @@
             return;
         }
 
+        if (Collapsed || IsSelfPreview)
+        {
+            FrameDataUrl = null;
+            return;
+        }
+
         var frame = await Api.GetComputerUsePreviewFrameAsync(_cts.Token);
         FrameDataUrl = frame is { Bytes.Length: > 0 }
             ? $"data:{frame.MimeType};base64," + Convert.ToBase64String(frame.Bytes)
             : null;
+    }
+
+    private void ToggleCollapsed()
+    {
+        Collapsed = !Collapsed;
+        if (Collapsed) FrameDataUrl = null;
     }
 
     private void ToggleExpanded() => Expanded = !Expanded;

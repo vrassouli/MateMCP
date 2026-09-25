@@ -467,6 +467,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     box-shadow: 0 16px 48px rgba(0, 0, 0, .3);
 }
 
+.computer-use-preview-card.collapsed .computer-use-preview-heading {
+    margin-bottom: 0;
+}
+
 .computer-use-preview-heading {
     display: flex;
     justify-content: space-between;
@@ -623,12 +627,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 @media (max-width: 760px) {
     .computer-use-preview-card {
-        right: 10px;
-        bottom: 10px;
-        width: min(310px, calc(100vw - 20px));
+        position: static;
+        right: auto;
+        bottom: auto;
+        grid-column: 1 / -1;
+        width: 100%;
+        margin-bottom: 0;
     }
     .computer-use-preview-card.expanded {
-        width: calc(100vw - 20px);
+        width: 100%;
     }
     .computer-use-preview-frame { height: 150px; }
     .computer-use-preview-card.expanded .computer-use-preview-frame { height: min(360px, calc(100vh - 150px)); }
