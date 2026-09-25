@@ -172,6 +172,7 @@ html, body {
 .metric {
     font-size: 28px;
     font-weight: 700;
+    line-height: 1.2;
     margin-top: 8px;
 }
 

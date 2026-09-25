@@ -35,6 +35,8 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("Update now", updateOverview, StringComparison.Ordinal);
         Assert.DoesNotContain("Agent activity", updatePanel, StringComparison.Ordinal);
         Assert.DoesNotContain("Prevent Sleep While In Use", updatePanel, StringComparison.Ordinal);
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+        Assert.Matches(@"(?s)\.metric\s*\{[^}]*line-height:\s*1\.2;", styles);
     }
 
     [Fact]
