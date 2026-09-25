@@ -1,6 +1,8 @@
 @implements IDisposable
 @using System.Net.Http.Json
 @using System.Text.Json
+@using CommunityToolkit.Maui.Storage
+@inject IFolderPicker FolderPicker
 
 <div class="panel">
     <div class="toolbar">
@@ -11,7 +13,6 @@
         <div class="actions">
             <input @bind="Search" @bind:event="oninput" placeholder="Search projects" aria-label="Search projects" />
             <Button Text="Add Project" OnClick="BeginAdd" />
-            <Button Text="Refresh" OnClick="LoadAsync" />
         </div>
     </div>
 
@@ -25,7 +26,13 @@
         <div class="panel" style="margin-top:12px">
             <strong>@(EditingOriginalName is null ? "Add Project" : "Edit Project")</strong>
             <div class="field"><label for="project-name">Name</label><input id="project-name" @bind="EditName" /></div>
-            <div class="field"><label for="project-workspace-path">Workspace path</label><input id="project-workspace-path" @bind="EditRoot" placeholder="/path/to/project or C:\projects\project" /></div>
+            <div class="field">
+                <label for="project-workspace-path">Workspace path</label>
+                <div class="workspace-path-row">
+                    <input id="project-workspace-path" @bind="EditRoot" placeholder="/path/to/project or C:\projects\project" />
+                    <Button Text="Browse..." OnClick="PickWorkspaceAsync" />
+                </div>
+            </div>
             <div class="actions">
                 <label><input type="checkbox" @bind="EditRead" /> Read</label>
                 <label><input type="checkbox" @bind="EditWrite" /> Write</label>
@@ -154,6 +161,35 @@
         Editing = false;
         EditingOriginalName = null;
         Error = null;
+    }
+
+    private async Task PickWorkspaceAsync()
+    {
+        Error = null;
+        try
+        {
+            var initialPath = Directory.Exists(EditRoot) ? EditRoot : null;
+            var result = initialPath is null
+                ? await FolderPicker.PickAsync(CancellationToken.None)
+                : await FolderPicker.PickAsync(initialPath, CancellationToken.None);
+
+            if (result.IsSuccessful)
+            {
+                EditRoot = result.Folder.Path;
+                return;
+            }
+
+            if (result.Exception is not null && result.Exception is not OperationCanceledException)
+                Error = $"Could not select workspace folder: {result.Exception.Message}";
+        }
+        catch (OperationCanceledException)
+        {
+            // Closing the native picker is a normal cancel action.
+        }
+        catch (Exception ex)
+        {
+            Error = $"Could not select workspace folder: {ex.Message}";
+        }
     }
 
     private async Task SaveAsync()

@@ -1,4 +1,6 @@
 using Bluent.UI.Extensions;
+using CommunityToolkit.Maui;
+using CommunityToolkit.Maui.Storage;
 using MateMCP.Agent.Companion.Services;
 
 namespace MateMCP.Agent.Companion;
@@ -9,9 +11,12 @@ public static class MauiProgram
     {
         var builder = MauiApp.CreateBuilder();
 
-        builder.UseMauiApp<App>();
+        builder
+            .UseMauiApp<App>()
+            .UseMauiCommunityToolkit();
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddBluentUI();
+        builder.Services.AddSingleton<IFolderPicker>(FolderPicker.Default);
         builder.Services.AddSingleton<AgentApiClient>();
         builder.Services.AddSingleton<AgentProcessController>();
         builder.Services.AddSingleton<DesktopUpdateService>();
