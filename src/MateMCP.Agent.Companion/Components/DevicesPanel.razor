@@ -35,10 +35,7 @@ else
                 <div>@CurrentDevice.Platform</div>
                 <div class="muted">@CurrentDevice.Status · @CurrentDevice.Id</div>
                 <div><a class="link" href="@CurrentDevice.McpUrl" target="_blank" rel="noopener noreferrer">@CurrentDevice.McpUrl</a></div>
-                @if (CurrentDevice.LastSeenAt is not null)
-                {
-                    <div class="muted">Last seen @CurrentDevice.LastSeenAt.Value.LocalDateTime</div>
-                }
+                <div class="muted">@FormatLastSeen(CurrentDevice.LastSeenAt)</div>
             </div>
             <div class="actions">
                 @if (!ConfirmCurrentRemoval)
@@ -114,10 +111,7 @@ else
                             <div>@device.Platform</div>
                             <div class="muted">@device.Status · @device.Id</div>
                             <div><a class="link" href="@device.McpUrl" target="_blank" rel="noopener noreferrer">@device.McpUrl</a></div>
-                            @if (device.LastSeenAt is not null)
-                            {
-                                <div class="muted">Last seen @device.LastSeenAt.Value.LocalDateTime</div>
-                            }
+                            <div class="muted">@FormatLastSeen(device.LastSeenAt)</div>
                             <div class="actions">
                                 @if (ConfirmRevokeId == device.Id)
                                 {
@@ -147,6 +141,11 @@ else
     private bool Busy { get; set; }
     private bool ConfirmCurrentRemoval { get; set; }
     private string? ConfirmRevokeId { get; set; }
+
+    private static string FormatLastSeen(DateTimeOffset? lastSeenAt) =>
+        lastSeenAt is null || lastSeenAt.Value.Year == 1
+            ? "Never seen"
+            : $"Last seen {lastSeenAt.Value.LocalDateTime:g}";
 
     private ManagedDevice? CurrentDevice => Status?.Devices.FirstOrDefault(x => x.IsCurrent);
     private IReadOnlyList<ManagedDevice> OtherDevices => Status?.Devices.Where(x => !x.IsCurrent).ToArray() ?? [];
