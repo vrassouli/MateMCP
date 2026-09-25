@@ -38,7 +38,7 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         if (hasProject)
         {
             var definition = projects.Get(project!);
-            if (!definition.Shell) { await audit.WriteAsync("shell.exec", project!, "denied:project-policy", cancellationToken); throw new McpException($"Shell access is disabled for project '{project}'."); }
+            if (!definition.Shell) { await audit.WriteAsync("shell.exec", project!, "denied:project-policy", cancellationToken, project); throw new McpException($"Shell access is disabled for project '{project}'."); }
             workingDirectory = definition.Root; scope = $"project:{project}";
 
             var bootstrap = await ProjectContextBootstrap.RequireAsync(
@@ -77,12 +77,12 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
                 cancellationToken);
             if (decision == ApprovalDecision.Deny)
             {
-                await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "denied:approval", cancellationToken);
+                await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "denied:approval", cancellationToken, project: hasProject ? project : null);
                 throw new McpException("Shell execution denied by local user.");
             }
             if (decision == ApprovalDecision.Timeout)
             {
-                await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "denied:approval-timeout", cancellationToken);
+                await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "denied:approval-timeout", cancellationToken, project: hasProject ? project : null);
                 throw new McpException("Shell execution approval timed out.");
             }
         }
@@ -97,11 +97,11 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "timeout", CancellationToken.None);
+            await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", "timeout", CancellationToken.None, project: hasProject ? project : null);
             throw new McpException("Shell execution timed out.");
         }
         var stdout = Limit(await stdoutTask); var stderr = Limit(await stderrTask);
-        await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken);
+        await audit.WriteAsync("shell.exec", $"{scope}:{Trim(command)}", $"exit:{process.ExitCode}", cancellationToken, project: hasProject ? project : null);
         var memoryContext = hasProject
             ? null
             : await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_exec", null, command, options.Value.ProactiveMemory, cancellationToken);

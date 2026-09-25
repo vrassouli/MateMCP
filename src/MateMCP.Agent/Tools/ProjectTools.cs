@@ -31,7 +31,7 @@ public sealed class ProjectTools(ProjectRegistry registry, ProjectConfigurationS
         CancellationToken cancellationToken = default)
     {
         var project = configuration.Add(new ProjectUpdate(name, root, read, write, shell));
-        await audit.WriteAsync("project.register", project.Id, project.Root, cancellationToken);
+        await audit.WriteAsync("project.register", project.Id, project.Root, cancellationToken, project.Name);
         return project;
     }
 
@@ -42,7 +42,7 @@ public sealed class ProjectTools(ProjectRegistry registry, ProjectConfigurationS
     {
         var existing = registry.Get(project);
         var updated = configuration.Update(existing.Name, new ProjectUpdate(name, root, read, write, shell));
-        await audit.WriteAsync("project.update", updated.Id, updated.Root, cancellationToken);
+        await audit.WriteAsync("project.update", updated.Id, updated.Root, cancellationToken, updated.Name);
         return updated;
     }
 
@@ -52,7 +52,7 @@ public sealed class ProjectTools(ProjectRegistry registry, ProjectConfigurationS
     {
         var existing = registry.Get(project);
         var removed = configuration.Remove(existing.Id);
-        await audit.WriteAsync("project.unregister", existing.Id, removed ? "removed-metadata-only" : "not-found", cancellationToken);
+        await audit.WriteAsync("project.unregister", existing.Id, removed ? "removed-metadata-only" : "not-found", cancellationToken, existing.Name);
         return new { removed, filesDeleted = false };
     }
 }

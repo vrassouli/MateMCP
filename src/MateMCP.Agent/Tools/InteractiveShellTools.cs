@@ -74,12 +74,12 @@ public sealed class InteractiveShellTools(
                 cancellationToken);
             if (decision == ApprovalDecision.Deny)
             {
-                await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", "denied:approval", cancellationToken);
+                await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", "denied:approval", cancellationToken, project: project);
                 throw new McpException("Interactive shell execution denied by local user.");
             }
             if (decision == ApprovalDecision.Timeout)
             {
-                await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", "denied:approval-timeout", cancellationToken);
+                await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", "denied:approval-timeout", cancellationToken, project: project);
                 throw new McpException("Interactive shell execution approval timed out.");
             }
         }
@@ -87,7 +87,7 @@ public sealed class InteractiveShellTools(
         try
         {
             var result = await sessions.StartAsync(command, workingDirectory, cancellationToken);
-            await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", $"started:{result.SessionId}", cancellationToken);
+            await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", $"started:{result.SessionId}", cancellationToken, project: project);
             var memoryContext = string.IsNullOrWhiteSpace(project) && memory is not null
                 ? await ProactiveMemoryContext.BuildAsync(memory, audit, "shell_session_start", null, command, options.Value.ProactiveMemory, cancellationToken)
                 : null;
@@ -95,7 +95,7 @@ public sealed class InteractiveShellTools(
         }
         catch (Exception ex) when (ex is not McpException)
         {
-            await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", $"failed:{ex.GetType().Name}", CancellationToken.None);
+            await audit.WriteAsync("shell.session.start", $"{scope}:{Trim(command)}", $"failed:{ex.GetType().Name}", CancellationToken.None, project: project);
             throw new McpException($"Could not start interactive shell session: {ex.Message}");
         }
     }
@@ -132,8 +132,9 @@ public sealed class InteractiveShellTools(
     {
         try
         {
+            var auditProject = ResolveSessionProject(sessionId);
             await sessions.WriteAsync(sessionId, text, submit, cancellationToken);
-            await audit.WriteAsync("shell.session.write", sessionId, $"chars:{text.Length};submit:{submit}", cancellationToken);
+            await audit.WriteAsync("shell.session.write", sessionId, $"chars:{text.Length};submit:{submit}", cancellationToken, auditProject);
             return new { sessionId, written = true };
         }
         catch (KeyNotFoundException ex) { throw new McpException(ex.Message); }
@@ -154,7 +155,7 @@ public sealed class InteractiveShellTools(
         [Description("Whether to press Enter after injecting the credential.")] bool submit = true,
         CancellationToken cancellationToken = default)
         => ShellSecretInjector.InjectAsync(sessionId, credential, submit, SendSecretTool, sessions, secrets,
-            injectionRateLimiter, approvals, audit, cancellationToken);
+            injectionRateLimiter, approvals, audit, cancellationToken, ResolveSessionProject(sessionId));
 
     [McpServerTool(
         Name = "shell_session_close",
@@ -168,8 +169,9 @@ public sealed class InteractiveShellTools(
         [Description("Session id returned by shell_session_start.")] string sessionId,
         CancellationToken cancellationToken = default)
     {
+        var auditProject = ResolveSessionProject(sessionId);
         var closed = sessions.Close(sessionId);
-        await audit.WriteAsync("shell.session.close", sessionId, closed ? "closed" : "not-found", cancellationToken);
+        await audit.WriteAsync("shell.session.close", sessionId, closed ? "closed" : "not-found", cancellationToken, auditProject);
         return new { sessionId, closed };
     }
 
@@ -192,6 +194,19 @@ public sealed class InteractiveShellTools(
         if (!_activity.TryEnter(out var lease) || lease is null)
             throw new McpException("MateMCP Agent is preparing a verified Desktop update. Retry the shell command after the Agent restarts.");
         return lease;
+    }
+
+    private string? ResolveSessionProject(string sessionId)
+    {
+        try
+        {
+            var snapshot = sessions.List().FirstOrDefault(x => string.Equals(x.SessionId, sessionId, StringComparison.Ordinal));
+            return snapshot is null ? null : projects.ResolveWorkspace(snapshot.WorkingDirectory)?.Name;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private (string WorkingDirectory, string Scope) ResolveWorkingDirectory(string? project)

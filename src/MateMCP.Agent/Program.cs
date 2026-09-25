@@ -306,10 +306,11 @@ app.MapGet("/credential-audit", async (HttpContext context, AuditLog audit, int?
     if (!IsLoopback(context)) return Results.NotFound();
     return Results.Ok(await audit.ReadCredentialUsageAsync(limit ?? 200, ct));
 });
-app.MapGet("/audit", async (HttpContext context, AuditLog audit, int? limit, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) =>
+app.MapGet("/audit", async (HttpContext context, AuditLog audit, int? limit, DateTimeOffset? from, DateTimeOffset? to,
+    string? project, string? capability, CancellationToken ct) =>
 {
     if (!IsLoopback(context)) return Results.NotFound();
-    try { return Results.Ok(await audit.ReadAsync(limit ?? 200, from, to, ct)); }
+    try { return Results.Ok(await audit.ReadAsync(limit ?? 200, from, to, project, capability, ct)); }
     catch (ArgumentException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
 });
 app.MapDelete("/audit", async (HttpContext context, AuditLog audit, DateTimeOffset? before, CancellationToken ct) =>

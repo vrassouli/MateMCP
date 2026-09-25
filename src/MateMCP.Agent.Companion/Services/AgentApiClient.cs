@@ -191,11 +191,13 @@ public sealed class AgentApiClient : IDisposable
     }
 
     public async Task<IReadOnlyList<AuditEntry>> GetAuditAsync(int limit = 200, DateTimeOffset? from = null,
-        DateTimeOffset? to = null, CancellationToken ct = default)
+        DateTimeOffset? to = null, string? project = null, string? capability = null, CancellationToken ct = default)
     {
         var query = $"audit?limit={Math.Clamp(limit, 1, 1000)}";
         if (from is not null) query += "&from=" + Uri.EscapeDataString(from.Value.ToString("o", CultureInfo.InvariantCulture));
         if (to is not null) query += "&to=" + Uri.EscapeDataString(to.Value.ToString("o", CultureInfo.InvariantCulture));
+        if (!string.IsNullOrWhiteSpace(project)) query += "&project=" + Uri.EscapeDataString(project.Trim());
+        if (!string.IsNullOrWhiteSpace(capability)) query += "&capability=" + Uri.EscapeDataString(capability.Trim());
         return await _http.GetFromJsonAsync<List<AuditEntry>>(query, Json, ct) ?? [];
     }
 
@@ -228,7 +230,7 @@ public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTi
 public sealed record UserSecretInfo(string Name, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int Kind, IReadOnlyList<string>? AllowedTools);
 public sealed record ShellSessionSnapshot(string SessionId, int ProcessId, string Output, int NextOffset, bool OutputTruncated, bool Exited,
     int? ExitCode, string WorkingDirectory, DateTimeOffset CreatedAt, DateTimeOffset LastTouched);
-public sealed record AuditEntry(DateTimeOffset Timestamp, string Capability, string Target, string Result, string? Credential, string? Tool);
+public sealed record AuditEntry(DateTimeOffset Timestamp, string Capability, string Target, string Result, string? Credential, string? Tool, string? Project = null);
 public sealed record AuditCleanupResult(int Deleted);
 
 public sealed record SkillMemoryItem(string Id, string Title, string Type, string Scope, string? Project, IReadOnlyList<string> Tags, string? Description, string Content, string Source, string UpdatedBy, bool Enabled, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool Archived = false);

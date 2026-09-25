@@ -35,7 +35,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalSer
             var definition = projects.Get(project);
             if (!definition.Write)
             {
-                await audit.WriteAsync("agent.file-upload.start", $"project:{definition.Name}:{Safe(fileName)}", "denied:project-policy", cancellationToken);
+                await audit.WriteAsync("agent.file-upload.start", $"project:{definition.Name}:{Safe(fileName)}", "denied:project-policy", cancellationToken, definition.Name);
                 throw new McpException($"File transfer is not allowed because project '{definition.Name}' does not allow writes.");
             }
 
@@ -52,19 +52,19 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalSer
         var decision = await approvals.RequestAsync("agent.file-upload", scope, $"{Safe(fileName)} ({size} bytes, {mimeType ?? "unknown MIME"})", cancellationToken);
         if (decision == ApprovalDecision.Deny)
         {
-            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{Safe(fileName)}", "denied:approval", cancellationToken);
+            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{Safe(fileName)}", "denied:approval", cancellationToken, project);
             throw new McpException("File transfer denied by local user.");
         }
         if (decision == ApprovalDecision.Timeout)
         {
-            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{Safe(fileName)}", "denied:approval-timeout", cancellationToken);
+            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{Safe(fileName)}", "denied:approval-timeout", cancellationToken, project);
             throw new McpException("File transfer approval timed out.");
         }
 
         try
         {
             var started = Transfers.Start(root, fileName, mimeType, size, sha256, project);
-            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{started.TransferId}:{started.FileName}", "ok", cancellationToken);
+            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{started.TransferId}:{started.FileName}", "ok", cancellationToken, started.Project);
             return new
             {
                 transferId = started.TransferId,
@@ -81,7 +81,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalSer
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{Safe(fileName)}", $"error:{ex.GetType().Name}", CancellationToken.None);
+            await audit.WriteAsync("agent.file-upload.start", $"{scope}:{Safe(fileName)}", $"error:{ex.GetType().Name}", CancellationToken.None, project);
             throw new McpException($"Could not start file transfer: {ex.Message}", ex);
         }
     }
@@ -174,7 +174,7 @@ public sealed class AgentFileTransferTools(ProjectRegistry projects, ApprovalSer
                 projectRelativePath = Path.GetRelativePath(root, completed.RemotePath);
             }
 
-            await audit.WriteAsync("agent.file-upload.complete", $"{transferId}:{completed.FileName}", "ok", cancellationToken);
+            await audit.WriteAsync("agent.file-upload.complete", $"{transferId}:{completed.FileName}", "ok", cancellationToken, completed.Project);
             return new
             {
                 completed.TransferId,

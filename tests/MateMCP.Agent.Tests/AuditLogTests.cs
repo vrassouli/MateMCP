@@ -48,6 +48,40 @@ public sealed class AuditLogTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadAsync_CanCombineProjectAndCapabilityFilters()
+    {
+        var path = Path.Combine(_directory, "audit.jsonl");
+        var audit = new AuditLog(path);
+
+        await audit.WriteAsync("filesystem.read", "Ruzin:a.txt", "ok", project: "Ruzin");
+        await audit.WriteAsync("shell.exec", "project:Ruzin:git status", "exit:0", project: "Ruzin");
+        await audit.WriteAsync("filesystem.read", "MateMCP:b.txt", "ok", project: "MateMCP");
+        await audit.WriteAsync("desktop.window.list", "local-desktop", "ok");
+
+        var filtered = await audit.ReadAsync(20, null, null, "Ruzin", "filesystem.read");
+
+        var entry = Assert.Single(filtered);
+        Assert.Equal("Ruzin", entry.Project);
+        Assert.Equal("filesystem.read", entry.Capability);
+        Assert.Equal("Ruzin:a.txt", entry.Target);
+    }
+
+    [Fact]
+    public async Task Legacy_audit_rows_without_project_remain_readable()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "audit.jsonl");
+        await File.WriteAllTextAsync(path,
+            """{"Timestamp":"2026-09-25T00:00:00+00:00","Capability":"legacy","Target":"target","Result":"ok"}""" + Environment.NewLine);
+
+        var audit = new AuditLog(path);
+        var entry = Assert.Single(await audit.ReadAsync(20));
+
+        Assert.Equal("legacy", entry.Capability);
+        Assert.Null(entry.Project);
+    }
+
+    [Fact]
     public async Task DeleteBeforeAsync_RemovesOnlyOlderAuditEntries()
     {
         Directory.CreateDirectory(_directory);

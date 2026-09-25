@@ -69,7 +69,7 @@ public static class ProjectContextBootstrap
                     "context.reuse",
                     $"{tool}:{definition.Name}",
                     $"context:{existing.ContextId};accepted;hash:{ShortHash(contextHash)}",
-                    cancellationToken);
+                    cancellationToken, definition.Name);
                 return new ProjectContextBootstrapResult(false, presentedLease, null, contextHash, sources, existing.ContextId);
             }
 
@@ -78,7 +78,7 @@ public static class ProjectContextBootstrap
                 "context.invalidated",
                 $"{tool}:{definition.Name}",
                 $"context:{rejectedContext};lease-rejected;hash:{ShortHash(contextHash)}",
-                cancellationToken);
+                cancellationToken, definition.Name);
         }
 
         if (instructions.Length == 0 && skillContext.MatchedCount == 0 && string.IsNullOrWhiteSpace(durableContext))
@@ -95,7 +95,7 @@ public static class ProjectContextBootstrap
                 "instruction.apply",
                 $"{tool}:{definition.Name}",
                 $"context:{contextId};source:{instruction.RelativePath}",
-                cancellationToken);
+                cancellationToken, definition.Name);
         }
         foreach (var skillSource in skillContext.Sources)
         {
@@ -103,7 +103,7 @@ public static class ProjectContextBootstrap
                 "skill.apply",
                 $"{tool}:{definition.Name}",
                 $"context:{contextId};source:{skillSource}",
-                cancellationToken);
+                cancellationToken, definition.Name);
         }
         if (memorySelection is not null)
         {
@@ -121,7 +121,8 @@ public static class ProjectContextBootstrap
             "context.bootstrap",
             $"{tool}:{definition.Name}",
             $"context:{contextId};required;instructions:{instructions.Length};skills:{skillContext.MatchedCount};memoryItems:{memorySelection?.ItemCount ?? 0};chars:{context.Length};hash:{ShortHash(contextHash)}",
-            cancellationToken);
+            cancellationToken,
+            definition.Name);
 
         return new ProjectContextBootstrapResult(true, lease, context, contextHash, sources, contextId);
     }

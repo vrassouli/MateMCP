@@ -18,7 +18,8 @@ internal static class ShellSecretInjector
         CredentialInjectionRateLimiter injectionRateLimiter,
         IApprovalService approvals,
         AuditLog audit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? project = null)
     {
         string command;
         try { command = sessions.GetCommand(sessionId); }
@@ -32,13 +33,13 @@ internal static class ShellSecretInjector
         if (!info.IsAllowedForTool(toolName))
         {
             await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}",
-                "denied:tool-policy", cancellationToken);
+                "denied:tool-policy", cancellationToken, project);
             throw new McpException($"Credential '{info.Name}' is not authorized for tool '{toolName}'.");
         }
         if (!injectionRateLimiter.TryAcquire(info.Name, out var retryAfter))
         {
             await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}",
-                "denied:rate-limit", cancellationToken);
+                "denied:rate-limit", cancellationToken, project);
             throw new McpException($"Credential injection rate limit exceeded. Retry after {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds.");
         }
 
@@ -47,12 +48,12 @@ internal static class ShellSecretInjector
             $"Use credential {info.Name} in shell session {sessionId[..Math.Min(8, sessionId.Length)]}: {Trim(command)}", cancellationToken);
         if (decision == ApprovalDecision.Deny)
         {
-            await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}", "denied:approval", cancellationToken);
+            await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}", "denied:approval", cancellationToken, project);
             throw new McpException("Credential use denied by local user.");
         }
         if (decision == ApprovalDecision.Timeout)
         {
-            await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}", "denied:approval-timeout", cancellationToken);
+            await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}", "denied:approval-timeout", cancellationToken, project);
             throw new McpException("Credential use approval timed out.");
         }
 
@@ -61,7 +62,7 @@ internal static class ShellSecretInjector
         try
         {
             await sessions.WriteSecretAsync(sessionId, value, submit, cancellationToken);
-            await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}", "injected", cancellationToken);
+            await audit.WriteCredentialUsageAsync(info.Name, toolName, $"cmd:{commandFingerprint}", "injected", cancellationToken, project);
             return new { sessionId, credential = info.Name, injected = true, submit };
         }
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
