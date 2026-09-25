@@ -287,8 +287,8 @@
                     {
                         <div class="terminal">@ShellOutput</div>
                         <div class="field" style="margin-top:12px">
-                            <label>Input</label>
-                            <input @bind="ShellInput" @onkeydown="HandleShellKeyDown" placeholder="Send input to the running process" />
+                            <label for="shell-input">Input</label>
+                            <input id="shell-input" @bind="ShellInput" @onkeydown="HandleShellKeyDown" placeholder="Send input to the running process" />
                         </div>
                         <div class="actions">
                             <Button Text="Send" OnClick="SendShellInputAsync" />
@@ -303,10 +303,10 @@
             <div class="grid">
                 <div class="panel">
                     <strong>Add / replace secret</strong>
-                    <div class="field"><label>Name</label><input @bind="SecretName" autocomplete="off" /></div>
-                    <div class="field"><label>Description</label><input @bind="SecretDescription" /></div>
-                    <div class="field"><label>Secret value</label><input type="password" @bind="SecretValue" autocomplete="new-password" /></div>
-                    <div class="field"><label>Allowed use</label>
+                    <div class="field"><label for="secret-name">Name</label><input id="secret-name" @bind="SecretName" autocomplete="off" /></div>
+                    <div class="field"><label for="secret-description">Description</label><input id="secret-description" @bind="SecretDescription" /></div>
+                    <div class="field"><label for="secret-value">Secret value</label><input id="secret-value" type="password" @bind="SecretValue" autocomplete="new-password" /></div>
+                    <div class="field" role="group" aria-labelledby="secret-allowed-use-label"><span id="secret-allowed-use-label">Allowed use</span>
                         <label><input type="checkbox" @bind="SecretAllowShell" /> Shell / terminal credential prompts</label>
                         <label><input type="checkbox" @bind="SecretAllowUi" /> Browser / desktop text and password fields</label>
                     </div>
@@ -353,7 +353,7 @@
                     </div>
                     <div class="actions">
                         <Button Text="Previous day" OnClick="PreviousAuditDayAsync" />
-                        <input type="date" value="@AuditDate.ToString("yyyy-MM-dd")" @onchange="AuditDateChangedAsync" />
+                        <input type="date" aria-label="Activity date" value="@AuditDate.ToString("yyyy-MM-dd")" @onchange="AuditDateChangedAsync" />
                         <Button Text="Next day" OnClick="NextAuditDayAsync" />
                         <Button Text="Today" OnClick="TodayAuditAsync" />
                     </div>

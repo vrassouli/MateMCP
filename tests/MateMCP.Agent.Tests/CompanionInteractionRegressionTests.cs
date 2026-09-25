@@ -87,6 +87,33 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_visible_form_labels_have_explicit_control_associations()
+    {
+        var root = FindRepositoryRoot();
+        var projects = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "ProjectsPanel.razor"));
+        var logs = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "AgentLogsPanel.razor"));
+        var memory = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "SkillsMemoryPanel.razor"));
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+
+        Assert.Contains("<label for=\"project-name\">Name</label><input id=\"project-name\"", projects, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"project-workspace-path\">Workspace path</label><input id=\"project-workspace-path\"", projects, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"agent-log-level\">Minimum level</label>", logs, StringComparison.Ordinal);
+        Assert.Contains("<select id=\"agent-log-level\"", logs, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"agent-log-search\">Search</label>", logs, StringComparison.Ordinal);
+        Assert.Contains("<input id=\"agent-log-search\"", logs, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"memory-title\">Title</label><input id=\"memory-title\"", memory, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"memory-content\">Content (Markdown)</label><textarea id=\"memory-content\"", memory, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Filter by type\"", memory, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Search Skills and Memory\"", memory, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"shell-input\">Input</label>", main, StringComparison.Ordinal);
+        Assert.Contains("<input id=\"shell-input\"", main, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"secret-name\">Name</label><input id=\"secret-name\"", main, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"secret-value\">Secret value</label><input id=\"secret-value\"", main, StringComparison.Ordinal);
+        Assert.Contains("role=\"group\" aria-labelledby=\"secret-allowed-use-label\"", main, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Activity date\"", main, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Mac_secret_metadata_uses_stable_user_application_support_and_elevated_agent_delegates_keychain()
     {
         var store = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent", "Security", "UserSecretStore.cs"));

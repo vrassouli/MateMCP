@@ -13,11 +13,11 @@
 <div class="grid">
     <div class="panel">
         <strong>@(EditingId is null ? "Add global Skills / Memory item" : "Edit global Skills / Memory item")</strong>
-        <div class="field"><label>Title</label><input @bind="Title" /></div>
-        <div class="field"><label>Type</label><select @bind="Type"><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select></div>
-        <div class="field"><label>Tags (comma separated)</label><input @bind="Tags" /></div>
-        <div class="field"><label>Description</label><input @bind="Description" /></div>
-        <div class="field"><label>Content (Markdown)</label><textarea rows="12" @bind="Content"></textarea></div>
+        <div class="field"><label for="memory-title">Title</label><input id="memory-title" @bind="Title" /></div>
+        <div class="field"><label for="memory-type">Type</label><select id="memory-type" @bind="Type"><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select></div>
+        <div class="field"><label for="memory-tags">Tags (comma separated)</label><input id="memory-tags" @bind="Tags" /></div>
+        <div class="field"><label for="memory-description">Description</label><input id="memory-description" @bind="Description" /></div>
+        <div class="field"><label for="memory-content">Content (Markdown)</label><textarea id="memory-content" rows="12" @bind="Content"></textarea></div>
         <label><input type="checkbox" @bind="Enabled" /> Enabled</label>
         <div class="actions" style="margin-top:12px">
             <Button Text="Save" OnClick="SaveAsync" />
@@ -34,10 +34,10 @@
     <div class="panel">
         <strong>Stored global Skills & Memory</strong>
         <div class="actions" style="margin-top:10px">
-            <select @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
-            <select @bind="FilterArchived"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All states</option></select>
-            <select @bind="SortBy"><option value="updated-desc">Recently updated</option><option value="updated-asc">Oldest updated</option><option value="title">Title</option><option value="created-desc">Recently created</option></select>
-            <input @bind="FilterText" placeholder="Search" />
+            <select aria-label="Filter by type" @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
+            <select aria-label="Filter by archive state" @bind="FilterArchived"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All states</option></select>
+            <select aria-label="Sort items" @bind="SortBy"><option value="updated-desc">Recently updated</option><option value="updated-asc">Oldest updated</option><option value="title">Title</option><option value="created-desc">Recently created</option></select>
+            <input @bind="FilterText" placeholder="Search" aria-label="Search Skills and Memory" />
             <Button Text="Search" OnClick="LoadAsync" />
         </div>
         @if (IsLoading)

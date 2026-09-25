@@ -24,8 +24,8 @@
 
     <div class="log-filters">
         <div class="field">
-            <label>Minimum level</label>
-            <select @bind="Level" @bind:after="ReloadAsync">
+            <label for="agent-log-level">Minimum level</label>
+            <select id="agent-log-level" @bind="Level" @bind:after="ReloadAsync">
                 <option value="">Trace</option>
                 <option value="Debug">Debug</option>
                 <option value="Information">Information</option>
@@ -35,8 +35,8 @@
             </select>
         </div>
         <div class="field">
-            <label>Search</label>
-            <input @bind="Search" @onkeydown="HandleSearchKeyAsync" placeholder="Message or category" />
+            <label for="agent-log-search">Search</label>
+            <input id="agent-log-search" @bind="Search" @onkeydown="HandleSearchKeyAsync" placeholder="Message or category" />
         </div>
         <div class="actions"><Button Text="Apply" OnClick="ReloadAsync" /></div>
     </div>

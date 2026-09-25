@@ -24,8 +24,8 @@
     {
         <div class="panel" style="margin-top:12px">
             <strong>@(EditingOriginalName is null ? "Add Project" : "Edit Project")</strong>
-            <div class="field"><label>Name</label><input @bind="EditName" /></div>
-            <div class="field"><label>Workspace path</label><input @bind="EditRoot" placeholder="/path/to/project or C:\projects\project" /></div>
+            <div class="field"><label for="project-name">Name</label><input id="project-name" @bind="EditName" /></div>
+            <div class="field"><label for="project-workspace-path">Workspace path</label><input id="project-workspace-path" @bind="EditRoot" placeholder="/path/to/project or C:\projects\project" /></div>
             <div class="actions">
                 <label><input type="checkbox" @bind="EditRead" /> Read</label>
                 <label><input type="checkbox" @bind="EditWrite" /> Write</label>
