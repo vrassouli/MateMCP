@@ -123,6 +123,21 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_navigation_resets_the_shared_content_scroll_region()
+    {
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
+
+        Assert.Contains("mateMcpLayout.resetContentScroll", main, StringComparison.Ordinal);
+        Assert.Contains("await NavigateAsync(section);", main, StringComparison.Ordinal);
+        Assert.Contains("NavigateAsync(\"approvals\")", main, StringComparison.Ordinal);
+        Assert.Contains("NavigateAsync(\"shell\")", main, StringComparison.Ordinal);
+        Assert.Contains("window.mateMcpLayout", index, StringComparison.Ordinal);
+        Assert.Contains("document.querySelector('.content-scroll')?.scrollTo", index, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Companion_terminal_follow_pauses_when_user_scrolls_up_and_resumes_at_bottom()
     {
         var index = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));

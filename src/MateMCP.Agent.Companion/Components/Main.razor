@@ -152,7 +152,7 @@
                             <div class="muted">@(Approvals.Count == 0 ? "Nothing needs your attention." : "Requests are waiting for your decision.")</div>
                             @if (Approvals.Count > 0)
                             {
-                                <div class="actions"><Button Text="Review approvals" OnClick='() => Section = "approvals"' /></div>
+                                <div class="actions"><Button Text="Review approvals" OnClick='() => NavigateAsync("approvals")' /></div>
                             }
                         </div>
                         <div class="panel dashboard-card">
@@ -161,7 +161,7 @@
                             <div class="muted">Active terminal sessions opened through MateMCP.</div>
                             @if (ActiveShellCount > 0)
                             {
-                                <div class="actions"><Button Text="Open shell" OnClick='() => Section = "shell"' /></div>
+                                <div class="actions"><Button Text="Open shell" OnClick='() => NavigateAsync("shell")' /></div>
                             }
                         </div>
                     </div>
@@ -562,15 +562,15 @@
         _pollTask = PollAsync(_disposeCts.Token);
     }
 
-    private Task NavigateAsync(string section)
+    private async Task NavigateAsync(string section)
     {
         Section = section;
-        return Task.CompletedTask;
+        await JS.InvokeVoidAsync("mateMcpLayout.resetContentScroll");
     }
 
     private async Task NavigateFromDrawerAsync(string section)
     {
-        Section = section;
+        await NavigateAsync(section);
         await CloseNavigationAsync();
     }
 

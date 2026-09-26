@@ -81,6 +81,12 @@
                 }
             };
 
+            window.mateMcpLayout = {
+                resetContentScroll() {
+                    document.querySelector('.content-scroll')?.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+                }
+            };
+
             // Mac Catalyst WebView keyboard focus can fail to advance between HTML controls.
             // Keep normal browser semantics for text editing, but explicitly implement Tab and
             // Shift+Tab focus traversal. When a modal dialog is open, focus stays inside it.
