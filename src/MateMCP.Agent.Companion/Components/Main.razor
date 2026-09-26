@@ -454,7 +454,7 @@
                 }
                 @foreach (var item in Audit)
                 {
-                    <div class="row" @key="AuditKey(item)">
+                    <div class="row audit-row" @key="AuditKey(item)">
                         <div class="audit-row-heading">
                             <strong>@item.Capability</strong>
                             <span class="muted"> · @item.Timestamp.LocalDateTime</span>

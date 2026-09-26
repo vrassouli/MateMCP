@@ -189,6 +189,11 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("&capability=", client, StringComparison.Ordinal);
         Assert.Contains(".audit-filters {", styles, StringComparison.Ordinal);
         Assert.Matches(@"(?s)@media \(max-width: 760px\).*?\.audit-filters\s*\{\s*grid-template-columns:\s*1fr;", styles);
+        Assert.Contains("class=\"row audit-row\"", main, StringComparison.Ordinal);
+        Assert.Contains(".audit-row {", styles, StringComparison.Ordinal);
+        Assert.Contains(".audit-row > * {", styles, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere;", styles, StringComparison.Ordinal);
+        Assert.Contains("word-break: break-word;", styles, StringComparison.Ordinal);
     }
 
     [Fact]
