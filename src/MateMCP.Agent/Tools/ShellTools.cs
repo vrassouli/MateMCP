@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using MateMCP.Agent.Audit;
 using MateMCP.Agent.Configuration;
 using MateMCP.Agent.Context;
@@ -121,8 +122,26 @@ public sealed class ShellTools(ProjectRegistry projects, SkillMemoryStore memory
         ProcessStartInfo psi;
         if (OperatingSystem.IsWindows())
         {
-            psi = new ProcessStartInfo(ResolvePowerShell()) { WorkingDirectory = workingDirectory, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-            psi.ArgumentList.Add("-NoLogo"); psi.ArgumentList.Add("-NoProfile"); psi.ArgumentList.Add("-NonInteractive"); psi.ArgumentList.Add("-Command"); psi.ArgumentList.Add(command); return psi;
+            var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            psi = new ProcessStartInfo(ResolvePowerShell())
+            {
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = utf8,
+                StandardErrorEncoding = utf8,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            psi.ArgumentList.Add("-NoLogo");
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-NonInteractive");
+            psi.ArgumentList.Add("-Command");
+            psi.ArgumentList.Add(
+                "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); " +
+                "$OutputEncoding = [Console]::OutputEncoding; " +
+                command);
+            return psi;
         }
         var shell = File.Exists("/bin/zsh") ? "/bin/zsh" : "/bin/sh";
         psi = new ProcessStartInfo(shell) { WorkingDirectory = workingDirectory, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
