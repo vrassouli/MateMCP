@@ -60,6 +60,10 @@ public sealed class DesktopUpdateCompatibilityTests
         Assert.Contains("/usr/bin/osascript", updater, StringComparison.Ordinal);
         Assert.Contains("schtasks.exe /Run /TN $TaskName", updater, StringComparison.Ordinal);
         Assert.Contains("install-desktop-windows.ps1", updater, StringComparison.Ordinal);
+        Assert.Contains("$AgentExe = Join-Path $InstalledRoot 'MateMCP.Agent.exe'", updater, StringComparison.Ordinal);
+        Assert.Contains("function Start-NormalAgent", updater, StringComparison.Ordinal);
+        Assert.Contains("Start-Process -FilePath $AgentExe -WorkingDirectory $InstalledRoot -WindowStyle Hidden", updater, StringComparison.Ordinal);
+        Assert.DoesNotContain("start-agent-hidden.vbs", updater, StringComparison.Ordinal);
         Assert.Contains("Wait-AgentHealth", updater, StringComparison.Ordinal);
         Assert.Contains("http://127.0.0.1:45871/health", updater, StringComparison.Ordinal);
         Assert.Contains("StartMacLaunchdJob", updater, StringComparison.Ordinal);
@@ -78,6 +82,10 @@ public sealed class DesktopUpdateCompatibilityTests
         Assert.Contains("MATEMCP_MAC_USER_HOME", updater, StringComparison.Ordinal);
         Assert.Contains("configure-agent-mode-macos.sh", updater, StringComparison.Ordinal);
         Assert.Contains("schtasks.exe /Run /TN $TaskName", updater, StringComparison.Ordinal);
+        Assert.Contains("$AgentExe = Join-Path $InstalledRoot 'MateMCP.Agent.exe'", updater, StringComparison.Ordinal);
+        Assert.Contains("function Start-NormalAgent", updater, StringComparison.Ordinal);
+        Assert.Contains("Start-Process -FilePath $AgentExe -WorkingDirectory $InstalledRoot -WindowStyle Hidden", updater, StringComparison.Ordinal);
+        Assert.DoesNotContain("start-agent-hidden.vbs", updater, StringComparison.Ordinal);
         Assert.Contains("Wait-AgentHealth", updater, StringComparison.Ordinal);
         Assert.Contains("wait_agent_health", updater, StringComparison.Ordinal);
         Assert.Contains("http://127.0.0.1:45871/health", updater, StringComparison.Ordinal);
@@ -85,6 +93,18 @@ public sealed class DesktopUpdateCompatibilityTests
         Assert.Contains("currentUid == 0 ? \"system\"", updater, StringComparison.Ordinal);
         Assert.Contains("<key>KeepAlive</key><false/>", updater, StringComparison.Ordinal);
         Assert.Contains("launchctl bootout", updater, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Companion_runtime_start_uses_agent_executable_directly_on_windows()
+    {
+        var root = FindRepositoryRoot();
+        var controller = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentProcessController.cs"));
+
+        Assert.Contains("var agentExe = Path.Combine(root, \"MateMCP.Agent.exe\")", controller, StringComparison.Ordinal);
+        Assert.Contains("new ProcessStartInfo(agentExe)", controller, StringComparison.Ordinal);
+        Assert.Contains("CreateNoWindow = true", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("start-agent-hidden.vbs", controller, StringComparison.Ordinal);
     }
 
     [Fact]

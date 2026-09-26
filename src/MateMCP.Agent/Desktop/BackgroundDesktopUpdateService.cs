@@ -285,10 +285,13 @@ $Marker = {{PowerShellQuote(markerPath)}}
 $Status = {{PowerShellQuote(statusPath)}}
 $Failure = {{PowerShellQuote(failurePath)}}
 $InstalledRoot = Join-Path $env:LOCALAPPDATA 'MateMCP'
-$HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
+$AgentExe = Join-Path $InstalledRoot 'MateMCP.Agent.exe'
 $ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
 $TaskName = 'MateMCP Agent'
-$WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
+function Start-NormalAgent {
+    if (-not (Test-Path $AgentExe)) { throw "MateMCP Agent executable not found after update: $AgentExe" }
+    Start-Process -FilePath $AgentExe -WorkingDirectory $InstalledRoot -WindowStyle Hidden | Out-Null
+}
 function Wait-AgentHealth {
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -313,7 +316,7 @@ try {
         & schtasks.exe /Run /TN $TaskName | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Desktop updated, but the elevated Agent task could not be started (schtasks exit $LASTEXITCODE)." }
     }
-    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
+    else { Start-NormalAgent }
     Wait-AgentHealth
     $Now = [DateTimeOffset]::UtcNow.ToString('o')
     [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
@@ -327,7 +330,7 @@ catch {
     [IO.File]::WriteAllText($Status, "$Now|failed|Background Desktop update installation failed; the previous installation will be restarted if possible.")
     $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
     if ($AgentMode -eq 'Elevated') { & schtasks.exe /Run /TN $TaskName *> $null }
-    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
+    else { try { Start-NormalAgent } catch { } }
 }
 finally {
     Remove-Item $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
