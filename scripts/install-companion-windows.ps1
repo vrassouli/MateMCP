@@ -27,6 +27,11 @@ if (Test-Path $packageUninstall) {
     Copy-Item $packageUninstall (Join-Path $Target 'uninstall-companion-windows.ps1') -Force
 }
 
+# The unified install can run elevated when the Agent uses Elevated mode. The
+# Companion/WebView2 subtree must still be writable by the normal desktop user.
+& icacls.exe $Target /setintegritylevel '(OI)(CI)M' /T /C | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Could not restore Medium integrity on the MateMCP Companion installation.' }
+
 $shortcutShell = New-Object -ComObject WScript.Shell
 $shortcut = $shortcutShell.CreateShortcut($ProgramsShortcut)
 $shortcut.TargetPath = $Exe
