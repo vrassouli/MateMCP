@@ -88,6 +88,22 @@ public sealed class DesktopUpdateCompatibilityTests
     }
 
     [Fact]
+    public void Windows_companion_upgrade_preserves_webview_user_data()
+    {
+        var root = FindRepositoryRoot();
+        var installer = File.ReadAllText(Path.Combine(root, "scripts", "install-companion-windows.ps1"));
+
+        Assert.Contains("$WebViewUserData = Join-Path $Target 'MateMCP.Agent.Companion.exe.WebView2'", installer, StringComparison.Ordinal);
+        Assert.Contains("Where-Object { $_.FullName -ne $WebViewUserData }", installer, StringComparison.Ordinal);
+        Assert.Contains("Remove-Item -Recurse -Force", installer, StringComparison.Ordinal);
+
+        var preserve = installer.IndexOf("Where-Object { $_.FullName -ne $WebViewUserData }", StringComparison.Ordinal);
+        var remove = installer.IndexOf("Remove-Item -Recurse -Force", preserve, StringComparison.Ordinal);
+        var copy = installer.IndexOf("Copy-Item (Join-Path $Source '*') $Target -Recurse -Force", StringComparison.Ordinal);
+        Assert.True(preserve >= 0 && remove > preserve && copy > remove);
+    }
+
+    [Fact]
     public void Mac_installer_waits_for_old_agent_before_replacing_managed_payload()
     {
         var root = FindRepositoryRoot();

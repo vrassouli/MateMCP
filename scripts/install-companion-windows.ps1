@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 
 $Target = Join-Path $env:LOCALAPPDATA 'MateMCP\Companion'
 $Exe = Join-Path $Target 'MateMCP.Agent.Companion.exe'
+$WebViewUserData = Join-Path $Target 'MateMCP.Agent.Companion.exe.WebView2'
 $StartupDirectory = [Environment]::GetFolderPath('Startup')
 $StartupShortcut = Join-Path $StartupDirectory 'MateMCP Agent Companion.lnk'
 $ProgramsDirectory = [Environment]::GetFolderPath('Programs')
@@ -19,7 +20,13 @@ if (-not (Test-Path (Join-Path $Source 'MateMCP.Agent.Companion.exe'))) {
 Get-Process 'MateMCP.Agent.Companion' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Remove-Item $StartupShortcut -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
-Get-ChildItem $Target -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+# WebView2 keeps its user-data/cache beside the executable. That directory is
+# runtime state, not install payload, and child WebView2 processes may still
+# hold cache files briefly after the Companion exits. Preserve it during
+# upgrades so a locked cache file cannot abort the whole Desktop update.
+Get-ChildItem $Target -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -ne $WebViewUserData } |
+    Remove-Item -Recurse -Force
 Copy-Item (Join-Path $Source '*') $Target -Recurse -Force
 
 $packageUninstall = Join-Path $PSScriptRoot 'uninstall-companion-windows.ps1'
