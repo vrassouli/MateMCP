@@ -398,6 +398,16 @@ html, body {
 .audit-filter-actions .actions { margin-top: 0; }
 .audit-live-status { margin-top: 8px; }
 .audit-row-heading { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.audit-row {
+    min-width: 0;
+}
+
+.audit-row > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
 a.link {
     color: var(--colorBrandForegroundLink, inherit);
     text-decoration: underline;
