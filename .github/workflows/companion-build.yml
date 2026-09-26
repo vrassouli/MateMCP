@@ -279,6 +279,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       MATEMCP_DESKTOP_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'agent-latest' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Bootstrap install and uninstall on macOS
@@ -293,7 +294,7 @@ jobs:
           marker="$HOME/Library/Application Support/MateMCP Companion/.desktop-release-asset"
           test -s "$marker"
           release_json="$(mktemp)"
-          curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: MateMCP-CI/1.0' \
+          curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'User-Agent: MateMCP-CI/1.0' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${MATEMCP_DESKTOP_RELEASE_TAG}" -o "$release_json"
           expected="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(next(a["id"] for a in r["assets"] if a["name"] == "MateMCP-Desktop-macos-arm64.tar.gz"))' "$release_json")"
           test "$(cat "$marker")" = "$expected"

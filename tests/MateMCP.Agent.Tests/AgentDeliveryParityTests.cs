@@ -15,6 +15,19 @@ public sealed class AgentDeliveryParityTests
     }
 
     [Fact]
+    public void Mac_bootstrap_authenticates_release_resolution_in_ci()
+    {
+        var root = FindRepositoryRoot();
+        var mac = File.ReadAllText(Path.Combine(root, "scripts", "bootstrap-macos.sh"));
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "companion-build.yml"));
+
+        Assert.Contains("GITHUB_AUTH_TOKEN=\"${GH_TOKEN:-${GITHUB_TOKEN:-}}\"", mac, StringComparison.Ordinal);
+        Assert.Contains("\"${CURL_AUTH_ARGS[@]}\" \\", mac, StringComparison.Ordinal);
+        Assert.Contains("GH_TOKEN: ${{ github.token }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("Authorization: Bearer ${GH_TOKEN}", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Desktop_bootstrap_records_the_installed_release_asset_for_companion_update_checks()
     {
         var root = FindRepositoryRoot();
