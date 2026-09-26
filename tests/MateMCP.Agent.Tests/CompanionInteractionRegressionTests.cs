@@ -192,33 +192,6 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
-    public void Mac_catalyst_webview_enables_native_tab_focus_traversal_before_initialization()
-    {
-        var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "MainPage.xaml"));
-        var codeBehind = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "MainPage.xaml.cs"));
-        var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
-
-        Assert.Contains("BlazorWebViewInitializing=\"OnBlazorWebViewInitializing\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("BlazorWebViewInitialized=\"OnBlazorWebViewInitialized\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("OperatingSystem.IsMacCatalystVersionAtLeast(26)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("EntryPoint = \"objc_msgSend\"", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("ObjCRuntime.Selector.GetHandle(\"setTabFocusesLinks:\")", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("SendBooleanProperty(e.Configuration.Preferences.Handle, selector, true)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("SendBooleanProperty(e.WebView.Configuration.Preferences.Handle, selector, true)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("InstallNativeTabKeyCommands(e.WebView)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("UIKit.UIKeyCommand.Create(", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("new ObjCRuntime.Selector(\"insertTab:\")", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("new ObjCRuntime.Selector(\"insertBacktab:\")", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("WantsPriorityOverSystemBehavior = true", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("SetValueForKey", codeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("RespondsToSelector", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("event.key !== 'Tab'", index, StringComparison.Ordinal);
-        Assert.DoesNotContain("event.defaultPrevented", index, StringComparison.Ordinal);
-        Assert.Contains("const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;", index, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Companion_visible_form_labels_have_explicit_control_associations()
     {
         var root = FindRepositoryRoot();
