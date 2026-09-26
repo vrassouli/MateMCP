@@ -120,15 +120,17 @@ public sealed class AgentProcessController
             }
 
             var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MateMCP");
-            var agentExe = Path.Combine(root, "MateMCP.Agent.exe");
-            if (!File.Exists(agentExe))
-                throw new FileNotFoundException("MateMCP Agent executable is not installed.", agentExe);
-            _ = Process.Start(new ProcessStartInfo(agentExe)
+            var launcher = Path.Combine(root, "start-agent-hidden.vbs");
+            if (!File.Exists(launcher))
+                throw new FileNotFoundException("MateMCP Agent launcher is not installed.", launcher);
+            var wscript = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wscript.exe");
+            Process.Start(new ProcessStartInfo(wscript)
             {
                 WorkingDirectory = root,
                 UseShellExecute = false,
-                CreateNoWindow = true
-            }) ?? throw new InvalidOperationException("Could not start the MateMCP Agent process.");
+                CreateNoWindow = true,
+                ArgumentList = { launcher }
+            });
             await WaitForHealthyAsync(ct);
             return;
         }

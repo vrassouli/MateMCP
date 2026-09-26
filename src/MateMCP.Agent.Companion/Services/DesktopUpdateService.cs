@@ -358,13 +358,10 @@ $LogRoot = Join-Path $env:LOCALAPPDATA 'MateMCP-Update'
 $Log = Join-Path $LogRoot 'update.log'
 $InstalledRoot = Join-Path $env:LOCALAPPDATA 'MateMCP'
 $Companion = Join-Path $InstalledRoot 'Companion\MateMCP.Agent.Companion.exe'
-$AgentExe = Join-Path $InstalledRoot 'MateMCP.Agent.exe'
+$HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
 $ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
 $TaskName = 'MateMCP Agent'
-function Start-NormalAgent {
-    if (-not (Test-Path $AgentExe)) { throw "MateMCP Agent executable not found after update: $AgentExe" }
-    Start-Process -FilePath $AgentExe -WorkingDirectory $InstalledRoot -WindowStyle Hidden | Out-Null
-}
+$WScript = Join-Path $env:WINDIR 'System32\wscript.exe'
 function Wait-AgentHealth {
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -391,7 +388,7 @@ try {
         & schtasks.exe /Run /TN $TaskName | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Desktop updated, but the elevated Agent task could not be started (schtasks exit $LASTEXITCODE)." }
     }
-    else { Start-NormalAgent }
+    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" }
     Wait-AgentHealth
     [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
     Remove-Item $Failure -Force -ErrorAction SilentlyContinue
@@ -402,7 +399,7 @@ catch {
     [IO.File]::WriteAllText($Failure, "Desktop update installation failed: $($_.Exception.Message). See $Log for details.")
     $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
     if ($AgentMode -eq 'Elevated') { & schtasks.exe /Run /TN $TaskName *> $null }
-    else { try { Start-NormalAgent } catch { } }
+    elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
     if (Test-Path $Companion) { Start-Process -FilePath $Companion -WorkingDirectory (Split-Path $Companion) -ErrorAction SilentlyContinue }
 }
 finally {
