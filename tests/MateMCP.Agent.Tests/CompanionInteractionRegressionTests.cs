@@ -201,8 +201,10 @@ public sealed class CompanionInteractionRegressionTests
 
         Assert.Contains("BlazorWebViewInitializing=\"OnBlazorWebViewInitializing\"", xaml, StringComparison.Ordinal);
         Assert.Contains("OperatingSystem.IsMacCatalystVersionAtLeast(26)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("new Foundation.NSString(\"tabFocusesLinks\")", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("SetValueForKey(value, key)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("EntryPoint = \"objc_msgSend\"", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("ObjCRuntime.Selector.GetHandle(\"setTabFocusesLinks:\")", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("SendBooleanProperty(e.Configuration.Preferences.Handle, selector, true)", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetValueForKey", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("RespondsToSelector", codeBehind, StringComparison.Ordinal);
         Assert.Contains("event.key !== 'Tab'", index, StringComparison.Ordinal);
         Assert.DoesNotContain("event.defaultPrevented", index, StringComparison.Ordinal);
