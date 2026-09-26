@@ -6,9 +6,10 @@ namespace MateMCP.Agent.Projects;
 
 public sealed record ProjectUpdate(string Name, string Root, bool Read = true, bool Write = true, bool Shell = true);
 
-public sealed class ProjectConfigurationService
+public sealed class ProjectConfigurationService(IConfiguration configuration)
 {
     private readonly string _configurationPath = ConfigurationBootstrap.EnsureUserConfiguration();
+    private readonly IConfigurationRoot? _configurationRoot = configuration as IConfigurationRoot;
     private readonly object _gate = new();
 
     public ProjectDefinition Add(ProjectUpdate update)
@@ -128,5 +129,9 @@ public sealed class ProjectConfigurationService
         ConfigurationBootstrap.TryRestrictPermissions(temp);
         File.Move(temp, _configurationPath, true);
         ConfigurationBootstrap.TryRestrictPermissions(_configurationPath);
+
+        // Configuration file watching is asynchronous. Reload synchronously so callers
+        // see project mutations through ProjectRegistry before this operation returns.
+        _configurationRoot?.Reload();
     }
 }

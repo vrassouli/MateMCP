@@ -16,6 +16,8 @@ public sealed class ProjectManagementWorkspaceTests
         Assert.Contains("bool Available", registry, StringComparison.Ordinal);
         Assert.Contains("LegacyId", registry, StringComparison.Ordinal);
         Assert.Contains("Guid.NewGuid().ToString(\"N\")", config, StringComparison.Ordinal);
+        Assert.Contains("IConfigurationRoot", config, StringComparison.Ordinal);
+        Assert.Contains("_configurationRoot?.Reload();", config, StringComparison.Ordinal);
         Assert.Contains("already registered", config, StringComparison.Ordinal);
         Assert.Contains("project = project with { Id = existingId }", config, StringComparison.Ordinal);
         Assert.DoesNotContain("MigrateSkillMemoryProjectReferences", config, StringComparison.Ordinal);
