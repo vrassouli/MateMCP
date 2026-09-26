@@ -346,6 +346,41 @@
                         <Button Text="Today" OnClick="TodayAuditAsync" />
                     </div>
                 </div>
+
+                <div class="audit-filters">
+                    <div class="field">
+                        <label for="audit-project-filter">Project</label>
+                        <input id="audit-project-filter" list="audit-project-options" placeholder="All projects" @bind="AuditProjectFilter" />
+                        <datalist id="audit-project-options">
+                            @foreach (var projectName in AuditProjectOptions)
+                            {
+                                <option value="@projectName"></option>
+                            }
+                        </datalist>
+                    </div>
+                    <div class="field">
+                        <label for="audit-capability-filter">Action / capability</label>
+                        <input id="audit-capability-filter" list="audit-capability-options" placeholder="All actions" @bind="AuditCapabilityFilter" />
+                        <datalist id="audit-capability-options">
+                            @foreach (var capability in AuditCapabilityOptions)
+                            {
+                                <option value="@capability"></option>
+                            }
+                        </datalist>
+                    </div>
+                    <div class="audit-filter-actions">
+                        <div class="actions">
+                            <Button Text="Apply filters" OnClick="LoadAuditAsync" />
+                            <Button Text="Clear filters" OnClick="ClearAuditFiltersAsync" />
+                        </div>
+                        <label class="update-toggle">
+                            <input type="checkbox" @bind="AuditLiveRefresh" />
+                            <span>Live refresh</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="muted audit-live-status">@AuditLiveRefreshStatus</div>
+
                 <div class="actions" style="margin-top:12px">
                     @if (!ConfirmAuditCleanup)
                     {
@@ -364,13 +399,19 @@
                 </div>
                 @if (Audit.Count == 0)
                 {
-                    <div class="muted" style="margin-top:12px">No activity recorded for this date.</div>
+                    <div class="muted" style="margin-top:12px">@(HasAuditFilters ? "No activity matches the current filters." : "No activity recorded for this date.")</div>
                 }
                 @foreach (var item in Audit)
                 {
-                    <div class="row">
-                        <strong>@item.Capability</strong>
-                        <span class="muted"> · @item.Timestamp.LocalDateTime</span>
+                    <div class="row" @key="AuditKey(item)">
+                        <div class="audit-row-heading">
+                            <strong>@item.Capability</strong>
+                            <span class="muted"> · @item.Timestamp.LocalDateTime</span>
+                            @if (!string.IsNullOrWhiteSpace(item.Project))
+                            {
+                                <span class="muted"> · project: @item.Project</span>
+                            }
+                        </div>
                         <div>@item.Target</div>
                         <div class="muted">@item.Result@if (!string.IsNullOrWhiteSpace(item.Credential)) { <text> · credential: @item.Credential</text> }@if (!string.IsNullOrWhiteSpace(item.Tool)) { <text> · tool: @item.Tool</text> }</div>
                     </div>
@@ -409,8 +450,24 @@
     private bool SecretAllowUi { get; set; } = true;
     private bool DeviceUrlCopied { get; set; }
     private DateOnly AuditDate { get; set; } = DateOnly.FromDateTime(DateTime.Now);
+    private string AuditProjectFilter { get; set; } = string.Empty;
+    private string AuditCapabilityFilter { get; set; } = string.Empty;
+    private IReadOnlyList<string> AuditProjectOptions { get; set; } = [];
+    private IReadOnlyList<string> AuditCapabilityOptions { get; set; } = [];
+    private bool AuditLiveRefresh { get; set; } = true;
+    private int _auditPollTicks;
     private bool ConfirmAuditCleanup { get; set; }
     private string? AuditMessage { get; set; }
+
+    private bool HasAuditFilters =>
+        !string.IsNullOrWhiteSpace(AuditProjectFilter) || !string.IsNullOrWhiteSpace(AuditCapabilityFilter);
+
+    private string AuditLiveRefreshStatus =>
+        !AuditLiveRefresh
+            ? "Live refresh paused."
+            : AuditDate != DateOnly.FromDateTime(DateTime.Now)
+                ? "Live refresh resumes when Today is selected."
+                : "Live refresh checks every 10 seconds while Activity is open.";
 
     private int ActiveShellCount => ShellSessions.Count(x => !x.Exited);
     private string AgentStateLabel => AgentRunning ? (Status is null ? "Starting…" : "Online") : "Stopped";
@@ -544,6 +601,8 @@
         Secrets = [];
         ShellSessions = [];
         Audit = [];
+        AuditProjectOptions = [];
+        AuditCapabilityOptions = [];
         ClearSelectedShell();
     }
 
@@ -567,7 +626,32 @@
         try
         {
             while (await timer.WaitForNextTickAsync(ct))
-                await InvokeAsync(async () => { await RefreshDynamicAsync(); StateHasChanged(); });
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshDynamicAsync();
+
+                    var liveAudit = AgentRunning
+                        && Section == "audit"
+                        && AuditLiveRefresh
+                        && AuditDate == DateOnly.FromDateTime(DateTime.Now);
+                    if (liveAudit)
+                    {
+                        _auditPollTicks++;
+                        if (_auditPollTicks >= 5)
+                        {
+                            _auditPollTicks = 0;
+                            await LoadAuditAsync();
+                        }
+                    }
+                    else
+                    {
+                        _auditPollTicks = 0;
+                    }
+
+                    StateHasChanged();
+                });
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
     }
@@ -701,8 +785,32 @@
     private async Task LoadAuditAsync()
     {
         var (from, to) = GetAuditRange();
-        Audit = await Api.GetAuditAsync(500, from, to, _disposeCts.Token);
+        var project = string.IsNullOrWhiteSpace(AuditProjectFilter) ? null : AuditProjectFilter.Trim();
+        var capability = string.IsNullOrWhiteSpace(AuditCapabilityFilter) ? null : AuditCapabilityFilter.Trim();
+        Audit = await Api.GetAuditAsync(500, from, to, project, capability, _disposeCts.Token);
+
+        AuditProjectOptions = AuditProjectOptions
+            .Concat(Audit.Where(x => !string.IsNullOrWhiteSpace(x.Project)).Select(x => x.Project!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        AuditCapabilityOptions = AuditCapabilityOptions
+            .Concat(Audit.Select(x => x.Capability))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
+
+    private async Task ClearAuditFiltersAsync()
+    {
+        AuditProjectFilter = string.Empty;
+        AuditCapabilityFilter = string.Empty;
+        AuditMessage = null;
+        await LoadAuditAsync();
+    }
+
+    private static string AuditKey(AuditEntry item)
+        => $"{item.Timestamp:O}|{item.Capability}|{item.Target}|{item.Result}";
 
     private async Task PreviousAuditDayAsync()
     {

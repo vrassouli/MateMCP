@@ -34,7 +34,8 @@ public sealed record AuditEntry(
     string? Credential = null,
     string? Tool = null,
     string? ProposedAction = null,
-    AuditImpactAssessment? Assessment = null);
+    AuditImpactAssessment? Assessment = null,
+    string? Project = null);
 
 public sealed class AuditLog
 {
@@ -48,12 +49,14 @@ public sealed class AuditLog
         _path = path;
     }
 
-    public async Task WriteAsync(string capability, string target, string result, CancellationToken cancellationToken = default)
-        => await AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, capability, target, result), cancellationToken);
+    public async Task WriteAsync(string capability, string target, string result, CancellationToken cancellationToken = default,
+        string? project = null)
+        => await AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, capability, target, result, Project: NormalizeProject(project)), cancellationToken);
 
     public async Task WriteCredentialUsageAsync(string credential, string tool, string target, string result,
-        CancellationToken cancellationToken = default)
-        => await AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, "secret.use", target, result, credential, tool), cancellationToken);
+        CancellationToken cancellationToken = default, string? project = null)
+        => await AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, "secret.use", target, result, credential, tool,
+            Project: NormalizeProject(project)), cancellationToken);
 
     public async Task WriteApprovalAsync(
         string capability,
@@ -78,7 +81,18 @@ public sealed class AuditLog
 
     public Task<IReadOnlyList<AuditEntry>> ReadAsync(int limit, DateTimeOffset? from, DateTimeOffset? to,
         CancellationToken cancellationToken = default)
-        => ReadMatchingAsync(limit, from, to, static _ => true, cancellationToken);
+        => ReadAsync(limit, from, to, null, null, cancellationToken);
+
+    public Task<IReadOnlyList<AuditEntry>> ReadAsync(int limit, DateTimeOffset? from, DateTimeOffset? to,
+        string? project, string? capability, CancellationToken cancellationToken = default)
+    {
+        var normalizedProject = NormalizeProject(project);
+        var normalizedCapability = string.IsNullOrWhiteSpace(capability) ? null : capability.Trim();
+        return ReadMatchingAsync(limit, from, to,
+            entry => (normalizedProject is null || string.Equals(entry.Project, normalizedProject, StringComparison.OrdinalIgnoreCase))
+                     && (normalizedCapability is null || string.Equals(entry.Capability, normalizedCapability, StringComparison.OrdinalIgnoreCase)),
+            cancellationToken);
+    }
 
     public Task<IReadOnlyList<AuditEntry>> ReadCredentialUsageAsync(int limit = 200,
         CancellationToken cancellationToken = default)
@@ -227,6 +241,12 @@ public sealed class AuditLog
         Array.Reverse(bytes);
         var line = Encoding.UTF8.GetString(bytes);
         return line.EndsWith('\r') ? line[..^1] : line;
+    }
+
+    private static string? NormalizeProject(string? project)
+    {
+        project = project?.Trim();
+        return string.IsNullOrWhiteSpace(project) ? null : ActionImpactAssessment.Bound(project, 120);
     }
 
     private static AuditImpactAssessment? ToAuditAssessment(ActionImpactAssessment? assessment)

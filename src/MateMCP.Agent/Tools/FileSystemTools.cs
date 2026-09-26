@@ -20,7 +20,7 @@ public sealed class FileSystemTools(ProjectRegistry projects, SkillMemoryStore m
     {
         var resolved = projects.ResolvePath(project, path);
         var entries = Directory.EnumerateFileSystemEntries(resolved).Take(1000).Select(x => new { name = Path.GetFileName(x), directory = Directory.Exists(x) }).ToArray();
-        await audit.WriteAsync("filesystem.list", $"{project}:{path}", "ok");
+        await audit.WriteAsync("filesystem.list", $"{project}:{path}", "ok", project: project);
         return entries;
     }
 
@@ -32,7 +32,7 @@ public sealed class FileSystemTools(ProjectRegistry projects, SkillMemoryStore m
         using var reader = new StreamReader(resolved);
         var buffer = new char[maxChars];
         var count = await reader.ReadBlockAsync(buffer.AsMemory(0, maxChars));
-        await audit.WriteAsync("filesystem.read", $"{project}:{path}", "ok");
+        await audit.WriteAsync("filesystem.read", $"{project}:{path}", "ok", project: project);
         return new string(buffer, 0, count);
     }
 
@@ -65,7 +65,7 @@ public sealed class FileSystemTools(ProjectRegistry projects, SkillMemoryStore m
 
         Directory.CreateDirectory(Path.GetDirectoryName(resolved)!);
         await File.WriteAllTextAsync(resolved, content, cancellationToken);
-        await audit.WriteAsync("filesystem.write", $"{project}:{path}", "ok", cancellationToken);
+        await audit.WriteAsync("filesystem.write", $"{project}:{path}", "ok", cancellationToken, project);
         return new { status = "written", project, path, contextLease, written = true };
     }
 }
