@@ -40,6 +40,7 @@ public sealed class CompanionHostUiTests
         var index = File.ReadAllText(Path.Combine(companionRoot, "wwwroot", "index.html"));
         var css = File.ReadAllText(Path.Combine(companionRoot, "wwwroot", "css", "app.css"));
         var main = File.ReadAllText(Path.Combine(companionRoot, "Components", "Main.razor"));
+        var navigation = File.ReadAllText(Path.Combine(companionRoot, "Components", "CompanionNavigation.razor"));
         var imports = File.ReadAllText(Path.Combine(companionRoot, "Components", "_Imports.razor"));
         var app = File.ReadAllText(Path.Combine(companionRoot, "App.xaml.cs"));
         var project = File.ReadAllText(Path.Combine(companionRoot, "MateMCP.Agent.Companion.csproj"));
@@ -55,7 +56,7 @@ public sealed class CompanionHostUiTests
         Assert.Contains("Local Agent management</div>", main, StringComparison.Ordinal);
         Assert.DoesNotContain("Local Agent management · Bluent UI", main, StringComparison.Ordinal);
         Assert.Contains("@using Bluent.UI.Icons", imports, StringComparison.Ordinal);
-        Assert.Contains("FluentIcons.Home", main, StringComparison.Ordinal);
+        Assert.Contains("FluentIcons.Home", navigation, StringComparison.Ordinal);
         Assert.Contains("FluentIcons.ArrowSyncCircle", main, StringComparison.Ordinal);
 
         Assert.Contains("#app {", css, StringComparison.Ordinal);
@@ -63,7 +64,8 @@ public sealed class CompanionHostUiTests
         Assert.Contains(".sidebar {", css, StringComparison.Ordinal);
         Assert.Contains("overflow-y: auto;", css, StringComparison.Ordinal);
         Assert.Contains(".content {", css, StringComparison.Ordinal);
-        Assert.Contains("overflow: auto;", css, StringComparison.Ordinal);
+        Assert.Contains(".content-scroll {", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto;", css, StringComparison.Ordinal);
         Assert.Contains("var(--colorNeutralBackground1", css, StringComparison.Ordinal);
         Assert.Contains("var(--colorStatusSuccessForeground1", css, StringComparison.Ordinal);
     }

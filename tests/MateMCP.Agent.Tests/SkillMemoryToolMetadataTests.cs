@@ -43,8 +43,9 @@ public sealed class SkillMemoryToolMetadataTests
     {
         var root = FindRepositoryRoot();
         var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var navigation = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "CompanionNavigation.razor"));
         var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "SkillsMemoryPanel.razor"));
-        Assert.Contains("Skills &amp; Memory", main, StringComparison.Ordinal);
+        Assert.Contains("Skills &amp; Memory", navigation, StringComparison.Ordinal);
         Assert.Contains("<SkillsMemoryPanel", main, StringComparison.Ordinal);
         Assert.DoesNotContain("ProjectContext=", main, StringComparison.Ordinal);
         Assert.Contains("Global Skills & Memory", panel, StringComparison.Ordinal);
