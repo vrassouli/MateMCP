@@ -19,14 +19,44 @@
                 media.addListener(applySystemTheme);
             }
 
+            const modalOpeners = new WeakMap();
+            window.mateMcpModal = {
+                open(dialogId, focusSelector) {
+                    const dialog = document.getElementById(dialogId);
+                    if (!(dialog instanceof HTMLDialogElement)) return;
+
+                    modalOpeners.set(dialog, document.activeElement);
+                    if (dialog.dataset.mateMcpBound !== 'true') {
+                        dialog.addEventListener('close', () => {
+                            const opener = modalOpeners.get(dialog);
+                            modalOpeners.delete(dialog);
+                            if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+                        });
+                        dialog.dataset.mateMcpBound = 'true';
+                    }
+
+                    if (!dialog.open) dialog.showModal();
+                    requestAnimationFrame(() => {
+                        const preferred = focusSelector ? dialog.querySelector(focusSelector) : null;
+                        (preferred ?? dialog.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))?.focus();
+                    });
+                },
+                close(dialogId) {
+                    const dialog = document.getElementById(dialogId);
+                    if (dialog instanceof HTMLDialogElement && dialog.open) dialog.close();
+                }
+            };
+
             // Mac Catalyst WebView keyboard focus can fail to advance between HTML controls.
             // Keep normal browser semantics for text editing, but explicitly implement Tab and
-            // Shift+Tab focus traversal so Companion forms are keyboard-usable on both platforms.
+            // Shift+Tab focus traversal. When a modal dialog is open, focus stays inside it.
             document.addEventListener('keydown', event => {
                 if (event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
 
                 const selector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-                const focusable = Array.from(document.querySelectorAll(selector)).filter(element => {
+                const openDialogs = document.querySelectorAll('dialog[open]');
+                const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;
+                const focusable = Array.from(root.querySelectorAll(selector)).filter(element => {
                     const style = window.getComputedStyle(element);
                     return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
                 });

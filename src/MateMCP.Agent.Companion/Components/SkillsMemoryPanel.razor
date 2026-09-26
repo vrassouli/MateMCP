@@ -10,62 +10,86 @@
     </div>
 </div>
 
-<div class="grid">
-    <div class="panel">
-        <strong>@(EditingId is null ? "Add global Skills / Memory item" : "Edit global Skills / Memory item")</strong>
-        <div class="field"><label for="memory-title">Title</label><input id="memory-title" @bind="Title" /></div>
-        <div class="field"><label for="memory-type">Type</label><select id="memory-type" @bind="Type"><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select></div>
-        <div class="field"><label for="memory-tags">Tags (comma separated)</label><input id="memory-tags" @bind="Tags" /></div>
-        <div class="field"><label for="memory-description">Description</label><input id="memory-description" @bind="Description" /></div>
-        <div class="field"><label for="memory-content">Content (Markdown)</label><textarea id="memory-content" rows="12" @bind="Content"></textarea></div>
-        <label><input type="checkbox" @bind="Enabled" /> Enabled</label>
-        <div class="actions" style="margin-top:12px">
-            <Button Text="Save" OnClick="SaveAsync" />
-            @if (EditingId is not null) { <Button Text="Cancel" OnClick="CancelEdit" /> }
+<dialog id="skills-memory-editor" class="companion-dialog skills-memory-dialog" aria-labelledby="skills-memory-editor-title">
+    <div class="companion-dialog-surface">
+        <div class="companion-dialog-header">
+            <strong id="skills-memory-editor-title">@(EditingId is null ? "Add global Skills / Memory item" : "Edit global Skills / Memory item")</strong>
+            <button type="button" class="companion-dialog-close" aria-label="Close editor" @onclick="CancelDialogAsync">×</button>
         </div>
-        <div class="muted" style="margin-top:10px">Use this only for durable cross-project knowledge. Never store credentials here; use Secret Manager.</div>
-        @if (!string.IsNullOrWhiteSpace(Message)) { <div class="muted" style="margin-top:8px">@Message</div> }
-        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
-        {
-            <div class="error" style="margin-top:8px">@ErrorMessage</div>
-        }
+
+        <div class="companion-dialog-body">
+            <div class="field"><label for="memory-title">Title</label><input id="memory-title" autofocus @bind="Title" /></div>
+            <div class="field"><label for="memory-type">Type</label><select id="memory-type" @bind="Type"><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select></div>
+            <div class="field"><label for="memory-tags">Tags (comma separated)</label><input id="memory-tags" @bind="Tags" /></div>
+            <div class="field"><label for="memory-description">Description</label><input id="memory-description" @bind="Description" /></div>
+            <div class="field"><label for="memory-content">Content (Markdown)</label><textarea id="memory-content" rows="12" @bind="Content"></textarea></div>
+            <label><input type="checkbox" @bind="Enabled" /> Enabled</label>
+
+            <div class="actions" style="margin-top:12px">
+                <Button Text="Save" OnClick="SaveAsync" />
+                <Button Text="Cancel" OnClick="CancelDialogAsync" />
+            </div>
+
+            <div class="muted" style="margin-top:10px">Use this only for durable cross-project knowledge. Never store credentials here; use Secret Manager.</div>
+            @if (!string.IsNullOrWhiteSpace(EditorErrorMessage))
+            {
+                <div class="error" role="alert" aria-live="polite" style="margin-top:8px">@EditorErrorMessage</div>
+            }
+        </div>
+    </div>
+</dialog>
+
+<div class="panel">
+    <div class="toolbar memory-toolbar">
+        <div>
+            <strong>Stored global Skills & Memory</strong>
+            @if (!string.IsNullOrWhiteSpace(Message))
+            {
+                <div class="muted" style="margin-top:6px" role="status">@Message</div>
+            }
+        </div>
+        <Button Text="Add item" OnClick="OpenAddAsync" />
     </div>
 
-    <div class="panel">
-        <strong>Stored global Skills & Memory</strong>
-        <div class="actions" style="margin-top:10px">
-            <select aria-label="Filter by type" @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
-            <select aria-label="Filter by archive state" @bind="FilterArchived"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All states</option></select>
-            <select aria-label="Sort items" @bind="SortBy"><option value="updated-desc">Recently updated</option><option value="updated-asc">Oldest updated</option><option value="title">Title</option><option value="created-desc">Recently created</option></select>
-            <input @bind="FilterText" placeholder="Search" aria-label="Search Skills and Memory" />
-            <Button Text="Search" OnClick="LoadAsync" />
-        </div>
-        @if (IsLoading)
-        {
-            <div class="muted" style="margin-top:12px">Loading…</div>
-        }
-        else if (!VisibleItems.Any())
-        {
-            <div class="muted" style="margin-top:12px">No matching items. Use the form on the left to add one.</div>
-        }
-        @foreach (var item in VisibleItems)
-        {
-            <div class="row" @key="item.Id">
-                <strong>@item.Title</strong>
-                <div class="muted">@item.Type · global · source: @item.Source · last modified by: @item.UpdatedBy · @(item.Archived ? "archived" : item.Enabled ? "enabled" : "disabled")</div>
-                <div class="muted">Created @FormatTime(item.CreatedAt) · Updated @FormatTime(item.UpdatedAt)</div>
-                @if (item.Tags is { Count: > 0 }) { <div class="muted">@string.Join(", ", item.Tags)</div> }
-                @if (!string.IsNullOrWhiteSpace(item.Description)) { <div>@item.Description</div> }
-                <div style="white-space:pre-wrap">@item.Content</div>
-                <div class="actions">
-                    <Button Text="Edit" OnClick="() => Edit(item)" />
-                    <Button Text="@(item.Enabled ? "Disable" : "Enable")" OnClick="() => ToggleEnabledAsync(item)" />
-                    <Button Text="@(item.Archived ? "Unarchive" : "Archive")" OnClick="() => ToggleArchiveAsync(item)" />
-                    <Button Text="Delete" OnClick="() => DeleteAsync(item)" />
-                </div>
-            </div>
-        }
+    @if (!string.IsNullOrWhiteSpace(PageErrorMessage))
+    {
+        <div class="error" role="alert" aria-live="polite">@PageErrorMessage</div>
+    }
+
+    <div class="actions memory-filters">
+        <select aria-label="Filter by type" @bind="FilterType" @bind:after="LoadAsync"><option value="">All types</option><option value="memory">Memory</option><option value="skill">Skill</option><option value="rule">Rule</option><option value="procedure">Procedure</option></select>
+        <select aria-label="Filter by archive state" @bind="FilterArchived"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All states</option></select>
+        <select aria-label="Sort items" @bind="SortBy"><option value="updated-desc">Recently updated</option><option value="updated-asc">Oldest updated</option><option value="title">Title</option><option value="created-desc">Recently created</option></select>
+        <input @bind="FilterText" placeholder="Search" aria-label="Search Skills and Memory" />
+        <Button Text="Search" OnClick="LoadAsync" />
     </div>
+
+    @if (IsLoading)
+    {
+        <div class="muted" style="margin-top:12px">Loading…</div>
+    }
+    else if (!VisibleItems.Any())
+    {
+        <div class="muted" style="margin-top:12px">No matching items. Use Add item to create one.</div>
+    }
+
+    @foreach (var item in VisibleItems)
+    {
+        <div class="row" @key="item.Id">
+            <strong>@item.Title</strong>
+            <div class="muted">@item.Type · global · source: @item.Source · last modified by: @item.UpdatedBy · @(item.Archived ? "archived" : item.Enabled ? "enabled" : "disabled")</div>
+            <div class="muted">Created @FormatTime(item.CreatedAt) · Updated @FormatTime(item.UpdatedAt)</div>
+            @if (item.Tags is { Count: > 0 }) { <div class="muted">@string.Join(", ", item.Tags)</div> }
+            @if (!string.IsNullOrWhiteSpace(item.Description)) { <div>@item.Description</div> }
+            <div style="white-space:pre-wrap">@item.Content</div>
+            <div class="actions">
+                <Button Text="Edit" OnClick="() => OpenEditAsync(item)" />
+                <Button Text="@(item.Enabled ? "Disable" : "Enable")" OnClick="() => ToggleEnabledAsync(item)" />
+                <Button Text="@(item.Archived ? "Unarchive" : "Archive")" OnClick="() => ToggleArchiveAsync(item)" />
+                <Button Text="Delete" OnClick="() => DeleteAsync(item)" />
+            </div>
+        </div>
+    }
 </div>
 
 @code {
@@ -83,7 +107,8 @@
     private string SortBy { get; set; } = "updated-desc";
     private string FilterText { get; set; } = "";
     private string? Message { get; set; }
-    private string? ErrorMessage { get; set; }
+    private string? PageErrorMessage { get; set; }
+    private string? EditorErrorMessage { get; set; }
     private bool IsLoading { get; set; }
 
     private IEnumerable<SkillMemoryItem> VisibleItems
@@ -112,7 +137,7 @@
     private async Task LoadAsync()
     {
         IsLoading = true;
-        ErrorMessage = null;
+        PageErrorMessage = null;
         try
         {
             Items = await Api.GetSkillMemoryAsync(
@@ -123,7 +148,7 @@
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
             Items = [];
-            ErrorMessage = BuildApiErrorMessage(ex, "load");
+            PageErrorMessage = BuildApiErrorMessage(ex, "load");
             Logger.LogError(ex, "Failed to load global Skills & Memory from the local Agent API.");
         }
         finally
@@ -132,11 +157,38 @@
         }
     }
 
+    private async Task OpenAddAsync()
+    {
+        ResetEditor();
+        Message = null;
+        EditorErrorMessage = null;
+        await JS.InvokeVoidAsync("mateMcpModal.open", "skills-memory-editor", "#memory-title");
+    }
+
+    private async Task OpenEditAsync(SkillMemoryItem item)
+    {
+        EditingId = item.Id;
+        Title = item.Title;
+        Type = item.Type;
+        Tags = string.Join(", ", item.Tags ?? []);
+        Description = item.Description ?? "";
+        Content = item.Content;
+        Enabled = item.Enabled;
+        Archived = item.Archived;
+        Message = null;
+        EditorErrorMessage = null;
+        await JS.InvokeVoidAsync("mateMcpModal.open", "skills-memory-editor", "#memory-title");
+    }
+
     private async Task SaveAsync()
     {
-        if (string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Content)) return;
+        if (string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Content))
+        {
+            EditorErrorMessage = "Title and Content are required.";
+            return;
+        }
 
-        ErrorMessage = null;
+        EditorErrorMessage = null;
         try
         {
             var tags = Tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
@@ -144,22 +196,27 @@
                 string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(), Content, "user", Enabled, Archived);
             var wasCreating = EditingId is null;
             await Api.SaveSkillMemoryAsync(EditingId, edit);
-            CancelEdit();
+            ResetEditor();
             Message = wasCreating ? "Item created." : "Item updated.";
             await LoadAsync();
+            await CloseEditorAsync();
         }
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
-            ErrorMessage = BuildApiErrorMessage(ex, "save");
+            EditorErrorMessage = BuildApiErrorMessage(ex, "save");
             Logger.LogError(ex, "Failed to save global Skills & Memory item through the local Agent API.");
         }
     }
 
-    private void Edit(SkillMemoryItem item)
+    private async Task CancelDialogAsync()
     {
-        EditingId = item.Id; Title = item.Title; Type = item.Type;
-        Tags = string.Join(", ", item.Tags ?? []); Description = item.Description ?? ""; Content = item.Content; Enabled = item.Enabled; Archived = item.Archived; Message = null; ErrorMessage = null;
+        ResetEditor();
+        EditorErrorMessage = null;
+        await CloseEditorAsync();
     }
+
+    private async Task CloseEditorAsync()
+        => await JS.InvokeVoidAsync("mateMcpModal.close", "skills-memory-editor");
 
     private async Task ToggleEnabledAsync(SkillMemoryItem item)
         => await UpdateStateAsync(item, !item.Enabled, item.Archived, item.Enabled ? "Item disabled." : "Item enabled.");
@@ -169,7 +226,7 @@
 
     private async Task UpdateStateAsync(SkillMemoryItem item, bool enabled, bool archived, string message)
     {
-        ErrorMessage = null;
+        PageErrorMessage = null;
         try
         {
             var edit = new SkillMemoryEdit(item.Title, item.Type, "global", null, item.Tags, item.Description, item.Content, "user", enabled, archived);
@@ -179,33 +236,39 @@
         }
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
-            ErrorMessage = BuildApiErrorMessage(ex, "update");
+            PageErrorMessage = BuildApiErrorMessage(ex, "update");
             Logger.LogError(ex, "Failed to update global Skills & Memory item {SkillMemoryId} state.", item.Id);
         }
     }
 
     private static string FormatTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
-    private void CancelEdit()
+    private void ResetEditor()
     {
-        EditingId = null; Title = ""; Type = "memory"; Tags = ""; Description = ""; Content = ""; Enabled = true; Archived = false;
+        EditingId = null;
+        Title = "";
+        Type = "memory";
+        Tags = "";
+        Description = "";
+        Content = "";
+        Enabled = true;
+        Archived = false;
     }
 
     private async Task DeleteAsync(SkillMemoryItem item)
     {
         if (!await JS.InvokeAsync<bool>("confirm", $"Delete '{item.Title}' permanently? This cannot be undone.")) return;
 
-        ErrorMessage = null;
+        PageErrorMessage = null;
         try
         {
             await Api.DeleteSkillMemoryAsync(item.Id);
-            if (EditingId == item.Id) CancelEdit();
             Message = "Item deleted.";
             await LoadAsync();
         }
         catch (Exception ex) when (IsRecoverableApiFailure(ex))
         {
-            ErrorMessage = BuildApiErrorMessage(ex, "delete");
+            PageErrorMessage = BuildApiErrorMessage(ex, "delete");
             Logger.LogError(ex, "Failed to delete global Skills & Memory item {SkillMemoryId} through the local Agent API.", item.Id);
         }
     }
