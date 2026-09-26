@@ -2,6 +2,14 @@ namespace MateMCP.Agent.Companion;
 
 public partial class MainPage : ContentPage
 {
+#if MACCATALYST
+    [System.Runtime.InteropServices.DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    private static extern void SendBooleanProperty(
+        IntPtr receiver,
+        IntPtr selector,
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.I1)] bool value);
+#endif
+
     public MainPage()
     {
         InitializeComponent();
@@ -12,16 +20,14 @@ public partial class MainPage : ContentPage
         Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializingEventArgs e)
     {
 #if MACCATALYST
-        // WebKit exposes tabFocusesLinks to the Catalyst/iOS runtime starting in 26,
+        // WebKit exposes setTabFocusesLinks: on the Catalyst/iOS 26+ runtime,
         // but the current .NET Catalyst binding does not expose the managed property.
-        // Set it through KVC before WKWebView creation so plain Tab participates in
-        // normal form-control focus traversal. Do not gate this on a selector capability check:
-        // that check can report false for this WebKit property on Catalyst.
+        // Invoke the Objective-C setter directly before WKWebView creation so plain
+        // Tab participates in normal form-control focus traversal.
         if (OperatingSystem.IsMacCatalystVersionAtLeast(26))
         {
-            using var key = new Foundation.NSString("tabFocusesLinks");
-            using var value = Foundation.NSNumber.FromBoolean(true);
-            e.Configuration.Preferences.SetValueForKey(value, key);
+            var selector = ObjCRuntime.Selector.GetHandle("setTabFocusesLinks:");
+            SendBooleanProperty(e.Configuration.Preferences.Handle, selector, true);
         }
 #endif
     }
