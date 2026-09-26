@@ -288,35 +288,86 @@
         }
         else if (Section == "secrets")
         {
-            <div class="grid">
-                <div class="panel">
-                    <strong>Add / replace secret</strong>
-                    <div class="field"><label for="secret-name">Name</label><input id="secret-name" @bind="SecretName" autocomplete="off" /></div>
-                    <div class="field"><label for="secret-description">Description</label><input id="secret-description" @bind="SecretDescription" /></div>
-                    <div class="field"><label for="secret-value">Secret value</label><input id="secret-value" type="password" @bind="SecretValue" autocomplete="new-password" /></div>
-                    <div class="field" role="group" aria-labelledby="secret-allowed-use-label"><span id="secret-allowed-use-label">Allowed use</span>
-                        <label><input type="checkbox" @bind="SecretAllowShell" /> Shell / terminal credential prompts</label>
-                        <label><input type="checkbox" @bind="SecretAllowUi" /> Browser / desktop text and password fields</label>
+            <dialog id="secret-editor" class="companion-dialog secret-dialog" aria-labelledby="secret-editor-title">
+                <div class="companion-dialog-surface">
+                    <div class="companion-dialog-header">
+                        <strong id="secret-editor-title">@(EditingSecretName is null ? "Add secret" : "Edit secret")</strong>
+                        <button type="button" class="companion-dialog-close" aria-label="Close secret editor" @onclick="CancelSecretEditorAsync">×</button>
                     </div>
-                    <Button Text="Save secret" OnClick="SaveSecretAsync" />
-                    <div class="muted" style="margin-top:10px">Secret values are sent only to the loopback Agent API and are never read back or shown in this UI.</div>
-                </div>
-                <div class="panel">
-                    <strong>Stored secrets</strong>
-                    @if (Secrets.Count == 0)
-                    {
-                        <div class="muted" style="margin-top:10px">No stored secrets.</div>
-                    }
-                    @foreach (var secret in Secrets)
-                    {
-                        <div class="row" @key="secret.Name">
-                            <strong>@secret.Name</strong>
-                            <div>@secret.Description</div>
-                            <div class="muted">Allowed: @string.Join(", ", secret.AllowedTools ?? new[] { "shell_session_send_secret" })</div>
-                            <div class="actions"><Button Text="Delete" OnClick="() => DeleteSecretAsync(secret.Name)" /></div>
+                    <div class="companion-dialog-body">
+                        @if (EditingSecretName is null)
+                        {
+                            <div class="field"><label for="secret-name">Name</label><input id="secret-name" autofocus @bind="SecretName" autocomplete="off" /></div>
+                        }
+                        else
+                        {
+                            <div class="field"><label for="secret-name">Name</label><input id="secret-name" value="@SecretName" readonly autocomplete="off" /></div>
+                        }
+
+                        <div class="field"><label for="secret-description">Description</label><input id="secret-description" @bind="SecretDescription" /></div>
+
+                        @if (EditingSecretName is null)
+                        {
+                            <div class="field"><label for="secret-value">Secret value</label><input id="secret-value" type="password" @bind="SecretValue" autocomplete="new-password" /></div>
+                        }
+                        else
+                        {
+                            <label class="update-toggle secret-replace-toggle">
+                                <input type="checkbox" @bind="SecretReplaceValue" />
+                                <span>Replace stored value</span>
+                            </label>
+                            <div class="muted secret-replace-note">Leave replacement off to edit metadata without reading or rewriting the stored secret.</div>
+                            @if (SecretReplaceValue)
+                            {
+                                <div class="field secret-replacement-field"><label for="secret-value">New secret value</label><input id="secret-value" type="password" @bind="SecretValue" autocomplete="new-password" /></div>
+                            }
+                        }
+
+                        <div class="field" role="group" aria-labelledby="secret-allowed-use-label"><span id="secret-allowed-use-label">Allowed use</span>
+                            <label><input type="checkbox" @bind="SecretAllowShell" /> Shell / terminal credential prompts</label>
+                            <label><input type="checkbox" @bind="SecretAllowUi" /> Browser / desktop text and password fields</label>
                         </div>
-                    }
+
+                        <div class="actions">
+                            <Button Text="Save" OnClick="SaveSecretEditorAsync" />
+                            <Button Text="Cancel" OnClick="CancelSecretEditorAsync" />
+                        </div>
+                        <div class="muted" style="margin-top:10px">Secret values are sent only to the loopback Agent API and are never read back or shown in this UI.</div>
+                        @if (!string.IsNullOrWhiteSpace(SecretEditorError))
+                        {
+                            <div class="error" role="alert" aria-live="polite">@SecretEditorError</div>
+                        }
+                    </div>
                 </div>
+            </dialog>
+
+            <div class="panel">
+                <div class="toolbar secret-toolbar">
+                    <div>
+                        <strong>Stored secrets</strong>
+                        @if (!string.IsNullOrWhiteSpace(SecretMessage))
+                        {
+                            <div class="muted" role="status" style="margin-top:6px">@SecretMessage</div>
+                        }
+                    </div>
+                    <Button Text="Add secret" OnClick="OpenAddSecretAsync" />
+                </div>
+                @if (Secrets.Count == 0)
+                {
+                    <div class="muted" style="margin-top:10px">No stored secrets.</div>
+                }
+                @foreach (var secret in Secrets)
+                {
+                    <div class="row" @key="secret.Name">
+                        <strong>@secret.Name</strong>
+                        <div>@secret.Description</div>
+                        <div class="muted">Allowed: @string.Join(", ", secret.AllowedTools ?? new[] { "shell_session_send_secret" })</div>
+                        <div class="actions">
+                            <Button Text="Edit" OnClick="() => OpenEditSecretAsync(secret)" />
+                            <Button Text="Delete" OnClick="() => DeleteSecretAsync(secret.Name)" />
+                        </div>
+                    </div>
+                }
             </div>
         }
         else if (Section == "projects")
@@ -443,11 +494,15 @@
     private int ShellOffset { get; set; }
     private string ShellOutput { get; set; } = string.Empty;
     private string ShellInput { get; set; } = string.Empty;
+    private string? EditingSecretName { get; set; }
     private string SecretName { get; set; } = string.Empty;
     private string SecretDescription { get; set; } = string.Empty;
     private string SecretValue { get; set; } = string.Empty;
     private bool SecretAllowShell { get; set; } = true;
     private bool SecretAllowUi { get; set; } = true;
+    private bool SecretReplaceValue { get; set; }
+    private string? SecretEditorError { get; set; }
+    private string? SecretMessage { get; set; }
     private bool DeviceUrlCopied { get; set; }
     private DateOnly AuditDate { get; set; } = DateOnly.FromDateTime(DateTime.Now);
     private string AuditProjectFilter { get; set; } = string.Empty;
@@ -753,9 +808,85 @@
         ShellSessions = await Api.GetShellSessionsAsync(_disposeCts.Token);
     }
 
-    private async Task SaveSecretAsync()
+    private async Task OpenAddSecretAsync()
     {
-        if (string.IsNullOrWhiteSpace(SecretName) || string.IsNullOrEmpty(SecretValue)) return;
+        ResetSecretEditor();
+        SecretMessage = null;
+        await JS.InvokeVoidAsync("mateMcpModal.open", "secret-editor", "#secret-name");
+    }
+
+    private async Task OpenEditSecretAsync(UserSecretInfo secret)
+    {
+        ResetSecretEditor();
+        EditingSecretName = secret.Name;
+        SecretName = secret.Name;
+        SecretDescription = secret.Description ?? string.Empty;
+        var allowed = secret.AllowedTools ?? ["shell_session_send_secret"];
+        SecretAllowShell = allowed.Contains("shell_session_send_secret", StringComparer.Ordinal);
+        SecretAllowUi = allowed.Contains("ui_fill_secret", StringComparer.Ordinal)
+            || allowed.Contains("browser_fill_secret", StringComparer.Ordinal);
+        SecretMessage = null;
+        await JS.InvokeVoidAsync("mateMcpModal.open", "secret-editor", "#secret-description");
+    }
+
+    private async Task SaveSecretEditorAsync()
+    {
+        var name = SecretName.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            SecretEditorError = "Secret name is required.";
+            return;
+        }
+
+        var allowed = BuildSecretAllowedTools();
+        var description = string.IsNullOrWhiteSpace(SecretDescription) ? null : SecretDescription.Trim();
+        SecretEditorError = null;
+
+        try
+        {
+            if (EditingSecretName is null)
+            {
+                if (string.IsNullOrEmpty(SecretValue))
+                {
+                    SecretEditorError = "Secret value is required when adding a secret.";
+                    return;
+                }
+
+                await Api.SaveSecretAsync(name, SecretValue, description, allowed, _disposeCts.Token);
+                SecretMessage = "Secret added.";
+            }
+            else if (SecretReplaceValue)
+            {
+                if (string.IsNullOrEmpty(SecretValue))
+                {
+                    SecretEditorError = "Enter a new secret value to replace the stored value.";
+                    return;
+                }
+
+                await Api.SaveSecretAsync(EditingSecretName, SecretValue, description, allowed, _disposeCts.Token);
+                SecretMessage = "Secret metadata and stored value updated.";
+            }
+            else
+            {
+                await Api.UpdateSecretMetadataAsync(EditingSecretName, description, allowed, _disposeCts.Token);
+                SecretMessage = "Secret metadata updated; stored value was preserved.";
+            }
+
+            SecretValue = string.Empty;
+            Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
+            await LoadAuditAsync();
+            await CloseSecretEditorAsync();
+            ResetSecretEditor();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            SecretValue = string.Empty;
+            SecretEditorError = "Could not save the secret. Check that the local Agent is running and matches this Companion version.";
+        }
+    }
+
+    private IReadOnlyCollection<string> BuildSecretAllowedTools()
+    {
         var allowed = new List<string>();
         if (SecretAllowShell) allowed.Add("shell_session_send_secret");
         if (SecretAllowUi)
@@ -763,16 +894,38 @@
             allowed.Add("ui_fill_secret");
             allowed.Add("browser_fill_secret");
         }
-        await Api.SaveSecretAsync(SecretName.Trim(), SecretValue, string.IsNullOrWhiteSpace(SecretDescription) ? null : SecretDescription.Trim(), allowed, _disposeCts.Token);
+        return allowed;
+    }
+
+    private async Task CancelSecretEditorAsync()
+    {
         SecretValue = string.Empty;
-        Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
-        await LoadAuditAsync();
+        SecretEditorError = null;
+        await CloseSecretEditorAsync();
+        ResetSecretEditor();
+    }
+
+    private async Task CloseSecretEditorAsync()
+        => await JS.InvokeVoidAsync("mateMcpModal.close", "secret-editor");
+
+    private void ResetSecretEditor()
+    {
+        EditingSecretName = null;
+        SecretName = string.Empty;
+        SecretDescription = string.Empty;
+        SecretValue = string.Empty;
+        SecretAllowShell = true;
+        SecretAllowUi = true;
+        SecretReplaceValue = false;
+        SecretEditorError = null;
     }
 
     private async Task DeleteSecretAsync(string name)
     {
         await Api.DeleteSecretAsync(name, _disposeCts.Token);
         Secrets = await Api.GetSecretsAsync(_disposeCts.Token);
+        SecretMessage = "Secret deleted.";
+        await LoadAuditAsync();
     }
 
     private (DateTimeOffset From, DateTimeOffset To) GetAuditRange()

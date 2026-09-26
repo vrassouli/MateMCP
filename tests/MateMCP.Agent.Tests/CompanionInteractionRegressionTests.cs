@@ -234,6 +234,33 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_secret_manager_edits_metadata_without_revealing_plaintext_and_requires_explicit_replacement()
+    {
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var client = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "AgentApiClient.cs"));
+        var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
+
+        Assert.Contains("<dialog id=\"secret-editor\"", main, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Add secret\"", main, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Edit\"", main, StringComparison.Ordinal);
+        Assert.Contains("Replace stored value", main, StringComparison.Ordinal);
+        Assert.Contains("SecretReplaceValue", main, StringComparison.Ordinal);
+        Assert.Contains("UpdateSecretMetadataAsync", main, StringComparison.Ordinal);
+        Assert.Contains("SecretValue = string.Empty;", main, StringComparison.Ordinal);
+        Assert.Contains("stored value was preserved", main, StringComparison.Ordinal);
+        Assert.Contains("Enter a new secret value to replace the stored value.", main, StringComparison.Ordinal);
+        Assert.Contains("Secrets = await Api.GetSecretsAsync", main, StringComparison.Ordinal);
+        Assert.Contains("await CloseSecretEditorAsync();", main, StringComparison.Ordinal);
+
+        Assert.Contains("PutAsJsonAsync($\"secrets/{Uri.EscapeDataString(name)}\"", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetSecretValue", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResolveSecret", client, StringComparison.Ordinal);
+        Assert.Contains("window.mateMcpModal", index, StringComparison.Ordinal);
+        Assert.Contains("const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;", index, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Projects_uses_native_folder_picker_and_reloads_after_mutations_without_local_refresh_button()
     {
         var root = FindRepositoryRoot();
