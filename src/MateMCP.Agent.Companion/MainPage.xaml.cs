@@ -44,6 +44,35 @@ public partial class MainPage : ContentPage
             var selector = ObjCRuntime.Selector.GetHandle("setTabFocusesLinks:");
             SendBooleanProperty(e.WebView.Configuration.Preferences.Handle, selector, true);
         }
+
+        InstallNativeTabKeyCommands(e.WebView);
 #endif
     }
+
+#if MACCATALYST
+    private static void InstallNativeTabKeyCommands(UIKit.UIResponder responder)
+    {
+        var current = responder.NextResponder;
+        while (current is not null and not UIKit.UIViewController)
+            current = current.NextResponder;
+
+        if (current is not UIKit.UIViewController controller)
+            return;
+
+        using var tabInput = new Foundation.NSString("	");
+        using var tab = UIKit.UIKeyCommand.Create(
+            tabInput,
+            (UIKit.UIKeyModifierFlags)0,
+            new ObjCRuntime.Selector("insertTab:"));
+        using var shiftTab = UIKit.UIKeyCommand.Create(
+            tabInput,
+            UIKit.UIKeyModifierFlags.Shift,
+            new ObjCRuntime.Selector("insertBacktab:"));
+
+        tab.WantsPriorityOverSystemBehavior = true;
+        shiftTab.WantsPriorityOverSystemBehavior = true;
+        controller.AddKeyCommand(tab);
+        controller.AddKeyCommand(shiftTab);
+    }
+#endif
 }
