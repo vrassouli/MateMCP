@@ -31,4 +31,19 @@ public partial class MainPage : ContentPage
         }
 #endif
     }
+
+    private static void OnBlazorWebViewInitialized(
+        object? sender,
+        Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e)
+    {
+#if MACCATALYST
+        // Re-apply the preference to the actual WKWebView instance. This catches
+        // any configuration replacement/copying that happens during WebView creation.
+        if (OperatingSystem.IsMacCatalystVersionAtLeast(26))
+        {
+            var selector = ObjCRuntime.Selector.GetHandle("setTabFocusesLinks:");
+            SendBooleanProperty(e.WebView.Configuration.Preferences.Handle, selector, true);
+        }
+#endif
+    }
 }
