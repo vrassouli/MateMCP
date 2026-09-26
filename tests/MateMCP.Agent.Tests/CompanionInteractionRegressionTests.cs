@@ -200,12 +200,10 @@ public sealed class CompanionInteractionRegressionTests
         var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
 
         Assert.Contains("BlazorWebViewInitializing=\"OnBlazorWebViewInitializing\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("OperatingSystem.IsMacCatalystVersionAtLeast(26)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("e.Configuration.Preferences.TabFocusesLinks = true;", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("new ObjCRuntime.Selector(\"setTabFocusesLinks:\")", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("RespondsToSelector(setTabFocusesLinks)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("SetValueForKey(value, key)", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("TabFocusesLinks", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("setTabFocusesLinks:", codeBehind, StringComparison.Ordinal);
         Assert.Contains("event.key !== 'Tab'", index, StringComparison.Ordinal);
+        Assert.DoesNotContain("event.defaultPrevented", index, StringComparison.Ordinal);
         Assert.Contains("const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;", index, StringComparison.Ordinal);
     }
 
