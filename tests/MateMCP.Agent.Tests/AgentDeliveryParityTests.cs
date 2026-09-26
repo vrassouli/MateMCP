@@ -71,6 +71,27 @@ public sealed class AgentDeliveryParityTests
     }
 
     [Fact]
+    public void Windows_elevated_agent_keeps_companion_subtree_at_medium_integrity()
+    {
+        var root = FindRepositoryRoot();
+        var mode = File.ReadAllText(Path.Combine(root, "scripts", "configure-agent-mode-windows.ps1"));
+        var companion = File.ReadAllText(Path.Combine(root, "scripts", "install-companion-windows.ps1"));
+
+        Assert.Contains("$CompanionRoot = Join-Path $AgentRoot 'Companion'", mode, StringComparison.Ordinal);
+        Assert.Contains("& icacls.exe $AgentRoot /setintegritylevel '(OI)(CI)H'", mode, StringComparison.Ordinal);
+        Assert.Contains("& icacls.exe $CompanionRoot /setintegritylevel '(OI)(CI)M' /T /C", mode, StringComparison.Ordinal);
+        Assert.Contains("& icacls.exe $Target /setintegritylevel '(OI)(CI)M' /T /C", companion, StringComparison.Ordinal);
+
+        var highRoot = mode.IndexOf("& icacls.exe $AgentRoot /setintegritylevel '(OI)(CI)H'", StringComparison.Ordinal);
+        var mediumCompanion = mode.IndexOf("& icacls.exe $CompanionRoot /setintegritylevel '(OI)(CI)M' /T /C", StringComparison.Ordinal);
+        Assert.True(highRoot >= 0 && mediumCompanion > highRoot);
+
+        var copyPayload = companion.IndexOf("Copy-Item (Join-Path $Source '*') $Target -Recurse -Force", StringComparison.Ordinal);
+        var repairIntegrity = companion.IndexOf("& icacls.exe $Target /setintegritylevel '(OI)(CI)M' /T /C", StringComparison.Ordinal);
+        Assert.True(copyPayload >= 0 && repairIntegrity > copyPayload);
+    }
+
+    [Fact]
     public void Agent_mode_is_preserved_across_upgrade_and_elevated_startup_is_removed_on_uninstall()
     {
         var root = FindRepositoryRoot();

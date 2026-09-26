@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $ConfigRoot = Join-Path $env:APPDATA 'MateMCP'
+$CompanionRoot = Join-Path $AgentRoot 'Companion'
 $ModeFile = Join-Path $ConfigRoot 'agent-run-mode.txt'
 $StartupDirectory = [Environment]::GetFolderPath('Startup')
 $StartupShortcut = Join-Path $StartupDirectory 'MateMCP Agent.lnk'
@@ -66,6 +67,15 @@ else {
     $shortcut.WindowStyle = 7
     $shortcut.Description = 'MateMCP Agent (background)'
     $shortcut.Save()
+}
+
+# The Agent and Companion share %LOCALAPPDATA%\MateMCP, but Companion and
+# WebView2 must remain writable by the normal medium-integrity desktop user.
+# Elevated mode protects the Agent root; explicitly override only the Companion
+# subtree so a later non-elevated launch does not inherit High integrity.
+if (Test-Path $CompanionRoot) {
+    & icacls.exe $CompanionRoot /setintegritylevel '(OI)(CI)M' /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restore Medium integrity on the MateMCP Companion subtree.' }
 }
 
 Set-Content -Path $ModeFile -Value $Mode -Encoding ASCII
