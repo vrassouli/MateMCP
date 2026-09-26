@@ -206,6 +206,11 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("ObjCRuntime.Selector.GetHandle(\"setTabFocusesLinks:\")", codeBehind, StringComparison.Ordinal);
         Assert.Contains("SendBooleanProperty(e.Configuration.Preferences.Handle, selector, true)", codeBehind, StringComparison.Ordinal);
         Assert.Contains("SendBooleanProperty(e.WebView.Configuration.Preferences.Handle, selector, true)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("InstallNativeTabKeyCommands(e.WebView)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("UIKit.UIKeyCommand.Create(", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("new ObjCRuntime.Selector(\"insertTab:\")", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("new ObjCRuntime.Selector(\"insertBacktab:\")", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("WantsPriorityOverSystemBehavior = true", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("SetValueForKey", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("RespondsToSelector", codeBehind, StringComparison.Ordinal);
         Assert.Contains("event.key !== 'Tab'", index, StringComparison.Ordinal);
