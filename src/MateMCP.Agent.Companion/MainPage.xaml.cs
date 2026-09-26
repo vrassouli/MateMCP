@@ -62,7 +62,7 @@ public partial class MainPage : ContentPage
         using var tabInput = new Foundation.NSString("	");
         using var tab = UIKit.UIKeyCommand.Create(
             tabInput,
-            UIKit.UIKeyModifierFlags.None,
+            (UIKit.UIKeyModifierFlags)0,
             new ObjCRuntime.Selector("insertTab:"));
         using var shiftTab = UIKit.UIKeyCommand.Create(
             tabInput,
