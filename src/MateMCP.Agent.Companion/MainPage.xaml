@@ -3,9 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:components="clr-namespace:MateMCP.Agent.Companion.Components"
              x:Class="MateMCP.Agent.Companion.MainPage">
-    <BlazorWebView HostPage="wwwroot/index.html"
-                   BlazorWebViewInitializing="OnBlazorWebViewInitializing"
-                   BlazorWebViewInitialized="OnBlazorWebViewInitialized">
+    <BlazorWebView HostPage="wwwroot/index.html">
         <BlazorWebView.RootComponents>
             <RootComponent Selector="#app" ComponentType="{x:Type components:Main}" />
         </BlazorWebView.RootComponents>

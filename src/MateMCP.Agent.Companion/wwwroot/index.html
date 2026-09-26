@@ -91,7 +91,7 @@
             // Keep normal browser semantics for text editing, but explicitly implement Tab and
             // Shift+Tab focus traversal. When a modal dialog is open, focus stays inside it.
             document.addEventListener('keydown', event => {
-                if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
+                if (event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
 
                 const selector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
                 const openDialogs = document.querySelectorAll('dialog[open]');
