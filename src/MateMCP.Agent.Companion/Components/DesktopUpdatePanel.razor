@@ -49,10 +49,11 @@
         <div class="error">@BackgroundUpdate.LastFailure</div>
     }
     <div class="row update-toggle-row">
-        <label class="update-toggle">
-            <input type="checkbox" checked="@AutoUpdateEnabled" @onchange="SetAutoUpdateAsync" disabled="@Updating" />
-            <span>Automatically install new Desktop builds in the background</span>
-        </label>
+        <Checkbox TValue="bool"
+                  Value="@AutoUpdateEnabled"
+                  ValueChanged="SetAutoUpdateAsync"
+                  Label="Automatically install new Desktop builds in the background"
+                  disabled="@Updating" />
         <div class="muted">Auto Update is opt-in. The Agent checks and verifies official MateMCP Desktop packages even while Companion is closed, and defers installation while shell work or approvals are active.</div>
     </div>
     @if (Updating)
@@ -178,9 +179,8 @@
         }
     }
 
-    private async Task SetAutoUpdateAsync(ChangeEventArgs args)
+    private async Task SetAutoUpdateAsync(bool requested)
     {
-        var requested = args.Value is bool value && value;
         var previous = AutoUpdateEnabled;
         AutoUpdateEnabled = requested;
         Error = null;

@@ -219,6 +219,45 @@ html, body {
 }
 
 
+/* Managed pages own scrolling inside their primary content region instead of the page. */
+.content-scroll-managed {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.content-scroll-managed > .error {
+    flex: 0 0 auto;
+}
+
+.dashboard-tabs {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboard-tabs > .header {
+    flex: 0 0 auto;
+}
+
+.dashboard-tabs > .panels {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.dashboard-tabs > .panels > .tab-panel {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding-bottom: 16px;
+}
+
+
 .toolbar {
     display: flex;
     justify-content: space-between;
@@ -385,18 +424,61 @@ html, body {
     margin-top: 10px;
 }
 
+.audit-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0;
+}
+
+.audit-controls {
+    flex: 0 0 auto;
+}
+
+.audit-toolbar {
+    margin-bottom: 10px;
+}
+
+.audit-date-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+.audit-date-nav > * {
+    flex: 0 0 auto;
+}
+
+.audit-date-nav .bui-date-field {
+    width: 170px;
+}
+
 .audit-filters {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto;
-    gap: 12px;
+    grid-template-columns: minmax(160px, .8fr) minmax(190px, 1fr) auto;
+    gap: 8px;
     align-items: end;
-    margin-top: 14px;
+    margin-top: 8px;
 }
 
 .audit-filters .field { margin-bottom: 0; }
-.audit-filter-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.audit-filter-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .audit-filter-actions .actions { margin-top: 0; }
-.audit-live-status { margin-top: 8px; }
+.audit-live-status { margin-top: 6px; }
+.audit-cleanup-actions { margin-top: 8px; }
+.audit-results {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    margin-top: 10px;
+    padding-right: 4px;
+}
+.audit-empty { padding: 10px 0; }
 .audit-row-heading { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .audit-row {
     min-width: 0;
@@ -529,6 +611,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 
 .workspace-path-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.shell-input-field { margin-top: 12px; }
+.secret-allowed-use { gap: 8px; }
 
 .terminal {
     background: #111;
@@ -627,6 +711,17 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     .dashboard-primary-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
 }
 
+@media (max-width: 900px) {
+    .audit-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .audit-date-nav {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+}
+
 @media (max-width: 760px) {
     html, body { overflow: hidden; }
     #app { height: 100vh; min-height: 0; overflow: hidden; }
@@ -644,16 +739,26 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     .memory-filters { grid-template-columns: 1fr; }
     .audit-filters { grid-template-columns: 1fr; }
     .audit-filter-actions { align-items: flex-start; }
+    .audit-date-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .audit-date-nav > *, .audit-date-nav .bui-date-field { width: 100%; min-width: 0; }
     .session-layout { grid-template-columns: 1fr; }
     #blazor-error-ui { left: 12px; right: 12px; bottom: 12px; }
     #blazor-error-ui .blazor-error-content { align-items: flex-start; }
 }
 
-.log-toolbar { align-items: flex-start; }
-.log-filters { display: grid; grid-template-columns: minmax(140px, 220px) minmax(220px, 1fr) auto; gap: 12px; align-items: end; }
+.agent-logs-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0;
+}
+.log-toolbar { flex: 0 0 auto; align-items: flex-start; margin-bottom: 12px; }
+.log-filters { flex: 0 0 auto; display: grid; grid-template-columns: minmax(140px, 220px) minmax(220px, 1fr) auto; gap: 10px; align-items: end; }
 .log-filters .field { margin-bottom: 0; }
 .log-filters .actions { margin-top: 0; }
-.log-terminal { min-height: 420px; max-height: 68vh; white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-terminal { flex: 1 1 auto; min-height: 0; max-height: none; margin-top: 14px; white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.log-follow-note { flex: 0 0 auto; margin-top: 8px; }
 .log-entry { margin-bottom: 3px; }
 .log-time, .log-category { color: #aaa; }
 .log-level { display: inline-block; min-width: 86px; font-weight: 600; }
