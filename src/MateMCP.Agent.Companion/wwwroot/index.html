@@ -87,27 +87,38 @@
                 }
             };
 
-            // Mac Catalyst WebView keyboard focus can fail to advance between HTML controls.
-            // Keep normal browser semantics for text editing, but explicitly implement Tab and
-            // Shift+Tab focus traversal. When a modal dialog is open, focus stays inside it.
+            // Mac Catalyst WebView keyboard focus can fail to advance between HTML controls,
+            // and in some cases (before any element inside the page has WebKit-level focus,
+            // e.g. right after launch or after a native dialog closes) the physical Tab key
+            // never reaches the DOM as a keydown at all -- UIKit's own responder chain can
+            // consume it first. To cover that case, MateMcpApplication/MateMcpNativeTabBridge
+            // on the native (Platforms/MacCatalyst) side register a UIKeyCommand for Tab and
+            // call window.mateMcpFocus.advance() directly. advance() is kept standalone so
+            // both that native bridge and the ordinary DOM keydown listener below drive the
+            // exact same traversal logic instead of duplicating it. See GitHub issue #277.
+            window.mateMcpFocus = {
+                advance(shiftKey) {
+                    const selector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+                    const openDialogs = document.querySelectorAll('dialog[open]');
+                    const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;
+                    const focusable = Array.from(root.querySelectorAll(selector)).filter(element => {
+                        const style = window.getComputedStyle(element);
+                        return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
+                    });
+                    if (focusable.length === 0) return false;
+
+                    const current = focusable.indexOf(document.activeElement);
+                    const next = shiftKey
+                        ? (current <= 0 ? focusable.length - 1 : current - 1)
+                        : (current < 0 || current === focusable.length - 1 ? 0 : current + 1);
+                    focusable[next].focus();
+                    return true;
+                }
+            };
+
             document.addEventListener('keydown', event => {
                 if (event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-
-                const selector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-                const openDialogs = document.querySelectorAll('dialog[open]');
-                const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;
-                const focusable = Array.from(root.querySelectorAll(selector)).filter(element => {
-                    const style = window.getComputedStyle(element);
-                    return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
-                });
-                if (focusable.length === 0) return;
-
-                const current = focusable.indexOf(document.activeElement);
-                const next = event.shiftKey
-                    ? (current <= 0 ? focusable.length - 1 : current - 1)
-                    : (current < 0 || current === focusable.length - 1 ? 0 : current + 1);
-                event.preventDefault();
-                focusable[next].focus();
+                if (window.mateMcpFocus.advance(event.shiftKey)) event.preventDefault();
             }, true);
 
             // Terminal-style follow mode. Output keeps the viewport pinned to the latest line

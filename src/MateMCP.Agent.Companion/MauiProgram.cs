@@ -3,6 +3,10 @@ using CommunityToolkit.Maui;
 using CommunityToolkit.Maui.Storage;
 using MateMCP.Agent.Companion.Services;
 
+#if MACCATALYST
+using Microsoft.AspNetCore.Components.WebView.Maui;
+#endif
+
 namespace MateMCP.Agent.Companion;
 
 public static class MauiProgram
@@ -26,6 +30,16 @@ public static class MauiProgram
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
+#endif
+
+#if MACCATALYST
+        // Keep a reference to the Companion window's WKWebView so MateMcpApplication's
+        // application-wide Tab/Shift+Tab UIKeyCommands can forward keypresses into the
+        // page's own focus-traversal helper when the WebView itself doesn't handle Tab.
+        // See MateMcpNativeTabBridge and MateMcpApplication. Refs #277.
+        BlazorWebViewHandler.BlazorWebViewMapper.AppendToMapping(
+            "MateMcpNativeTabBridge",
+            (handler, _) => MateMcpNativeTabBridge.ActiveWebView = handler.PlatformView);
 #endif
 
         return builder.Build();

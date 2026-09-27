@@ -44,12 +44,23 @@ public sealed class CompanionInteractionRegressionTests
     [Fact]
     public void Companion_webview_supports_tab_and_shift_tab_focus_traversal()
     {
-        var index = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
+        var root = FindRepositoryRoot();
+        var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
+        var catalystApplication = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Platforms", "MacCatalyst", "MateMcpApplication.cs"));
+        var catalystBridge = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Platforms", "MacCatalyst", "MateMcpNativeTabBridge.cs"));
 
         Assert.Contains("event.key !== 'Tab'", index, StringComparison.Ordinal);
         Assert.Contains("event.shiftKey", index, StringComparison.Ordinal);
         Assert.Contains("focusable[next].focus()", index, StringComparison.Ordinal);
         Assert.Contains("event.preventDefault()", index, StringComparison.Ordinal);
+        Assert.Contains("WantsPriorityOverSystemBehavior = true", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("mateMcpTabForward:", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("mateMcpTabBackward:", catalystApplication, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Selector(\"insertTab:\")", catalystApplication, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Selector(\"insertBacktab:\")", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("MateMcpNativeTabBridge.AdvanceFocus", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("window.mateMcpFocus.advance", catalystBridge, StringComparison.Ordinal);
+        Assert.Contains("EvaluateJavaScript", catalystBridge, StringComparison.Ordinal);
     }
 
     [Fact]
