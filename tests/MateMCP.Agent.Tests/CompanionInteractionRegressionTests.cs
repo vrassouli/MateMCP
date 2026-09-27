@@ -66,7 +66,7 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("UIKeyModifierFlags.Shift", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("base.SendEvent(uievent)", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("MateMcpNativeTabBridge.AdvanceFocus", catalystApplication, StringComparison.Ordinal);
-        Assert.Contains("private const string EscapeCharacter = \"\\u001b\"", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("key.KeyCode != UIKeyboardHidUsage.KeyboardEscape", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("ForwardEscapeToDom(pressesEvent);", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("MateMcpNativeTabBridge.CloseTopDialog();", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("CreatePriorityCommand", catalystBridge, StringComparison.Ordinal);

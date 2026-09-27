@@ -25,7 +25,6 @@ public class MateMcpApplication : UIApplication
     // character instead of a tab character plus a Shift modifier.
     private const string TabCharacter = "\t";
     private const string BackTabCharacter = "\u0019";
-    private const string EscapeCharacter = "\u001b";
 
     public override UIKeyCommand[] KeyCommands =>
     [
@@ -95,7 +94,7 @@ public class MateMcpApplication : UIApplication
         foreach (var press in pressesEvent.AllPresses)
         {
             var key = press.Key;
-            if (key is null || key.CharactersIgnoringModifiers != EscapeCharacter)
+            if (key is null || key.KeyCode != UIKeyboardHidUsage.KeyboardEscape)
             {
                 continue;
             }
