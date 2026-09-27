@@ -66,6 +66,9 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("UIKeyModifierFlags.Shift", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("base.SendEvent(uievent)", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("MateMcpNativeTabBridge.AdvanceFocus", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("private const string EscapeCharacter = \"\\u001b\"", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("ForwardEscapeToDom(pressesEvent);", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("MateMcpNativeTabBridge.CloseTopDialog();", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("CreatePriorityCommand", catalystBridge, StringComparison.Ordinal);
         Assert.Contains("WantsPriorityOverSystemBehavior = true", catalystBridge, StringComparison.Ordinal);
         Assert.Contains("controller.AddKeyCommand(_controllerForwardCommand)", catalystBridge, StringComparison.Ordinal);
@@ -284,6 +287,9 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("Title and Content are required.", panel, StringComparison.Ordinal);
 
         Assert.Contains("window.mateMcpModal", index, StringComparison.Ordinal);
+        Assert.Contains("cancelTop()", index, StringComparison.Ordinal);
+        Assert.Contains("new Event('cancel', { cancelable: true })", index, StringComparison.Ordinal);
+        Assert.Contains("if (dialog.dispatchEvent(cancelEvent)) dialog.close();", index, StringComparison.Ordinal);
         Assert.Contains("open(dialogId, focusSelector, openerSelector)", index, StringComparison.Ordinal);
         Assert.Contains("explicitOpener instanceof HTMLElement ? explicitOpener : document.activeElement", index, StringComparison.Ordinal);
         Assert.Contains("opener.focus({ preventScroll: true })", index, StringComparison.Ordinal);
