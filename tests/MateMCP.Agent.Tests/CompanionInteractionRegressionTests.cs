@@ -239,6 +239,8 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("&capability=", client, StringComparison.Ordinal);
         Assert.Contains(".audit-filters {", styles, StringComparison.Ordinal);
         Assert.Contains(".audit-date-nav {", styles, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.audit-toolbar\s*\{[^}]*flex-wrap:\s*wrap;", styles);
+        Assert.Matches(@"(?s)\.audit-date-nav\s*\{[^}]*flex:\s*0 0 auto;[^}]*flex-wrap:\s*nowrap;[^}]*max-width:\s*100%;", styles);
         Assert.Contains(".audit-results {", styles, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.audit-results\s*\{[^}]*overflow-y:\s*auto;", styles);
         Assert.Matches(@"(?s)@media \(max-width: 760px\).*?\.audit-filters\s*\{\s*grid-template-columns:\s*1fr;", styles);

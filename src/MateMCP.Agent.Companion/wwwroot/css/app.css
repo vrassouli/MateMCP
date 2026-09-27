@@ -438,13 +438,23 @@ html, body {
 
 .audit-toolbar {
     margin-bottom: 10px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.audit-toolbar > :first-child {
+    flex: 1 1 220px;
+    min-width: 0;
 }
 
 .audit-date-nav {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 0 0 auto;
     flex-wrap: nowrap;
+    max-width: 100%;
+    margin-left: auto;
 }
 
 .audit-date-nav > * {
