@@ -57,6 +57,12 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("mateMcpTabBackward:", catalystApplication, StringComparison.Ordinal);
         Assert.DoesNotContain("new Selector(\"insertTab:\")", catalystApplication, StringComparison.Ordinal);
         Assert.DoesNotContain("new Selector(\"insertBacktab:\")", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("public override void SendEvent(UIEvent uievent)", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("uievent is UIPressesEvent", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("CharactersIgnoringModifiers != \"\\t\"", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("press.Phase == UIPressPhase.Began", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("UIKeyModifierFlags.Shift", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("base.SendEvent(uievent)", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("MateMcpNativeTabBridge.AdvanceFocus", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("CreatePriorityCommand", catalystBridge, StringComparison.Ordinal);
         Assert.Contains("WantsPriorityOverSystemBehavior = true", catalystBridge, StringComparison.Ordinal);
