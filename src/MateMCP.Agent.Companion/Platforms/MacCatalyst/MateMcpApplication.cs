@@ -25,6 +25,7 @@ public class MateMcpApplication : UIApplication
     // character instead of a tab character plus a Shift modifier.
     private const string TabCharacter = "\t";
     private const string BackTabCharacter = "\u0019";
+    private const string EscapeCharacter = "\u001b";
 
     public override UIKeyCommand[] KeyCommands =>
     [
@@ -35,9 +36,14 @@ public class MateMcpApplication : UIApplication
 
     public override void SendEvent(UIEvent uievent)
     {
-        if (uievent is UIPressesEvent pressesEvent && TryHandleTabPress(pressesEvent))
+        if (uievent is UIPressesEvent pressesEvent)
         {
-            return;
+            if (TryHandleTabPress(pressesEvent))
+            {
+                return;
+            }
+
+            ForwardEscapeToDom(pressesEvent);
         }
 
         base.SendEvent(uievent);
@@ -82,6 +88,35 @@ public class MateMcpApplication : UIApplication
         }
 
         return false;
+    }
+
+    private static void ForwardEscapeToDom(UIPressesEvent pressesEvent)
+    {
+        foreach (var press in pressesEvent.AllPresses)
+        {
+            var key = press.Key;
+            if (key is null || key.CharactersIgnoringModifiers != EscapeCharacter)
+            {
+                continue;
+            }
+
+            const UIKeyModifierFlags shortcutModifiers =
+                UIKeyModifierFlags.Command | UIKeyModifierFlags.Control | UIKeyModifierFlags.Alternate;
+            if ((key.ModifierFlags & shortcutModifiers) != 0)
+            {
+                continue;
+            }
+
+            if (press.Phase == UIPressPhase.Began)
+            {
+                // Do not swallow Escape. WebKit/UIKit still receives the original event; this
+                // DOM call is only a fallback for Catalyst builds where HTML dialog cancellation
+                // is lost before it reaches the page. If no dialog is open, it is a no-op.
+                MateMcpNativeTabBridge.CloseTopDialog();
+            }
+
+            return;
+        }
     }
 
     [Export("mateMcpTabForward:")]

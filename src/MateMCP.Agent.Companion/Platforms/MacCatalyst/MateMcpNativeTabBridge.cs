@@ -64,6 +64,19 @@ internal static class MateMcpNativeTabBridge
         return command;
     }
 
+    public static void CloseTopDialog()
+    {
+        var webView = _activeWebView;
+        if (webView is null)
+        {
+            return;
+        }
+
+        webView.EvaluateJavaScript(
+            "window.mateMcpModal && window.mateMcpModal.cancelTop && window.mateMcpModal.cancelTop();",
+            (_, _) => { });
+    }
+
     public static void AdvanceFocus(bool shiftKey)
     {
         var webView = _activeWebView;

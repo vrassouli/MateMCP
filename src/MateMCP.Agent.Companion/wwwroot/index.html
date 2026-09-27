@@ -49,6 +49,18 @@
                 close(dialogId) {
                     const dialog = document.getElementById(dialogId);
                     if (dialog instanceof HTMLDialogElement && dialog.open) dialog.close();
+                },
+                cancelTop() {
+                    const openDialogs = document.querySelectorAll('dialog[open]');
+                    const dialog = openDialogs.length ? openDialogs[openDialogs.length - 1] : null;
+                    if (!(dialog instanceof HTMLDialogElement)) return false;
+
+                    // Mirror the browser's Escape semantics: allow a cancel listener to prevent
+                    // closing, otherwise close normally so the existing close/focus restoration
+                    // handlers still run.
+                    const cancelEvent = new Event('cancel', { cancelable: true });
+                    if (dialog.dispatchEvent(cancelEvent)) dialog.close();
+                    return true;
                 }
             };
 
