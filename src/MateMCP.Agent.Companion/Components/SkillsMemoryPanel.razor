@@ -48,7 +48,7 @@
                 <div class="muted" style="margin-top:6px" role="status">@Message</div>
             }
         </div>
-        <Button Text="Add item" OnClick="OpenAddAsync" />
+        <Button Id="skills-memory-add" Text="Add item" OnClick="OpenAddAsync" />
     </div>
 
     @if (!string.IsNullOrWhiteSpace(PageErrorMessage))
@@ -162,7 +162,7 @@
         ResetEditor();
         Message = null;
         EditorErrorMessage = null;
-        await JS.InvokeVoidAsync("mateMcpModal.open", "skills-memory-editor", "#memory-title");
+        await JS.InvokeVoidAsync("mateMcpModal.open", "skills-memory-editor", "#memory-title", "#skills-memory-add");
     }
 
     private async Task OpenEditAsync(SkillMemoryItem item)
