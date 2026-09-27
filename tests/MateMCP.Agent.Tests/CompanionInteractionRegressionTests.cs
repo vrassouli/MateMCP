@@ -93,16 +93,19 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
-    public void Companion_checkboxes_keep_labels_inline_with_shared_rtl_safe_spacing()
+    public void Companion_checkboxes_use_bluent_without_global_native_overrides()
     {
-        var styles = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+        var root = FindRepositoryRoot();
+        var componentsDirectory = Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components");
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
 
-        Assert.Contains("input[type=\"checkbox\"] {", styles, StringComparison.Ordinal);
-        Assert.Contains("width: auto;", styles, StringComparison.Ordinal);
-        Assert.Contains("margin-inline-end: 8px;", styles, StringComparison.Ordinal);
-        Assert.Contains("vertical-align: middle;", styles, StringComparison.Ordinal);
+        Assert.Contains("<Checkbox TValue=\"bool\"", File.ReadAllText(Path.Combine(componentsDirectory, "Main.razor")), StringComparison.Ordinal);
+        Assert.Contains("<Checkbox TValue=\"bool\"", File.ReadAllText(Path.Combine(componentsDirectory, "ProjectsPanel.razor")), StringComparison.Ordinal);
+        Assert.Contains("<Checkbox TValue=\"bool\"", File.ReadAllText(Path.Combine(componentsDirectory, "AgentLogsPanel.razor")), StringComparison.Ordinal);
+        Assert.Contains("<Checkbox TValue=\"bool\"", File.ReadAllText(Path.Combine(componentsDirectory, "DesktopUpdatePanel.razor")), StringComparison.Ordinal);
+        Assert.DoesNotContain("input[type=\"checkbox\"] {", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain(".update-toggle input", styles, StringComparison.Ordinal);
     }
-
     [Fact]
     public void Companion_narrow_navigation_uses_a_modal_drawer_and_scopes_focus_to_it()
     {
@@ -329,6 +332,9 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Matches(@"(?s)\.log-terminal\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*max-height:\s*none;[^}]*margin-top:\s*14px;", styles);
         Assert.Matches(@"(?s)\.audit-panel\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;", styles);
         Assert.Matches(@"(?s)\.audit-results\s*\{[^}]*flex:\s*1 1 auto;[^}]*overflow-y:\s*auto;", styles);
+        Assert.DoesNotContain("input, textarea, select {", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain("input[type=\"checkbox\"] {", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain("input:focus-visible, textarea:focus-visible, select:focus-visible {", styles, StringComparison.Ordinal);
         Assert.DoesNotContain("max-height: 68vh", styles, StringComparison.Ordinal);
     }
 

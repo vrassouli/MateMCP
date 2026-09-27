@@ -509,31 +509,8 @@ a.link {
 
 .copy-note { margin-left: 8px; }
 
-input, textarea, select {
-    width: 100%;
-    padding: 9px 10px;
-    border: 1px solid var(--colorNeutralStroke1, rgba(0, 0, 0, .18));
-    border-radius: var(--borderRadiusMedium, 7px);
-    background: var(--colorNeutralBackground1, transparent);
-    color: var(--colorNeutralForeground1, inherit);
-}
-
-input[type="checkbox"] {
-    width: auto;
-    margin: 0;
-    margin-inline-end: 8px;
-    padding: 0;
-    vertical-align: middle;
-}
-
-input:focus-visible, textarea:focus-visible, select:focus-visible {
-    outline: 2px solid var(--colorStrokeFocus2, currentColor);
-    outline-offset: 1px;
-}
-
 .update-toggle-row { display: grid; gap: 6px; }
 .update-toggle { display: flex; align-items: center; gap: 9px; cursor: pointer; }
-.update-toggle input { width: auto; margin: 0; padding: 0; }
 .update-progress-row { display: grid; gap: 7px; }
 .update-progress-bar { width: 100%; height: 10px; }
 .field { display: grid; gap: 6px; margin-bottom: 12px; }
