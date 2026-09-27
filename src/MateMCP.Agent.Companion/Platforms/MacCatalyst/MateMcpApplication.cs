@@ -27,6 +27,51 @@ public class MateMcpApplication : UIApplication
         MateMcpNativeTabBridge.CreatePriorityCommand(UIKeyModifierFlags.Shift, "mateMcpTabBackward:")
     ];
 
+
+    public override void SendEvent(UIEvent uievent)
+    {
+        if (uievent is UIPressesEvent pressesEvent && TryHandleTabPress(pressesEvent))
+        {
+            return;
+        }
+
+        base.SendEvent(uievent);
+    }
+
+    private static bool TryHandleTabPress(UIPressesEvent pressesEvent)
+    {
+        foreach (var press in pressesEvent.AllPresses)
+        {
+            var key = press.Key;
+            if (key is null || key.CharactersIgnoringModifiers != "\t")
+            {
+                continue;
+            }
+
+            // Preserve real shortcuts such as Command+Tab, Control+Tab, and Option+Tab.
+            // Shift is the only modifier that changes MateMCP's focus traversal direction.
+            const UIKeyModifierFlags shortcutModifiers =
+                UIKeyModifierFlags.Command | UIKeyModifierFlags.Control | UIKeyModifierFlags.Alternate;
+            if ((key.ModifierFlags & shortcutModifiers) != 0)
+            {
+                continue;
+            }
+
+            if (press.Phase == UIPressPhase.Began)
+            {
+                MateMcpNativeTabBridge.AdvanceFocus(
+                    shiftKey: (key.ModifierFlags & UIKeyModifierFlags.Shift) != 0);
+            }
+
+            // Swallow every phase of the matching Tab press. If UIKit/WebKit receives the same
+            // event after our DOM traversal, its system focus movement can consume or duplicate
+            // the navigation. SendEvent is intentionally the single pre-dispatch owner for Tab.
+            return true;
+        }
+
+        return false;
+    }
+
     [Export("mateMcpTabForward:")]
     private void MateMcpTabForward(UIKeyCommand command) => MateMcpNativeTabBridge.AdvanceFocus(shiftKey: false);
 
