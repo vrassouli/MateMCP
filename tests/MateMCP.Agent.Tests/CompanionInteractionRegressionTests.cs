@@ -53,12 +53,15 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("event.shiftKey", index, StringComparison.Ordinal);
         Assert.Contains("focusable[next].focus()", index, StringComparison.Ordinal);
         Assert.Contains("event.preventDefault()", index, StringComparison.Ordinal);
-        Assert.Contains("WantsPriorityOverSystemBehavior = true", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("mateMcpTabForward:", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("mateMcpTabBackward:", catalystApplication, StringComparison.Ordinal);
         Assert.DoesNotContain("new Selector(\"insertTab:\")", catalystApplication, StringComparison.Ordinal);
         Assert.DoesNotContain("new Selector(\"insertBacktab:\")", catalystApplication, StringComparison.Ordinal);
         Assert.Contains("MateMcpNativeTabBridge.AdvanceFocus", catalystApplication, StringComparison.Ordinal);
+        Assert.Contains("CreatePriorityCommand", catalystBridge, StringComparison.Ordinal);
+        Assert.Contains("WantsPriorityOverSystemBehavior = true", catalystBridge, StringComparison.Ordinal);
+        Assert.Contains("controller.AddKeyCommand(_controllerForwardCommand)", catalystBridge, StringComparison.Ordinal);
+        Assert.Contains("controller.AddKeyCommand(_controllerBackwardCommand)", catalystBridge, StringComparison.Ordinal);
         Assert.Contains("window.mateMcpFocus.advance", catalystBridge, StringComparison.Ordinal);
         Assert.Contains("EvaluateJavaScript", catalystBridge, StringComparison.Ordinal);
     }
