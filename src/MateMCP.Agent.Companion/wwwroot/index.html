@@ -21,16 +21,21 @@
 
             const modalOpeners = new WeakMap();
             window.mateMcpModal = {
-                open(dialogId, focusSelector) {
+                open(dialogId, focusSelector, openerSelector) {
                     const dialog = document.getElementById(dialogId);
                     if (!(dialog instanceof HTMLDialogElement)) return;
 
-                    modalOpeners.set(dialog, document.activeElement);
+                    const explicitOpener = openerSelector ? document.querySelector(openerSelector) : null;
+                    modalOpeners.set(dialog, explicitOpener instanceof HTMLElement ? explicitOpener : document.activeElement);
                     if (dialog.dataset.mateMcpBound !== 'true') {
                         dialog.addEventListener('close', () => {
                             const opener = modalOpeners.get(dialog);
                             modalOpeners.delete(dialog);
-                            if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+                            if (opener instanceof HTMLElement && opener.isConnected) {
+                                requestAnimationFrame(() => {
+                                    if (opener.isConnected) opener.focus({ preventScroll: true });
+                                });
+                            }
                         });
                         dialog.dataset.mateMcpBound = 'true';
                     }

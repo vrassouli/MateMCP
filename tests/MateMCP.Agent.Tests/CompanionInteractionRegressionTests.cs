@@ -255,14 +255,17 @@ public sealed class CompanionInteractionRegressionTests
         var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
 
         Assert.Contains("<dialog id=\"skills-memory-editor\"", panel, StringComparison.Ordinal);
-        Assert.Contains("Text=\"Add item\"", panel, StringComparison.Ordinal);
-        Assert.Contains("await JS.InvokeVoidAsync(\"mateMcpModal.open\", \"skills-memory-editor\", \"#memory-title\")", panel, StringComparison.Ordinal);
+        Assert.Contains("Id=\"skills-memory-add\" Text=\"Add item\"", panel, StringComparison.Ordinal);
+        Assert.Contains("await JS.InvokeVoidAsync(\"mateMcpModal.open\", \"skills-memory-editor\", \"#memory-title\", \"#skills-memory-add\")", panel, StringComparison.Ordinal);
         Assert.Contains("<input id=\"memory-title\" autofocus", panel, StringComparison.Ordinal);
         Assert.Contains("await LoadAsync();", panel, StringComparison.Ordinal);
         Assert.Contains("await CloseEditorAsync();", panel, StringComparison.Ordinal);
         Assert.Contains("Title and Content are required.", panel, StringComparison.Ordinal);
 
         Assert.Contains("window.mateMcpModal", index, StringComparison.Ordinal);
+        Assert.Contains("open(dialogId, focusSelector, openerSelector)", index, StringComparison.Ordinal);
+        Assert.Contains("explicitOpener instanceof HTMLElement ? explicitOpener : document.activeElement", index, StringComparison.Ordinal);
+        Assert.Contains("opener.focus({ preventScroll: true })", index, StringComparison.Ordinal);
         Assert.Contains("dialog.showModal()", index, StringComparison.Ordinal);
         Assert.Contains("dialog.addEventListener('close'", index, StringComparison.Ordinal);
         Assert.Contains("const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;", index, StringComparison.Ordinal);
@@ -282,7 +285,7 @@ public sealed class CompanionInteractionRegressionTests
         var index = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));
 
         Assert.Contains("<dialog id=\"secret-editor\"", main, StringComparison.Ordinal);
-        Assert.Contains("Text=\"Add secret\"", main, StringComparison.Ordinal);
+        Assert.Contains("Id=\"secret-add\" Text=\"Add secret\"", main, StringComparison.Ordinal);
         Assert.Contains("Text=\"Edit\"", main, StringComparison.Ordinal);
         Assert.Contains("Replace stored value", main, StringComparison.Ordinal);
         Assert.Contains("SecretReplaceValue", main, StringComparison.Ordinal);
@@ -296,7 +299,9 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("PutAsJsonAsync($\"secrets/{Uri.EscapeDataString(name)}\"", client, StringComparison.Ordinal);
         Assert.DoesNotContain("GetSecretValue", client, StringComparison.Ordinal);
         Assert.DoesNotContain("ResolveSecret", client, StringComparison.Ordinal);
+        Assert.Contains("await JS.InvokeVoidAsync(\"mateMcpModal.open\", \"secret-editor\", \"#secret-name\", \"#secret-add\")", main, StringComparison.Ordinal);
         Assert.Contains("window.mateMcpModal", index, StringComparison.Ordinal);
+        Assert.Contains("opener.focus({ preventScroll: true })", index, StringComparison.Ordinal);
         Assert.Contains("const root = openDialogs.length ? openDialogs[openDialogs.length - 1] : document;", index, StringComparison.Ordinal);
     }
 
