@@ -22,7 +22,11 @@ public sealed class AgentDeliveryParityTests
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "companion-build.yml"));
 
         Assert.Contains("GITHUB_AUTH_TOKEN=\"${GH_TOKEN:-${GITHUB_TOKEN:-}}\"", mac, StringComparison.Ordinal);
-        Assert.Contains("\"${CURL_AUTH_ARGS[@]}\" \\", mac, StringComparison.Ordinal);
+        Assert.Contains("github_curl()", mac, StringComparison.Ordinal);
+        Assert.Contains("curl --config \"$CURL_AUTH_CONFIG\" \"$@\"", mac, StringComparison.Ordinal);
+        Assert.Contains("github_curl -fsSL", mac, StringComparison.Ordinal);
+        Assert.Contains("github_curl -fL", mac, StringComparison.Ordinal);
+        Assert.DoesNotContain("CURL_AUTH_ARGS", mac, StringComparison.Ordinal);
         Assert.Contains("GH_TOKEN: ${{ github.token }}", workflow, StringComparison.Ordinal);
         Assert.Contains("Authorization: Bearer ${GH_TOKEN}", workflow, StringComparison.Ordinal);
     }

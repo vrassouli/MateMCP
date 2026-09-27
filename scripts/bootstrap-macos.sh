@@ -35,21 +35,27 @@ trap 'rm -rf "$TMP"' EXIT
 # can exhaust the unauthenticated rate limit. When GitHub provides a token, keep it
 # out of process arguments by passing the Authorization header through a private curl config.
 GITHUB_AUTH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-CURL_AUTH_ARGS=()
+CURL_AUTH_CONFIG=""
 if [[ -n "$GITHUB_AUTH_TOKEN" ]]; then
   CURL_AUTH_CONFIG="$TMP/curl-auth.conf"
   printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_AUTH_TOKEN" > "$CURL_AUTH_CONFIG"
   chmod 600 "$CURL_AUTH_CONFIG"
-  CURL_AUTH_ARGS=(--config "$CURL_AUTH_CONFIG")
 fi
+
+github_curl() {
+  if [[ -n "$CURL_AUTH_CONFIG" ]]; then
+    curl --config "$CURL_AUTH_CONFIG" "$@"
+  else
+    curl "$@"
+  fi
+}
 
 RELEASE_API="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_TAG}"
 RELEASE_JSON="$TMP/release.json"
 ARCHIVE="$TMP/$ARCHIVE_NAME"
 
 echo "Resolving ${ARCHIVE_NAME} from release ${RELEASE_TAG}..."
-curl -fsSL \
-  "${CURL_AUTH_ARGS[@]}" \
+github_curl -fsSL \
   -H "Accept: application/vnd.github+json" \
   -H "User-Agent: MateMCP-Bootstrap/1.0" \
   "$RELEASE_API" -o "$RELEASE_JSON"
@@ -71,7 +77,7 @@ done
 [[ -n "$ASSET_ID" && -n "$ASSET_URL" ]] || { echo "Release asset ${ARCHIVE_NAME} was not found in ${RELEASE_TAG}." >&2; exit 1; }
 
 echo "Downloading ${ARCHIVE_NAME} from release ${RELEASE_TAG}..."
-curl -fL "${CURL_AUTH_ARGS[@]}" -H "User-Agent: MateMCP-Bootstrap/1.0" "$ASSET_URL" -o "$ARCHIVE"
+github_curl -fL -H "User-Agent: MateMCP-Bootstrap/1.0" "$ASSET_URL" -o "$ARCHIVE"
 
 if [[ "$ASSET_DIGEST" == sha256:* ]]; then
   EXPECTED_SHA256="${ASSET_DIGEST#sha256:}"
