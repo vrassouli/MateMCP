@@ -170,6 +170,25 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_devices_stops_loading_and_polling_before_disposal_state_updates()
+    {
+        var panel = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "DevicesPanel.razor"));
+
+        Assert.Contains("var ct = _disposeCts.Token;", panel, StringComparison.Ordinal);
+        Assert.Contains("await RefreshAsync(ct);", panel, StringComparison.Ordinal);
+        Assert.Contains("if (_disposed || ct.IsCancellationRequested) return;", panel, StringComparison.Ordinal);
+        Assert.Contains("private async Task RefreshAsync(CancellationToken ct)", panel, StringComparison.Ordinal);
+        Assert.Contains("if (!_disposed && !ct.IsCancellationRequested)", panel, StringComparison.Ordinal);
+        Assert.Contains("StateHasChanged();", panel, StringComparison.Ordinal);
+        Assert.Contains("catch (ObjectDisposedException) when (_disposed || ct.IsCancellationRequested)", panel, StringComparison.Ordinal);
+        Assert.Contains("catch (InvalidOperationException) when (_disposed || ct.IsCancellationRequested)", panel, StringComparison.Ordinal);
+
+        var disposedIndex = panel.IndexOf("_disposed = true;", StringComparison.Ordinal);
+        var cancelIndex = panel.IndexOf("_disposeCts.Cancel();", StringComparison.Ordinal);
+        Assert.True(disposedIndex >= 0 && cancelIndex > disposedIndex);
+    }
+
+    [Fact]
     public void Companion_devices_keeps_local_identity_visible_when_control_plane_is_unavailable()
     {
         var panel = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "DevicesPanel.razor"));
