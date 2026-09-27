@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using MateMCP.Api.Data;
+using MateMCP.Api.Portal;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -43,7 +44,34 @@ builder.Services.AddOpenIddict().AddCore(o => o.UseEntityFrameworkCore().UseDbCo
     o.UseAspNetCore().EnableAuthorizationEndpointPassthrough();
 });
 
-var app = builder.Build(); app.UseForwardedHeaders();
+var app = builder.Build();
+app.UseForwardedHeaders();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (context.File.Name.EndsWith(".css", StringComparison.OrdinalIgnoreCase) ||
+            context.File.Name.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+            context.File.Name.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Context.Response.Headers.CacheControl = "public,max-age=3600";
+        }
+    }
+});
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
+        context.Response.Headers["Content-Security-Policy"] =
+            "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; " +
+            "base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+        return Task.CompletedTask;
+    });
+    await next();
+});
 app.Use(async (context, next) =>
 {
     var discoveryPath = context.Request.Path.Value?.TrimEnd('/');
@@ -60,37 +88,141 @@ DeviceManagementEndpoints.Map(app, relayUrl);
 
 app.MapGet("/register", (HttpContext context) =>
 {
+    if (context.User.Identity?.IsAuthenticated == true) return Results.Redirect("/dashboard");
     var returnUrl = SafeReturnUrl(context.Request.Query["returnUrl"].ToString());
-    return Page("Create MateMCP account", $"<form method=post><input type=hidden name=returnUrl value=\"{H(returnUrl)}\"><label>Email<input name=email type=email required></label><label>Password<input name=password type=password minlength=10 required></label><button>Create account</button></form><p><a href=\"/login?returnUrl={Uri.EscapeDataString(returnUrl)}\">Sign in</a></p>");
+    return PortalUi.AuthPage(context, registration: true, returnUrl);
 });
 app.MapPost("/register", async (HttpContext context, ControlPlaneDbContext db, IPasswordHasher<UserAccount> hasher) =>
 {
-    var form = await context.Request.ReadFormAsync(); var email = form["email"].ToString().Trim(); var password = form["password"].ToString();
-    if (password.Length < 10 || !email.Contains('@')) return Results.BadRequest("A valid email and a password of at least 10 characters are required.");
-    var normalized = email.ToUpperInvariant(); if (await db.Users.AnyAsync(x => x.NormalizedEmail == normalized)) return Results.Conflict("Account already exists.");
-    var account = new UserAccount { Email = email, NormalizedEmail = normalized, PasswordHash = "pending" }; account.PasswordHash = hasher.HashPassword(account, password); db.Users.Add(account); await db.SaveChangesAsync(); await SignInAsync(context, account); return Results.Redirect(SafeReturnUrl(form["returnUrl"].ToString()));
+    var form = await context.Request.ReadFormAsync();
+    var email = form["email"].ToString().Trim();
+    var password = form["password"].ToString();
+    var returnUrl = SafeReturnUrl(form["returnUrl"].ToString());
+
+    if (password.Length < 10 || !email.Contains('@'))
+        return PortalUi.AuthPage(context, registration: true, returnUrl, "Enter a valid email address and a password of at least 10 characters.", email, StatusCodes.Status400BadRequest);
+
+    var normalized = email.ToUpperInvariant();
+    if (await db.Users.AnyAsync(x => x.NormalizedEmail == normalized))
+        return PortalUi.AuthPage(context, registration: true, returnUrl, "An account with this email already exists.", email, StatusCodes.Status409Conflict);
+
+    var account = new UserAccount { Email = email, NormalizedEmail = normalized, PasswordHash = "pending" };
+    account.PasswordHash = hasher.HashPassword(account, password);
+    db.Users.Add(account);
+    await db.SaveChangesAsync();
+    await SignInAsync(context, account);
+    return Results.Redirect(returnUrl);
 });
 app.MapGet("/login", (HttpContext context) =>
 {
+    if (context.User.Identity?.IsAuthenticated == true) return Results.Redirect("/dashboard");
     var returnUrl = SafeReturnUrl(context.Request.Query["returnUrl"].ToString());
-    return Page("Sign in", $"<form method=post><input type=hidden name=returnUrl value=\"{H(returnUrl)}\"><label>Email<input name=email type=email required></label><label>Password<input name=password type=password required></label><button>Sign in</button></form><p><a href=\"/register?returnUrl={Uri.EscapeDataString(returnUrl)}\">Create account</a></p>");
+    return PortalUi.AuthPage(context, registration: false, returnUrl);
 });
 app.MapPost("/login", async (HttpContext context, ControlPlaneDbContext db, IPasswordHasher<UserAccount> hasher) =>
 {
-    var form = await context.Request.ReadFormAsync(); var account = await db.Users.SingleOrDefaultAsync(x => x.NormalizedEmail == form["email"].ToString().Trim().ToUpperInvariant() && !x.IsDisabled);
-    if (account is null || hasher.VerifyHashedPassword(account, account.PasswordHash, form["password"].ToString()) == PasswordVerificationResult.Failed) return Results.Unauthorized();
-    await SignInAsync(context, account); return Results.Redirect(SafeReturnUrl(form["returnUrl"].ToString()));
-});
-app.MapPost("/logout", async (HttpContext context) => { await context.SignOutAsync(); return Results.Redirect("/login"); });
+    var form = await context.Request.ReadFormAsync();
+    var email = form["email"].ToString().Trim();
+    var returnUrl = SafeReturnUrl(form["returnUrl"].ToString());
+    var account = await db.Users.SingleOrDefaultAsync(x => x.NormalizedEmail == email.ToUpperInvariant() && !x.IsDisabled);
 
-app.MapGet("/dashboard", async (ClaimsPrincipal principal, ControlPlaneDbContext db) =>
+    if (account is null || hasher.VerifyHashedPassword(account, account.PasswordHash, form["password"].ToString()) == PasswordVerificationResult.Failed)
+        return PortalUi.AuthPage(context, registration: false, returnUrl, "The email or password is incorrect.", email, StatusCodes.Status401Unauthorized);
+
+    await SignInAsync(context, account);
+    return Results.Redirect(returnUrl);
+});
+app.MapPost("/logout", async (HttpContext context) =>
 {
-    var userId = UserId(principal); var agents = await db.Agents.Where(x => x.OwnerId == userId).OrderBy(x => x.Name).ToListAsync();
+    await context.SignOutAsync();
+    return Results.Redirect("/login");
+});
+
+app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
+{
+    var userId = UserId(principal);
+    var agents = await db.Agents.Where(x => x.OwnerId == userId).OrderBy(x => x.Name).ToListAsync();
     var now = DateTimeOffset.UtcNow;
-    var approvals = (await db.Approvals.Include(x => x.AgentDevice).Where(x => x.AgentDevice!.OwnerId == userId && x.Status == "pending").ToListAsync()).Where(x => x.ExpiresAt > now).OrderBy(x => x.CreatedAt).ToList();
-    var rows = string.Join("", agents.Select(x => $"<tr><td>{H(x.Name)}</td><td>{H(x.Platform)}</td><td>{(x.IsRevoked ? "revoked" : x.LastSeenAt > DateTimeOffset.UtcNow.AddMinutes(-2) ? "online" : "offline")}</td><td><code>{relayUrl}/mcp/{x.PublicId}</code></td><td>{(x.IsRevoked ? "" : $"<form method=post action=/dashboard/agents/{x.PublicId}/revoke><button class=deny>Revoke</button></form>")}</td></tr>"));
-    var pending = string.Join("", approvals.Select(x => $"<article><b>{H(x.Capability)}</b> on {H(x.AgentDevice!.Name)}<pre>{H(x.Summary)}</pre><form method=post action=/dashboard/approvals/{x.Id}/allow><button>Allow once</button></form><form method=post action=/dashboard/approvals/{x.Id}/deny><button class=deny>Deny</button></form></article>"));
-    return Page("Your MateMCP agents", $"<table><tr><th>Name</th><th>Platform</th><th>Status</th><th>MCP URL</th><th></th></tr>{rows}</table><h2>Pending approvals</h2>{(pending.Length == 0 ? "<p>Nothing waiting.</p>" : pending)}<form method=post action=/logout><button>Sign out</button></form>");
+    var onlineAfter = now.AddMinutes(-2);
+    var approvals = (await db.Approvals
+        .Include(x => x.AgentDevice)
+        .Where(x => x.AgentDevice!.OwnerId == userId && x.Status == "pending")
+        .ToListAsync())
+        .Where(x => x.ExpiresAt > now)
+        .OrderBy(x => x.CreatedAt)
+        .ToList();
+
+    var activeAgents = agents.Count(x => !x.IsRevoked);
+    var onlineAgents = agents.Count(x => !x.IsRevoked && x.LastSeenAt > onlineAfter);
+    var rows = string.Join("", agents.Select(x =>
+    {
+        var status = x.IsRevoked ? "revoked" : x.LastSeenAt > onlineAfter ? "online" : "offline";
+        var revokeAction = x.IsRevoked
+            ? "<span class=\"status-badge status-neutral\">Unavailable</span>"
+            : $"""<form method="post" action="/dashboard/agents/{x.PublicId}/revoke"><button class="button button-danger button-compact" type="submit">Revoke</button></form>""";
+
+        return $"""
+            <tr>
+              <td><div class="device-name"><span class="device-icon" aria-hidden="true">{PortalUi.H(x.Platform.Length > 0 ? x.Platform[..1].ToUpperInvariant() : "D")}</span><div><strong>{PortalUi.H(x.Name)}</strong><span>{PortalUi.H(x.PublicId)}</span></div></div></td>
+              <td>{PortalUi.H(x.Platform)}</td>
+              <td>{PortalUi.StatusBadge(status)}</td>
+              <td><code class="endpoint-code" title="{PortalUi.H(relayUrl)}/mcp/{PortalUi.H(x.PublicId)}">{PortalUi.H(relayUrl)}/mcp/{PortalUi.H(x.PublicId)}</code></td>
+              <td>{revokeAction}</td>
+            </tr>
+            """;
+    }));
+
+    var devicesContent = rows.Length == 0
+        ? PortalUi.EmptyState("No devices yet", "Enroll MateMCP Desktop on a computer to see it here.", """<a class="button button-secondary" href="/device">Add a device</a>""")
+        : $"""
+          <div class="table-wrap">
+            <table class="portal-table">
+              <thead><tr><th>Device</th><th>Platform</th><th>Status</th><th>MCP endpoint</th><th></th></tr></thead>
+              <tbody>{rows}</tbody>
+            </table>
+          </div>
+          """;
+
+    var approvalsContent = approvals.Count == 0
+        ? PortalUi.EmptyState("Nothing waiting", "Approval requests that need your decision will appear here.")
+        : $"""
+          <div class="approval-list">
+            {string.Join("", approvals.Select(x => $"""
+              <article class="approval-item">
+                <div>
+                  <div class="approval-meta"><strong>{PortalUi.H(x.Capability)}</strong>{PortalUi.StatusBadge("pending")}<span class="approval-device">on {PortalUi.H(x.AgentDevice!.Name)}</span></div>
+                  <p class="approval-summary">{PortalUi.H(x.Summary)}</p>
+                </div>
+                <div class="approval-actions">
+                  <form method="post" action="/dashboard/approvals/{x.Id}/allow"><button class="button button-secondary button-compact" type="submit">Allow once</button></form>
+                  <form method="post" action="/dashboard/approvals/{x.Id}/deny"><button class="button button-danger button-compact" type="submit">Deny</button></form>
+                </div>
+              </article>
+            """))}
+          </div>
+          """;
+
+    var actions = """<a class="button button-secondary" href="/device">Add device</a>""";
+    var body = $"""
+        {PortalUi.PageHeading("Control plane", "Overview", "Your devices and time-sensitive approvals in one place.", actions)}
+        <div class="summary-grid">
+          <article class="summary-card"><div class="summary-card-head"><span class="summary-card-label">Active devices</span><span class="summary-card-icon" aria-hidden="true">D</span></div><div class="summary-value">{activeAgents}</div><div class="summary-detail">{onlineAgents} online right now</div></article>
+          <article class="summary-card"><div class="summary-card-head"><span class="summary-card-label">Online</span><span class="summary-card-icon" aria-hidden="true">●</span></div><div class="summary-value">{onlineAgents}</div><div class="summary-detail">Seen in the last 2 minutes</div></article>
+          <article class="summary-card"><div class="summary-card-head"><span class="summary-card-label">Needs approval</span><span class="summary-card-icon" aria-hidden="true">!</span></div><div class="summary-value">{approvals.Count}</div><div class="summary-detail">Pending decisions</div></article>
+        </div>
+        <div class="portal-grid">
+          <section class="portal-section">
+            <div class="portal-section-header"><div><h2>Devices</h2><p>Computers enrolled in your MateMCP account.</p></div><span class="section-count">{agents.Count}</span></div>
+            {devicesContent}
+          </section>
+          <section class="portal-section" id="approvals">
+            <div class="portal-section-header"><div><h2>Pending approvals</h2><p>Sensitive actions waiting for your decision.</p></div><span class="section-count">{approvals.Count}</span></div>
+            {approvalsContent}
+          </section>
+        </div>
+        """;
+
+    return PortalUi.AppPage(context, "Overview", principal.Identity?.Name ?? "MateMCP user", body);
 }).RequireAuthorization();
 app.MapPost("/dashboard/agents/{agentId}/revoke", async (string agentId, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
 {
@@ -106,11 +238,59 @@ app.MapPost("/api/enrollment/start", async (EnrollmentStart request, ControlPlan
     await db.SaveChangesAsync();
     return Results.Ok(new { deviceCode = raw, userCode = code, verificationUri = publicUrl + "/device", verificationUriComplete = publicUrl + "/device?code=" + code, interval = 3, expiresIn = 600 });
 });
-app.MapGet("/device", (string? code) => Page("Add a device", $"<form method=post action=/device/approve><label>Code<input name=code value=\"{H(code ?? "")}\" required></label><button>Add device</button></form>")).RequireAuthorization();
+app.MapGet("/device", (HttpContext context, ClaimsPrincipal principal, string? code) =>
+{
+    var body = $"""
+        {PortalUi.PageHeading("Enrollment", "Add a device", "Enter the short code shown by MateMCP Desktop on the computer you want to connect.")}
+        <section class="portal-section">
+          <div class="form-card">
+            <div class="form-card-grid">
+              <form class="auth-form" method="post" action="/device/approve">
+                <div class="form-field">
+                  <label for="device-code">Enrollment code</label>
+                  <input id="device-code" name="code" value="{PortalUi.H(code ?? "")}" autocomplete="one-time-code" spellcheck="false" required autofocus>
+                  <p class="field-hint">Codes are short-lived. Enter the code exactly as shown by MateMCP Desktop.</p>
+                </div>
+                <button class="button button-primary" type="submit">Approve device</button>
+              </form>
+              <aside class="help-panel">
+                <strong>How enrollment works</strong>
+                <ol>
+                  <li>Open MateMCP Desktop on the computer.</li>
+                  <li>Start device enrollment and copy its code.</li>
+                  <li>Enter the code here to bind that device to your account.</li>
+                </ol>
+              </aside>
+            </div>
+          </div>
+        </section>
+        """;
+    return PortalUi.AppPage(context, "Add a device", principal.Identity?.Name ?? "MateMCP user", body, "device");
+}).RequireAuthorization();
+
 app.MapPost("/device/approve", async (HttpContext context, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
 {
-    var form = await context.Request.ReadFormAsync(); var code = form["code"].ToString().Trim().ToUpperInvariant(); var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.UserCode == code && !x.Consumed && x.ApprovedByUserId == null);
-    if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest("Invalid or expired code.");
+    var form = await context.Request.ReadFormAsync();
+    var code = form["code"].ToString().Trim().ToUpperInvariant();
+    var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.UserCode == code && !x.Consumed && x.ApprovedByUserId == null);
+    if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow)
+    {
+        var body = $"""
+            {PortalUi.PageHeading("Enrollment", "Add a device", "Enter the short code shown by MateMCP Desktop on the computer you want to connect.")}
+            <section class="portal-section"><div class="form-card">
+              {PortalUi.Alert("That enrollment code is invalid or has expired.")}
+              <div class="form-card-grid">
+                <form class="auth-form" method="post" action="/device/approve">
+                  <div class="form-field"><label for="device-code">Enrollment code</label><input id="device-code" name="code" value="{PortalUi.H(code)}" autocomplete="one-time-code" spellcheck="false" required autofocus></div>
+                  <button class="button button-primary" type="submit">Try again</button>
+                </form>
+                <aside class="help-panel"><strong>Need a new code?</strong><p>Return to MateMCP Desktop and start enrollment again, then enter the new code here.</p></aside>
+              </div>
+            </div></section>
+            """;
+        return PortalUi.AppPage(context, "Add a device", principal.Identity?.Name ?? "MateMCP user", body, "device", StatusCodes.Status400BadRequest);
+    }
+
     var (_, recoverAgentId) = DecodeEnrollmentPlatform(enrollment.Platform);
     var userId = UserId(principal);
     if (recoverAgentId is not null)
@@ -118,8 +298,18 @@ app.MapPost("/device/approve", async (HttpContext context, ClaimsPrincipal princ
         var recoverable = await db.Agents.AnyAsync(x => x.PublicId == recoverAgentId && x.OwnerId == userId && !x.IsRevoked);
         if (!recoverable) return Results.Forbid();
     }
-    enrollment.ApprovedByUserId = userId; await db.SaveChangesAsync();
-    return Page(recoverAgentId is null ? "Device approved" : "Device recovery approved", $"<p><b>{H(enrollment.DeviceName)}</b> can now finish setup. You may close this page.</p>");
+
+    enrollment.ApprovedByUserId = userId;
+    await db.SaveChangesAsync();
+    var action = recoverAgentId is null ? "Device approved" : "Device recovery approved";
+    var successBody = $"""
+        {PortalUi.PageHeading("Enrollment", action, "The local Agent can now complete its secure enrollment flow.")}
+        <section class="portal-section"><div class="form-card">
+          {PortalUi.Alert($"{enrollment.DeviceName} can now finish setup. You may return to MateMCP Desktop.", "success")}
+          <a class="button button-secondary" href="/dashboard">Back to overview</a>
+        </div></section>
+        """;
+    return PortalUi.AppPage(context, action, principal.Identity?.Name ?? "MateMCP user", successBody, "device");
 }).RequireAuthorization();
 app.MapPost("/api/enrollment/token", async (EnrollmentToken request, ControlPlaneDbContext db) =>
 {
@@ -211,8 +401,6 @@ static string EncodeEnrollmentPlatform(string platform, string? recoverAgentId) 
 static (string Platform, string? RecoverAgentId) DecodeEnrollmentPlatform(string value) { var index = value.LastIndexOf(RecoveryMarker, StringComparison.Ordinal); if (index < 0) return (value, null); var agentId = value[(index + RecoveryMarker.Length)..]; return IsAgentId(agentId) ? (value[..index], agentId) : (value, null); }
 static bool IsLocal(string s) => !string.IsNullOrEmpty(s) && s[0] == '/' && (s.Length == 1 || s[1] != '/' && s[1] != '\\');
 static string SafeReturnUrl(string? value) => !string.IsNullOrWhiteSpace(value) && IsLocal(value) ? value : "/dashboard";
-static string H(string s) => System.Net.WebUtility.HtmlEncode(s);
-static IResult Page(string title, string body) => Results.Content($"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>{H(title)}</title><style>body{{font-family:system-ui;max-width:900px;margin:50px auto;padding:0 20px;color:#17202a}}label{{display:block;margin:14px 0}}input{{display:block;width:100%;max-width:420px;padding:10px}}button{{padding:10px 16px;margin:4px}}.deny{{background:#a22;color:white}}table{{border-collapse:collapse;width:100%}}td,th{{padding:9px;border-bottom:1px solid #ddd;text-align:left}}code,pre{{overflow-wrap:anywhere}}article{{border:1px solid #ddd;padding:14px;margin:12px 0}}</style></head><body><h1>{H(title)}</h1>{body}</body></html>", "text/html");
 static RSA LoadOrCreateRsaKey(string path) { var rsa = RSA.Create(3072); if (File.Exists(path)) { rsa.ImportFromPem(File.ReadAllText(path)); return rsa; } File.WriteAllText(path, rsa.ExportPkcs8PrivateKeyPem()); return rsa; }
 
 sealed record EnrollmentStart(string Name, string Platform, string? RecoverAgentId = null);

@@ -211,6 +211,84 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, revoked.StatusCode);
     }
 
+    [Fact]
+    public async Task Portal_auth_pages_are_branded_responsive_and_no_store()
+    {
+        using var client = _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri(ApiUrl),
+            AllowAutoRedirect = false,
+            HandleCookies = false
+        });
+
+        using var login = await client.GetAsync("/login?returnUrl=%2Fdashboard");
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var loginHtml = await login.Content.ReadAsStringAsync();
+        Assert.Contains("class=\"auth-layout\"", loginHtml, StringComparison.Ordinal);
+        Assert.Contains("/portal/portal.css", loginHtml, StringComparison.Ordinal);
+        Assert.Contains("autocomplete=\"current-password\"", loginHtml, StringComparison.Ordinal);
+        Assert.Contains("Create an account", loginHtml, StringComparison.Ordinal);
+        Assert.True(login.Headers.CacheControl?.NoStore);
+        Assert.True(login.Headers.TryGetValues("Content-Security-Policy", out var csp));
+        Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
+
+        using var register = await client.GetAsync("/register");
+        Assert.Equal(HttpStatusCode.OK, register.StatusCode);
+        var registerHtml = await register.Content.ReadAsStringAsync();
+        Assert.Contains("Create your account", registerHtml, StringComparison.Ordinal);
+        Assert.Contains("autocomplete=\"new-password\"", registerHtml, StringComparison.Ordinal);
+        Assert.Contains("minlength=\"10\"", registerHtml, StringComparison.Ordinal);
+
+        using var styles = await client.GetAsync("/portal/portal.css");
+        styles.EnsureSuccessStatusCode();
+        var css = await styles.Content.ReadAsStringAsync();
+        Assert.Contains(":focus-visible", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 820px)", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 560px)", css, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Invalid_login_rerenders_the_form_without_echoing_password()
+    {
+        using var client = _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri(ApiUrl),
+            AllowAutoRedirect = false,
+            HandleCookies = false
+        });
+
+        const string attemptedPassword = "definitely-the-wrong-password";
+        using var response = await client.PostAsync("/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["email"] = Email,
+            ["password"] = attemptedPassword,
+            ["returnUrl"] = "/dashboard"
+        }));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("The email or password is incorrect.", html, StringComparison.Ordinal);
+        Assert.Contains($"value=\"{Email}\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(attemptedPassword, html, StringComparison.Ordinal);
+        Assert.Contains("type=\"password\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Authenticated_dashboard_uses_the_account_shell_and_identity()
+    {
+        using var response = await _client!.GetAsync("/dashboard");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("class=\"portal-app\"", html, StringComparison.Ordinal);
+        Assert.Contains("MateMCP", html, StringComparison.Ordinal);
+        Assert.Contains("Control", html, StringComparison.Ordinal);
+        Assert.Contains(Email, html, StringComparison.Ordinal);
+        Assert.Contains("Pending approvals", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/logout\"", html, StringComparison.Ordinal);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+    }
     private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/authorize")
