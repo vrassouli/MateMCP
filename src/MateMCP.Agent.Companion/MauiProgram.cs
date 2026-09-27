@@ -33,13 +33,12 @@ public static class MauiProgram
 #endif
 
 #if MACCATALYST
-        // Keep a reference to the Companion window's WKWebView so MateMcpApplication's
-        // application-wide Tab/Shift+Tab UIKeyCommands can forward keypresses into the
-        // page's own focus-traversal helper when the WebView itself doesn't handle Tab.
-        // See MateMcpNativeTabBridge and MateMcpApplication. Refs #277.
+        // Install priority Tab/Shift+Tab commands on the WKWebView owning controller and keep
+        // the application-level commands as a fallback. Both paths dispatch into the same DOM
+        // focus helper. See MateMcpNativeTabBridge and MateMcpApplication. Refs #277/#231.
         BlazorWebViewHandler.BlazorWebViewMapper.AppendToMapping(
             "MateMcpNativeTabBridge",
-            (handler, _) => MateMcpNativeTabBridge.ActiveWebView = handler.PlatformView);
+            (handler, _) => MateMcpNativeTabBridge.Attach(handler.PlatformView));
 #endif
 
         return builder.Build();
