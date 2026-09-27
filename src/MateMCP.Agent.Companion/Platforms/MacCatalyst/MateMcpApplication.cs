@@ -21,6 +21,11 @@ namespace MateMCP.Agent.Companion;
 [Register("MateMcpApplication")]
 public class MateMcpApplication : UIApplication
 {
+    // On macOS/Catalyst, Shift+Tab can surface as the legacy back-tab control
+    // character instead of a tab character plus a Shift modifier.
+    private const string TabCharacter = "\t";
+    private const string BackTabCharacter = "\u0019";
+
     public override UIKeyCommand[] KeyCommands =>
     [
         MateMcpNativeTabBridge.CreatePriorityCommand((UIKeyModifierFlags)0, "mateMcpTabForward:"),
@@ -43,7 +48,13 @@ public class MateMcpApplication : UIApplication
         foreach (var press in pressesEvent.AllPresses)
         {
             var key = press.Key;
-            if (key is null || key.CharactersIgnoringModifiers != "\t")
+            if (key is null)
+            {
+                continue;
+            }
+
+            var characters = key.CharactersIgnoringModifiers;
+            if (characters is not TabCharacter and not BackTabCharacter)
             {
                 continue;
             }
@@ -60,7 +71,8 @@ public class MateMcpApplication : UIApplication
             if (press.Phase == UIPressPhase.Began)
             {
                 MateMcpNativeTabBridge.AdvanceFocus(
-                    shiftKey: (key.ModifierFlags & UIKeyModifierFlags.Shift) != 0);
+                    shiftKey: characters == BackTabCharacter ||
+                              (key.ModifierFlags & UIKeyModifierFlags.Shift) != 0);
             }
 
             // Swallow every phase of the matching Tab press. If UIKit/WebKit receives the same
