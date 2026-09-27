@@ -49,7 +49,7 @@
             </div>
         </header>
 
-        <div class="content-scroll">
+        <div class="@ContentScrollClass">
         @if (!string.IsNullOrWhiteSpace(Error))
         {
             <div class="error">@Error</div>
@@ -57,7 +57,7 @@
 
         @if (Section == "dashboard")
         {
-            <TabList>
+            <TabList Class="dashboard-tabs">
                 <Tab Text="Overview">
                     @if (!AgentRunning || Approvals.Count > 0)
                     {
@@ -114,10 +114,12 @@
                             <div class="muted">@UsageDetail</div>
                             @if (PowerStatus is not null)
                             {
-                                <label class="update-toggle dashboard-card-note">
-                                    <input type="checkbox" checked="@PowerStatus.PreventSleepWhileInUse" @onchange="SetPreventSleepAsync" disabled="@(!PowerStatus.Supported || ChangingPower)" />
-                                    <span>Prevent sleep while in use</span>
-                                </label>
+                                <Checkbox TValue="bool"
+                                          Class="dashboard-card-note"
+                                          Value="@PowerStatus.PreventSleepWhileInUse"
+                                          ValueChanged="SetPreventSleepAsync"
+                                          Label="Prevent sleep while in use"
+                                          disabled="@(!PowerStatus.Supported || ChangingPower)" />
                             }
                         </div>
 
@@ -274,9 +276,9 @@
                     else
                     {
                         <div class="terminal">@ShellOutput</div>
-                        <div class="field" style="margin-top:12px">
+                        <div class="field shell-input-field">
                             <label for="shell-input">Input</label>
-                            <input id="shell-input" @bind="ShellInput" @onkeydown="HandleShellKeyDown" placeholder="Send input to the running process" />
+                            <TextField id="shell-input" @bind-Value="ShellInput" @onkeydown="HandleShellKeyDown" placeholder="Send input to the running process" />
                         </div>
                         <div class="actions">
                             <Button Text="Send" OnClick="SendShellInputAsync" />
@@ -297,35 +299,32 @@
                     <div class="companion-dialog-body">
                         @if (EditingSecretName is null)
                         {
-                            <div class="field"><label for="secret-name">Name</label><input id="secret-name" autofocus @bind="SecretName" autocomplete="off" /></div>
+                            <div class="field"><label for="secret-name">Name</label><TextField id="secret-name" autofocus @bind-Value="SecretName" autocomplete="off" /></div>
                         }
                         else
                         {
-                            <div class="field"><label for="secret-name">Name</label><input id="secret-name" value="@SecretName" readonly autocomplete="off" /></div>
+                            <div class="field"><label for="secret-name">Name</label><TextField id="secret-name" Value="@SecretName" readonly autocomplete="off" /></div>
                         }
 
-                        <div class="field"><label for="secret-description">Description</label><input id="secret-description" @bind="SecretDescription" /></div>
+                        <div class="field"><label for="secret-description">Description</label><TextField id="secret-description" @bind-Value="SecretDescription" /></div>
 
                         @if (EditingSecretName is null)
                         {
-                            <div class="field"><label for="secret-value">Secret value</label><input id="secret-value" type="password" @bind="SecretValue" autocomplete="new-password" /></div>
+                            <div class="field"><label for="secret-value">Secret value</label><TextField id="secret-value" type="password" @bind-Value="SecretValue" autocomplete="new-password" /></div>
                         }
                         else
                         {
-                            <label class="update-toggle secret-replace-toggle">
-                                <input type="checkbox" @bind="SecretReplaceValue" />
-                                <span>Replace stored value</span>
-                            </label>
+                            <Checkbox TValue="bool" Class="secret-replace-toggle" @bind-Value="SecretReplaceValue" Label="Replace stored value" />
                             <div class="muted secret-replace-note">Leave replacement off to edit metadata without reading or rewriting the stored secret.</div>
                             @if (SecretReplaceValue)
                             {
-                                <div class="field secret-replacement-field"><label for="secret-value">New secret value</label><input id="secret-value" type="password" @bind="SecretValue" autocomplete="new-password" /></div>
+                                <div class="field secret-replacement-field"><label for="secret-value">New secret value</label><TextField id="secret-value" type="password" @bind-Value="SecretValue" autocomplete="new-password" /></div>
                             }
                         }
 
-                        <div class="field" role="group" aria-labelledby="secret-allowed-use-label"><span id="secret-allowed-use-label">Allowed use</span>
-                            <label><input type="checkbox" @bind="SecretAllowShell" /> Shell / terminal credential prompts</label>
-                            <label><input type="checkbox" @bind="SecretAllowUi" /> Browser / desktop text and password fields</label>
+                        <div class="field secret-allowed-use" role="group" aria-labelledby="secret-allowed-use-label"><span id="secret-allowed-use-label">Allowed use</span>
+                            <Checkbox TValue="bool" @bind-Value="SecretAllowShell" Label="Shell / terminal credential prompts" />
+                            <Checkbox TValue="bool" @bind-Value="SecretAllowUi" Label="Browser / desktop text and password fields" />
                         </div>
 
                         <div class="actions">
@@ -384,89 +383,91 @@
         }
         else if (Section == "audit")
         {
-            <div class="panel">
-                <div class="toolbar audit-toolbar">
-                    <div>
-                        <strong>Activity for @AuditDate.ToString("yyyy-MM-dd")</strong>
-                        <div class="muted">The Agent reads only this date range from the newest end of the audit log.</div>
+            <div class="panel audit-panel">
+                <div class="audit-controls">
+                    <div class="toolbar audit-toolbar">
+                        <div>
+                            <strong>Activity for @AuditDate.ToString("yyyy-MM-dd")</strong>
+                            <div class="muted">The Agent reads only this date range from the newest end of the audit log.</div>
+                        </div>
+                        <div class="audit-date-nav" aria-label="Activity date navigation">
+                            <Button Text="Previous day" OnClick="PreviousAuditDayAsync" />
+                            <DateField TValue="DateOnly" id="audit-date" Value="AuditDate" ValueChanged="AuditDateChangedAsync" aria-label="Activity date" />
+                            <Button Text="Next day" OnClick="NextAuditDayAsync" />
+                            <Button Text="Today" OnClick="TodayAuditAsync" />
+                        </div>
                     </div>
-                    <div class="actions">
-                        <Button Text="Previous day" OnClick="PreviousAuditDayAsync" />
-                        <input type="date" aria-label="Activity date" value="@AuditDate.ToString("yyyy-MM-dd")" @onchange="AuditDateChangedAsync" />
-                        <Button Text="Next day" OnClick="NextAuditDayAsync" />
-                        <Button Text="Today" OnClick="TodayAuditAsync" />
+
+                    <div class="audit-filters">
+                        <div class="field">
+                            <label for="audit-project-filter">Project</label>
+                            <SelectField TValue="string" id="audit-project-filter" @bind-Value="AuditProjectFilter">
+                                <option value="">All projects</option>
+                                @foreach (var projectName in AuditProjectOptions)
+                                {
+                                    <option value="@projectName">@projectName</option>
+                                }
+                            </SelectField>
+                        </div>
+                        <div class="field">
+                            <label for="audit-capability-filter">Action / capability</label>
+                            <TextField id="audit-capability-filter" list="audit-capability-options" placeholder="All actions" @bind-Value="AuditCapabilityFilter" />
+                            <datalist id="audit-capability-options">
+                                @foreach (var capability in AuditCapabilityOptions)
+                                {
+                                    <option value="@capability"></option>
+                                }
+                            </datalist>
+                        </div>
+                        <div class="audit-filter-actions">
+                            <div class="actions">
+                                <Button Text="Apply filters" OnClick="LoadAuditAsync" />
+                                <Button Text="Clear filters" OnClick="ClearAuditFiltersAsync" />
+                            </div>
+                            <Checkbox TValue="bool" @bind-Value="AuditLiveRefresh" Label="Live refresh" />
+                        </div>
+                    </div>
+                    <div class="muted audit-live-status">@AuditLiveRefreshStatus</div>
+
+                    <div class="actions audit-cleanup-actions">
+                        @if (!ConfirmAuditCleanup)
+                        {
+                            <Button Text="Clean up older activity" OnClick="() => ConfirmAuditCleanup = true" />
+                        }
+                        else
+                        {
+                            <span class="muted">Permanently delete activity before @AuditDate.ToString("yyyy-MM-dd")?</span>
+                            <Button Text="Confirm cleanup" OnClick="CleanupAuditAsync" />
+                            <Button Text="Cancel" OnClick="() => ConfirmAuditCleanup = false" />
+                        }
+                        @if (!string.IsNullOrWhiteSpace(AuditMessage))
+                        {
+                            <span class="muted">@AuditMessage</span>
+                        }
                     </div>
                 </div>
 
-                <div class="audit-filters">
-                    <div class="field">
-                        <label for="audit-project-filter">Project</label>
-                        <input id="audit-project-filter" list="audit-project-options" placeholder="All projects" @bind="AuditProjectFilter" />
-                        <datalist id="audit-project-options">
-                            @foreach (var projectName in AuditProjectOptions)
-                            {
-                                <option value="@projectName"></option>
-                            }
-                        </datalist>
-                    </div>
-                    <div class="field">
-                        <label for="audit-capability-filter">Action / capability</label>
-                        <input id="audit-capability-filter" list="audit-capability-options" placeholder="All actions" @bind="AuditCapabilityFilter" />
-                        <datalist id="audit-capability-options">
-                            @foreach (var capability in AuditCapabilityOptions)
-                            {
-                                <option value="@capability"></option>
-                            }
-                        </datalist>
-                    </div>
-                    <div class="audit-filter-actions">
-                        <div class="actions">
-                            <Button Text="Apply filters" OnClick="LoadAuditAsync" />
-                            <Button Text="Clear filters" OnClick="ClearAuditFiltersAsync" />
+                <div class="audit-results" aria-label="Activity results">
+                    @if (Audit.Count == 0)
+                    {
+                        <div class="muted audit-empty">@(HasAuditFilters ? "No activity matches the current filters." : "No activity recorded for this date.")</div>
+                    }
+                    @foreach (var item in Audit)
+                    {
+                        <div class="row audit-row" @key="AuditKey(item)">
+                            <div class="audit-row-heading">
+                                <strong>@item.Capability</strong>
+                                <span class="muted"> · @item.Timestamp.LocalDateTime</span>
+                                @if (!string.IsNullOrWhiteSpace(item.Project))
+                                {
+                                    <span class="muted"> · project: @item.Project</span>
+                                }
+                            </div>
+                            <div>@item.Target</div>
+                            <div class="muted">@item.Result@if (!string.IsNullOrWhiteSpace(item.Credential)) { <text> · credential: @item.Credential</text> }@if (!string.IsNullOrWhiteSpace(item.Tool)) { <text> · tool: @item.Tool</text> }</div>
                         </div>
-                        <label class="update-toggle">
-                            <input type="checkbox" @bind="AuditLiveRefresh" />
-                            <span>Live refresh</span>
-                        </label>
-                    </div>
-                </div>
-                <div class="muted audit-live-status">@AuditLiveRefreshStatus</div>
-
-                <div class="actions" style="margin-top:12px">
-                    @if (!ConfirmAuditCleanup)
-                    {
-                        <Button Text="Clean up older activity" OnClick="() => ConfirmAuditCleanup = true" />
-                    }
-                    else
-                    {
-                        <span class="muted">Permanently delete activity before @AuditDate.ToString("yyyy-MM-dd")?</span>
-                        <Button Text="Confirm cleanup" OnClick="CleanupAuditAsync" />
-                        <Button Text="Cancel" OnClick="() => ConfirmAuditCleanup = false" />
-                    }
-                    @if (!string.IsNullOrWhiteSpace(AuditMessage))
-                    {
-                        <span class="muted">@AuditMessage</span>
                     }
                 </div>
-                @if (Audit.Count == 0)
-                {
-                    <div class="muted" style="margin-top:12px">@(HasAuditFilters ? "No activity matches the current filters." : "No activity recorded for this date.")</div>
-                }
-                @foreach (var item in Audit)
-                {
-                    <div class="row audit-row" @key="AuditKey(item)">
-                        <div class="audit-row-heading">
-                            <strong>@item.Capability</strong>
-                            <span class="muted"> · @item.Timestamp.LocalDateTime</span>
-                            @if (!string.IsNullOrWhiteSpace(item.Project))
-                            {
-                                <span class="muted"> · project: @item.Project</span>
-                            }
-                        </div>
-                        <div>@item.Target</div>
-                        <div class="muted">@item.Result@if (!string.IsNullOrWhiteSpace(item.Credential)) { <text> · credential: @item.Credential</text> }@if (!string.IsNullOrWhiteSpace(item.Tool)) { <text> · tool: @item.Tool</text> }</div>
-                    </div>
-                }
             </div>
         }
         </div>
@@ -542,6 +543,10 @@
     private string? DeviceMcpUrl => Status?.Relay is { Enabled: true, Url: { Length: > 0 } relayUrl, DeviceId: { Length: > 0 } deviceId }
         ? $"{relayUrl.TrimEnd('/')}/mcp/{Uri.EscapeDataString(deviceId)}"
         : null;
+
+    private string ContentScrollClass => Section is "dashboard" or "logs" or "audit"
+        ? "content-scroll content-scroll-managed"
+        : "content-scroll";
 
     private string Title => Section switch
     {
@@ -748,10 +753,9 @@
         DeviceUrlCopied = true;
     }
 
-    private async Task SetPreventSleepAsync(ChangeEventArgs args)
+    private async Task SetPreventSleepAsync(bool requested)
     {
         if (ChangingPower || PowerStatus is null) return;
-        var requested = args.Value is bool value && value;
         var previous = PowerStatus;
         ChangingPower = true;
         try
@@ -942,7 +946,8 @@
         var capability = string.IsNullOrWhiteSpace(AuditCapabilityFilter) ? null : AuditCapabilityFilter.Trim();
         Audit = await Api.GetAuditAsync(500, from, to, project, capability, _disposeCts.Token);
 
-        AuditProjectOptions = AuditProjectOptions
+        AuditProjectOptions = (Status?.Projects ?? Array.Empty<string>())
+            .Concat(AuditProjectOptions)
             .Concat(Audit.Where(x => !string.IsNullOrWhiteSpace(x.Project)).Select(x => x.Project!))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
@@ -989,15 +994,12 @@
         await LoadAuditAsync();
     }
 
-    private async Task AuditDateChangedAsync(ChangeEventArgs e)
+    private async Task AuditDateChangedAsync(DateOnly value)
     {
-        if (DateOnly.TryParse(e.Value?.ToString(), out var value))
-        {
-            AuditDate = value;
-            ConfirmAuditCleanup = false;
-            AuditMessage = null;
-            await LoadAuditAsync();
-        }
+        AuditDate = value;
+        ConfirmAuditCleanup = false;
+        AuditMessage = null;
+        await LoadAuditAsync();
     }
 
     private async Task CleanupAuditAsync()

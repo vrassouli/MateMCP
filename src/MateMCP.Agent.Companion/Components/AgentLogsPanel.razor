@@ -1,14 +1,14 @@
 @implements IAsyncDisposable
 @inject AgentApiClient Api
 
-<div class="panel">
+<div class="panel agent-logs-panel">
     <div class="toolbar log-toolbar">
         <div>
             <strong>Agent diagnostics</strong>
             <div class="muted">Recent structured Agent logs are retained locally with bounded history and sensitive-value redaction.</div>
         </div>
         <div class="actions">
-            <label class="update-toggle"><input type="checkbox" @bind="Live" /> Live updates</label>
+            <Checkbox TValue="bool" @bind-Value="Live" Label="Live updates" />
             <Button Text="Copy diagnostics" OnClick="CopyAsync" />
             @if (!ConfirmClear)
             {
@@ -25,18 +25,18 @@
     <div class="log-filters">
         <div class="field">
             <label for="agent-log-level">Minimum level</label>
-            <select id="agent-log-level" @bind="Level" @bind:after="ReloadAsync">
+            <SelectField TValue="string" id="agent-log-level" Value="Level" ValueChanged="LogLevelChangedAsync">
                 <option value="">Trace</option>
                 <option value="Debug">Debug</option>
                 <option value="Information">Information</option>
                 <option value="Warning">Warning</option>
                 <option value="Error">Error</option>
                 <option value="Critical">Critical</option>
-            </select>
+            </SelectField>
         </div>
         <div class="field">
             <label for="agent-log-search">Search</label>
-            <input id="agent-log-search" @bind="Search" @onkeydown="HandleSearchKeyAsync" placeholder="Message or category" />
+            <TextField id="agent-log-search" @bind-Value="Search" @onkeydown="HandleSearchKeyAsync" placeholder="Message or category" />
         </div>
         <div class="actions"><Button Text="Apply" OnClick="ReloadAsync" /></div>
     </div>
@@ -56,7 +56,7 @@
             <div class="log-entry" @key="entry.Id"><span class="log-time">@entry.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff")</span> <span class="log-level">@LevelName(entry.Level)</span> <span class="log-category">[@entry.Category]</span> @entry.Message</div>
         }
     </div>
-    <div class="muted" style="margin-top:8px">Scrolling upward pauses automatic viewport following; return near the bottom to resume. Live updates can also be paused with the toggle.</div>
+    <div class="muted log-follow-note">Scrolling upward pauses automatic viewport following; return near the bottom to resume. Live updates can also be paused with the toggle.</div>
 </div>
 
 @code {
@@ -113,6 +113,12 @@
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    private async Task LogLevelChangedAsync(string? level)
+    {
+        Level = level ?? string.Empty;
+        await ReloadAsync();
     }
 
     private async Task HandleSearchKeyAsync(KeyboardEventArgs e)

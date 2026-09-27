@@ -11,7 +11,7 @@
             <div class="muted">Register and manage local workspaces. Removing a project never deletes its files.</div>
         </div>
         <div class="actions">
-            <input @bind="Search" @bind:event="oninput" placeholder="Search projects" aria-label="Search projects" />
+            <TextField BindValueEvent="oninput" @bind-Value="Search" placeholder="Search projects" aria-label="Search projects" />
             <Button Text="Add Project" OnClick="BeginAdd" />
         </div>
     </div>
@@ -25,18 +25,18 @@
     {
         <div class="panel" style="margin-top:12px">
             <strong>@(EditingOriginalName is null ? "Add Project" : "Edit Project")</strong>
-            <div class="field"><label for="project-name">Name</label><input id="project-name" @bind="EditName" /></div>
+            <div class="field"><label for="project-name">Name</label><TextField id="project-name" @bind-Value="EditName" /></div>
             <div class="field">
                 <label for="project-workspace-path">Workspace path</label>
                 <div class="workspace-path-row">
-                    <input id="project-workspace-path" @bind="EditRoot" placeholder="/path/to/project or C:\projects\project" />
+                    <TextField id="project-workspace-path" @bind-Value="EditRoot" placeholder="/path/to/project or C:\projects\project" />
                     <Button Text="Browse..." OnClick="PickWorkspaceAsync" />
                 </div>
             </div>
             <div class="actions">
-                <label><input type="checkbox" @bind="EditRead" /> Read</label>
-                <label><input type="checkbox" @bind="EditWrite" /> Write</label>
-                <label><input type="checkbox" @bind="EditShell" /> Shell</label>
+                <Checkbox TValue="bool" @bind-Value="EditRead" Label="Read" />
+                <Checkbox TValue="bool" @bind-Value="EditWrite" Label="Write" />
+                <Checkbox TValue="bool" @bind-Value="EditShell" Label="Shell" />
             </div>
             <div class="actions" style="margin-top:12px">
                 <Button Text="Save" OnClick="SaveAsync" />

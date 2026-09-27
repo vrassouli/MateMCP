@@ -132,18 +132,23 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
-    public void Companion_header_stays_outside_the_only_content_scroll_region()
+    public void Companion_header_stays_outside_content_scroll_and_managed_pages_use_inner_scroll_owners()
     {
         var root = FindRepositoryRoot();
         var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
         var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
 
         var headerIndex = main.IndexOf("<header class=\"content-header\">", StringComparison.Ordinal);
-        var scrollIndex = main.IndexOf("<div class=\"content-scroll\">", StringComparison.Ordinal);
+        var scrollIndex = main.IndexOf("<div class=\"@ContentScrollClass\">", StringComparison.Ordinal);
         Assert.True(headerIndex >= 0 && scrollIndex > headerIndex);
-        Assert.DoesNotContain("<div class=\"content-scroll\" tabindex=", main, StringComparison.Ordinal);
+        Assert.Contains("Section is \"dashboard\" or \"logs\" or \"audit\"", main, StringComparison.Ordinal);
+        Assert.Contains("content-scroll content-scroll-managed", main, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.content\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);[^}]*overflow:\s*hidden;", styles);
         Assert.Matches(@"(?s)\.content-scroll\s*\{[^}]*overflow-y:\s*auto;[^}]*scroll-padding-block:\s*16px;", styles);
+        Assert.Matches(@"(?s)\.content-scroll-managed\s*\{[^}]*display:\s*flex;[^}]*overflow:\s*hidden;", styles);
+        Assert.Contains(".dashboard-tabs > .panels > .tab-panel", styles, StringComparison.Ordinal);
+        Assert.Contains(".audit-results {", styles, StringComparison.Ordinal);
+        Assert.Contains(".agent-logs-panel {", styles, StringComparison.Ordinal);
         Assert.Contains("html, body { overflow: hidden; }", styles, StringComparison.Ordinal);
     }
 
@@ -214,7 +219,8 @@ public sealed class CompanionInteractionRegressionTests
         var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
 
         Assert.Contains("DateOnly.FromDateTime(DateTime.Now)", main, StringComparison.Ordinal);
-        Assert.Contains("type=\"date\"", main, StringComparison.Ordinal);
+        Assert.Contains("<DateField TValue=\"DateOnly\" id=\"audit-date\"", main, StringComparison.Ordinal);
+        Assert.Contains("<SelectField TValue=\"string\" id=\"audit-project-filter\"", main, StringComparison.Ordinal);
         Assert.Contains("id=\"audit-project-filter\"", main, StringComparison.Ordinal);
         Assert.Contains("id=\"audit-capability-filter\"", main, StringComparison.Ordinal);
         Assert.Contains("ClearAuditFiltersAsync", main, StringComparison.Ordinal);
@@ -232,6 +238,9 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("&project=", client, StringComparison.Ordinal);
         Assert.Contains("&capability=", client, StringComparison.Ordinal);
         Assert.Contains(".audit-filters {", styles, StringComparison.Ordinal);
+        Assert.Contains(".audit-date-nav {", styles, StringComparison.Ordinal);
+        Assert.Contains(".audit-results {", styles, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.audit-results\s*\{[^}]*overflow-y:\s*auto;", styles);
         Assert.Matches(@"(?s)@media \(max-width: 760px\).*?\.audit-filters\s*\{\s*grid-template-columns:\s*1fr;", styles);
         Assert.Contains("class=\"row audit-row\"", main, StringComparison.Ordinal);
         Assert.Contains(".audit-row {", styles, StringComparison.Ordinal);
@@ -249,25 +258,76 @@ public sealed class CompanionInteractionRegressionTests
         var memory = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "SkillsMemoryPanel.razor"));
         var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
 
-        Assert.Contains("<label for=\"project-name\">Name</label><input id=\"project-name\"", projects, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"project-name\">Name</label><TextField id=\"project-name\"", projects, StringComparison.Ordinal);
         Assert.Contains("<label for=\"project-workspace-path\">Workspace path</label>", projects, StringComparison.Ordinal);
-        Assert.Contains("<input id=\"project-workspace-path\"", projects, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"project-workspace-path\"", projects, StringComparison.Ordinal);
         Assert.Contains("<label for=\"agent-log-level\">Minimum level</label>", logs, StringComparison.Ordinal);
-        Assert.Contains("<select id=\"agent-log-level\"", logs, StringComparison.Ordinal);
+        Assert.Contains("<SelectField TValue=\"string\" id=\"agent-log-level\"", logs, StringComparison.Ordinal);
         Assert.Contains("<label for=\"agent-log-search\">Search</label>", logs, StringComparison.Ordinal);
-        Assert.Contains("<input id=\"agent-log-search\"", logs, StringComparison.Ordinal);
-        Assert.Contains("<label for=\"memory-title\">Title</label><input id=\"memory-title\"", memory, StringComparison.Ordinal);
-        Assert.Contains("<label for=\"memory-content\">Content (Markdown)</label><textarea id=\"memory-content\"", memory, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"agent-log-search\"", logs, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"memory-title\">Title</label><TextField id=\"memory-title\"", memory, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"memory-content\">Content (Markdown)</label><TextField id=\"memory-content\" Rows=\"12\"", memory, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Filter by type\"", memory, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Search Skills and Memory\"", memory, StringComparison.Ordinal);
         Assert.Contains("<label for=\"shell-input\">Input</label>", main, StringComparison.Ordinal);
-        Assert.Contains("<input id=\"shell-input\"", main, StringComparison.Ordinal);
-        Assert.Contains("<label for=\"secret-name\">Name</label><input id=\"secret-name\"", main, StringComparison.Ordinal);
-        Assert.Contains("<label for=\"secret-value\">Secret value</label><input id=\"secret-value\"", main, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"shell-input\"", main, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"secret-name\">Name</label><TextField id=\"secret-name\"", main, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"secret-value\">Secret value</label><TextField id=\"secret-value\"", main, StringComparison.Ordinal);
         Assert.Contains("role=\"group\" aria-labelledby=\"secret-allowed-use-label\"", main, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Activity date\"", main, StringComparison.Ordinal);
         Assert.Contains("<label for=\"audit-project-filter\">Project</label>", main, StringComparison.Ordinal);
         Assert.Contains("<label for=\"audit-capability-filter\">Action / capability</label>", main, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Companion_managed_scroll_pages_use_bluent_controls_and_fill_available_height()
+    {
+        var root = FindRepositoryRoot();
+        var main = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        var logs = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "AgentLogsPanel.razor"));
+        var styles = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+
+        Assert.Contains("<TabList Class=\"dashboard-tabs\">", main, StringComparison.Ordinal);
+        Assert.Contains("<SelectField TValue=\"string\" id=\"audit-project-filter\"", main, StringComparison.Ordinal);
+        Assert.Contains("<DateField TValue=\"DateOnly\" id=\"audit-date\"", main, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"audit-capability-filter\"", main, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"shell-input\"", main, StringComparison.Ordinal);
+        Assert.Contains("<Checkbox TValue=\"bool\"", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("<input", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("<select", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("<textarea", main, StringComparison.Ordinal);
+
+        Assert.Contains("class=\"panel agent-logs-panel\"", logs, StringComparison.Ordinal);
+        Assert.Contains("<SelectField TValue=\"string\" id=\"agent-log-level\"", logs, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"agent-log-search\"", logs, StringComparison.Ordinal);
+        Assert.Contains("<Checkbox TValue=\"bool\" @bind-Value=\"Live\"", logs, StringComparison.Ordinal);
+        Assert.DoesNotContain("<input", logs, StringComparison.Ordinal);
+        Assert.DoesNotContain("<select", logs, StringComparison.Ordinal);
+
+        var componentsDirectory = Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components");
+        foreach (var componentPath in Directory.EnumerateFiles(componentsDirectory, "*.razor", SearchOption.AllDirectories))
+        {
+            var markup = File.ReadAllText(componentPath);
+            Assert.DoesNotContain("<input", markup, StringComparison.Ordinal);
+            Assert.DoesNotContain("<select", markup, StringComparison.Ordinal);
+            Assert.DoesNotContain("<textarea", markup, StringComparison.Ordinal);
+        }
+
+        var projects = File.ReadAllText(Path.Combine(componentsDirectory, "ProjectsPanel.razor"));
+        var memory = File.ReadAllText(Path.Combine(componentsDirectory, "SkillsMemoryPanel.razor"));
+        var updates = File.ReadAllText(Path.Combine(componentsDirectory, "DesktopUpdatePanel.razor"));
+        Assert.Contains("<TextField BindValueEvent=\"oninput\" @bind-Value=\"Search\"", projects, StringComparison.Ordinal);
+        Assert.Contains("<Checkbox TValue=\"bool\" @bind-Value=\"EditRead\"", projects, StringComparison.Ordinal);
+        Assert.Contains("<SelectField TValue=\"string\" id=\"memory-type\"", memory, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"memory-content\" Rows=\"12\"", memory, StringComparison.Ordinal);
+        Assert.Contains("ValueChanged=\"SetAutoUpdateAsync\"", updates, StringComparison.Ordinal);
+
+        Assert.Matches(@"(?s)\.dashboard-tabs > \.panels > \.tab-panel\s*\{[^}]*overflow-y:\s*auto;", styles);
+        Assert.Matches(@"(?s)\.agent-logs-panel\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;", styles);
+        Assert.Matches(@"(?s)\.log-terminal\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*max-height:\s*none;[^}]*margin-top:\s*14px;", styles);
+        Assert.Matches(@"(?s)\.audit-panel\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;", styles);
+        Assert.Matches(@"(?s)\.audit-results\s*\{[^}]*flex:\s*1 1 auto;[^}]*overflow-y:\s*auto;", styles);
+        Assert.DoesNotContain("max-height: 68vh", styles, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -281,7 +341,7 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("<dialog id=\"skills-memory-editor\"", panel, StringComparison.Ordinal);
         Assert.Contains("Id=\"skills-memory-add\" Text=\"Add item\"", panel, StringComparison.Ordinal);
         Assert.Contains("await JS.InvokeVoidAsync(\"mateMcpModal.open\", \"skills-memory-editor\", \"#memory-title\", \"#skills-memory-add\")", panel, StringComparison.Ordinal);
-        Assert.Contains("<input id=\"memory-title\" autofocus", panel, StringComparison.Ordinal);
+        Assert.Contains("<TextField id=\"memory-title\" autofocus", panel, StringComparison.Ordinal);
         Assert.Contains("await LoadAsync();", panel, StringComparison.Ordinal);
         Assert.Contains("await CloseEditorAsync();", panel, StringComparison.Ordinal);
         Assert.Contains("Title and Content are required.", panel, StringComparison.Ordinal);
