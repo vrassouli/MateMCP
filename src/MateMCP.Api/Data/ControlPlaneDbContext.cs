@@ -5,6 +5,7 @@ namespace MateMCP.Api.Data;
 public sealed class ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext> options) : DbContext(options)
 {
     public DbSet<UserAccount> Users => Set<UserAccount>();
+    public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
     public DbSet<AgentDevice> Agents => Set<AgentDevice>();
     public DbSet<EnrollmentSession> Enrollments => Set<EnrollmentSession>();
     public DbSet<ApprovalRequest> Approvals => Set<ApprovalRequest>();
@@ -14,7 +15,20 @@ public sealed class ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext
     {
         base.OnModelCreating(builder);
         builder.UseOpenIddict();
+
         builder.Entity<UserAccount>().HasIndex(x => x.NormalizedEmail).IsUnique();
+
+        builder.Entity<ExternalLogin>().Property(x => x.Provider).HasMaxLength(64);
+        builder.Entity<ExternalLogin>().Property(x => x.ProviderKey).HasMaxLength(512);
+        builder.Entity<ExternalLogin>().Property(x => x.Email).HasMaxLength(320);
+        builder.Entity<ExternalLogin>().HasIndex(x => new { x.Provider, x.ProviderKey }).IsUnique();
+        builder.Entity<ExternalLogin>().HasIndex(x => new { x.UserAccountId, x.Provider }).IsUnique();
+        builder.Entity<ExternalLogin>()
+            .HasOne(x => x.User)
+            .WithMany(x => x.ExternalLogins)
+            .HasForeignKey(x => x.UserAccountId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.Entity<AgentDevice>().HasIndex(x => x.PublicId).IsUnique();
         builder.Entity<AgentDevice>().HasIndex(x => x.CredentialHash).IsUnique();
         builder.Entity<EnrollmentSession>().HasIndex(x => x.UserCode).IsUnique();
@@ -32,7 +46,19 @@ public sealed class UserAccount
     public bool IsAdmin { get; set; }
     public bool IsDisabled { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public List<ExternalLogin> ExternalLogins { get; set; } = [];
     public List<AgentDevice> Agents { get; set; } = [];
+}
+
+public sealed class ExternalLogin
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserAccountId { get; set; }
+    public UserAccount? User { get; set; }
+    public required string Provider { get; set; }
+    public required string ProviderKey { get; set; }
+    public required string Email { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class AgentDevice

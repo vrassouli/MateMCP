@@ -155,6 +155,8 @@ curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/relay
 
 The API supports SQLite for a small single-server deployment and SQL Server for external database deployments. Web, API, and Relay should sit behind HTTPS reverse proxies; their container ports should not be exposed directly to the Internet. Keep `matemcp.com`, `api.matemcp.com`, and `relay.matemcp.com` routed to their independent backends.
 
+The account portal can optionally enable Google, Microsoft, GitHub, and Apple sign-in while retaining local password authentication. See [`docs/external-login-providers.md`](docs/external-login-providers.md) for provider setup, callback URLs, and safe account-linking behavior.
+
 Production hostname/TLS routing is documented in [`docs/production-web-deployment.md`](docs/production-web-deployment.md). Web deployment details are in [`deploy/web/README.md`](deploy/web/README.md), and Relay-specific reverse-proxy guidance remains in [`deploy/relay/README.md`](deploy/relay/README.md).
 
 ## Documentation

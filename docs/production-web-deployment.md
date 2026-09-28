@@ -34,7 +34,9 @@ API production state is persistent and security-sensitive:
 - preserve the API data volume across updates;
 - keep the API/Relay internal key synchronized through the canonical installer;
 - configure a bootstrap administrator through deployment secrets/environment on the initial deployment or promote the configured matching account with the idempotent bootstrap behavior;
-- never put bootstrap passwords, internal keys, database credentials, or Agent credentials in Git or deployment documentation.
+- never put bootstrap passwords, internal keys, database credentials, external-login provider secrets, or Agent credentials in Git or deployment documentation.
+
+External login providers are optional and independently configurable. See [External login providers](external-login-providers.md) for provider credentials, callback URLs, account-linking behavior, and the production verification checklist.
 
 The Web service has no private application secrets.
 

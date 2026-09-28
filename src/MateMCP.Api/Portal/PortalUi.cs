@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using MateMCP.Api.ExternalAuth;
 using Microsoft.AspNetCore.Antiforgery;
 
 namespace MateMCP.Api.Portal;
@@ -15,6 +16,8 @@ public static class PortalUi
         int statusCode = StatusCodes.Status200OK)
     {
         NoStore(context);
+        if (string.IsNullOrWhiteSpace(error))
+            error = context.Request.Query["externalError"].ToString();
 
         var title = registration ? "Create your account" : "Welcome back";
         var eyebrow = registration ? "Start with MateMCP" : "MateMCP Control";
@@ -34,6 +37,12 @@ public static class PortalUi
         var errorMarkup = string.IsNullOrWhiteSpace(error)
             ? ""
             : $"<div class=\"form-alert\" role=\"alert\"><span class=\"alert-icon\">!</span><span>{H(error)}</span></div>";
+
+        var externalCatalog = context.RequestServices.GetService<ExternalAuthCatalog>();
+        var externalMode = registration ? "register" : "login";
+        var externalMarkup = externalCatalog is null || externalCatalog.Providers.Count == 0
+            ? ""
+            : $"<div class=\"external-auth\"><div class=\"external-provider-grid\">{string.Join("", externalCatalog.Providers.Select(provider => $"<a class=\"external-provider-button\" href=\"/auth/external/{Uri.EscapeDataString(provider.Id)}?mode={externalMode}&amp;returnUrl={Uri.EscapeDataString(returnUrl)}\"><span class=\"provider-mark provider-{H(provider.Id)}\" aria-hidden=\"true\">{ProviderMark(provider.Id)}</span><span>Continue with {H(provider.DisplayName)}</span></a>"))}</div><div class=\"auth-divider\"><span>or continue with email</span></div></div>";
 
         var body = $"""
             <div class="auth-layout">
@@ -68,6 +77,7 @@ public static class PortalUi
                     <p>{H(subtitle)}</p>
                   </div>
                   {errorMarkup}
+                  {externalMarkup}
                   <form class="auth-form" method="post" action="{action}">
                     <input type="hidden" name="returnUrl" value="{H(returnUrl)}">
                     <div class="form-field">
@@ -125,6 +135,7 @@ public static class PortalUi
                     {Nav("overview", "/dashboard", "⌂", "Overview")}
                     {Nav("devices", "/devices", "◇", "Devices")}
                     {Nav("approvals", "/approvals", "!", "Approvals")}
+                    {Nav("account", "/account", "◎", "Account")}
                     {(context.User.IsInRole("admin") ? Nav("admin", "/admin", "A", "Admin") : "")}
                     {Nav("device", "/device", "+", "Add device")}
                     <a class="portal-nav-link" href="https://matemcp.com/"><span class="nav-icon" aria-hidden="true">↗</span><span>Product site</span></a>
@@ -185,6 +196,16 @@ public static class PortalUi
 
     public static string Alert(string message, string kind = "error")
         => $"<div class=\"inline-alert inline-alert-{H(kind)}\" role=\"alert\"><span aria-hidden=\"true\">!</span><div>{H(message)}</div></div>";
+
+    private static string ProviderMark(string provider)
+        => provider.ToLowerInvariant() switch
+        {
+            "google" => "G",
+            "microsoft" => "M",
+            "github" => "GH",
+            "apple" => "●",
+            _ => provider[..Math.Min(2, provider.Length)].ToUpperInvariant()
+        };
 
     public static string H(string value) => WebUtility.HtmlEncode(value);
 
