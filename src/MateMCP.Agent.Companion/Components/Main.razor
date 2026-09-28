@@ -1,6 +1,7 @@
 @implements IAsyncDisposable
 @inject AgentApiClient Api
 @inject AgentProcessController AgentProcess
+@inject CompanionLifecycleStore CompanionLifecycle
 @inject IJSRuntime JS
 
 <div class="shell">
@@ -59,7 +60,7 @@
         {
             <TabList Class="dashboard-tabs">
                 <Tab Text="Overview">
-                    @if (!AgentRunning || Approvals.Count > 0)
+                    @if (!AgentRunning || Approvals.Count > 0 || CompanionLifecycle.PreviousUnexpectedExit is not null)
                     {
                         <div class="dashboard-attention-strip">
                             @if (!AgentRunning)
@@ -69,6 +70,14 @@
                             @if (Approvals.Count > 0)
                             {
                                 <div><strong>@Approvals.Count approval@(Approvals.Count == 1 ? "" : "s") waiting.</strong> Open Approval Center to review.</div>
+                            }
+                            @if (CompanionLifecycle.PreviousUnexpectedExit is { } previousExit)
+                            {
+                                <div>
+                                    <strong>The previous Companion session did not record a clean shutdown.</strong>
+                                    Last lifecycle event: @previousExit.LastEvent at @previousExit.LastEventAt.LocalDateTime.ToString("g").
+                                    The background Agent can remain online independently.
+                                </div>
                             }
                         </div>
                     }
@@ -84,6 +93,7 @@
                                 </div>
                             </div>
                             <div class="muted">MateMCP runs locally in the background on this device.</div>
+                            <div class="muted dashboard-card-note">Companion runs on demand. Closing this window exits Companion; the Agent continues in the background.</div>
                             <div class="actions">
                                 @if (LifecycleBusy)
                                 {

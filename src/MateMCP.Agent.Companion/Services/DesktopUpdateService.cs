@@ -14,13 +14,15 @@ public sealed class DesktopUpdateService : IDisposable
     private const string MarkerFileName = ".desktop-release-asset";
     private const string FailureFileName = ".desktop-update-error";
 
+    private readonly CompanionLifecycleStore _lifecycle;
     private readonly HttpClient _http = new()
     {
         Timeout = Timeout.InfiniteTimeSpan
     };
 
-    public DesktopUpdateService()
+    public DesktopUpdateService(CompanionLifecycleStore lifecycle)
     {
+        _lifecycle = lifecycle;
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("MateMCP-Agent-Companion/1.0");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
     }
@@ -91,6 +93,7 @@ public sealed class DesktopUpdateService : IDisposable
             throw;
         }
 
+        _lifecycle.MarkTerminal("update-handoff");
         Environment.Exit(0);
     }
 

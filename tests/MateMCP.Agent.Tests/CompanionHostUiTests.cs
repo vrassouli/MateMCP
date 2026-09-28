@@ -71,6 +71,31 @@ public sealed class CompanionHostUiTests
     }
 
     [Fact]
+    public void Companion_records_lifecycle_and_surfaces_previous_unclean_shutdown()
+    {
+        var root = FindRepositoryRoot();
+        var companionRoot = Path.Combine(root, "src", "MateMCP.Agent.Companion");
+        var app = File.ReadAllText(Path.Combine(companionRoot, "App.xaml.cs"));
+        var maui = File.ReadAllText(Path.Combine(companionRoot, "MauiProgram.cs"));
+        var update = File.ReadAllText(Path.Combine(companionRoot, "Services", "DesktopUpdateService.cs"));
+        var main = File.ReadAllText(Path.Combine(companionRoot, "Components", "Main.razor"));
+
+        Assert.Contains("AddSingleton<CompanionLifecycleStore>()", maui, StringComparison.Ordinal);
+        Assert.Contains("_lifecycle.BeginSession()", app, StringComparison.Ordinal);
+        Assert.Contains("AppDomain.CurrentDomain.UnhandledException", app, StringComparison.Ordinal);
+        Assert.Contains("TaskScheduler.UnobservedTaskException", app, StringComparison.Ordinal);
+        Assert.Contains("AppDomain.CurrentDomain.ProcessExit", app, StringComparison.Ordinal);
+        Assert.Contains("window.Destroying", app, StringComparison.Ordinal);
+        Assert.Contains("_lifecycle.MarkTerminal(\"update-handoff\")", update, StringComparison.Ordinal);
+        var handoff = update.IndexOf("_lifecycle.MarkTerminal(\"update-handoff\")", StringComparison.Ordinal);
+        var exit = update.IndexOf("Environment.Exit(0)", StringComparison.Ordinal);
+        Assert.InRange(handoff, 0, exit - 1);
+        Assert.Contains("PreviousUnexpectedExit", main, StringComparison.Ordinal);
+        Assert.Contains("Companion runs on demand.", main, StringComparison.Ordinal);
+        Assert.Contains("the Agent continues in the background.", main, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Windows_approval_notifications_have_an_unpackaged_native_toast_fallback()
     {
         var root = FindRepositoryRoot();
