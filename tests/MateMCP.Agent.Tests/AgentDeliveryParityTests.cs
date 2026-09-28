@@ -75,6 +75,18 @@ public sealed class AgentDeliveryParityTests
     }
 
     [Fact]
+    public void Windows_normal_mode_does_not_silently_leave_an_elevated_scheduled_task()
+    {
+        var root = FindRepositoryRoot();
+        var mode = File.ReadAllText(Path.Combine(root, "scripts", "configure-agent-mode-windows.ps1"));
+
+        Assert.Contains("Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue", mode, StringComparison.Ordinal);
+        Assert.Contains("Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop", mode, StringComparison.Ordinal);
+        Assert.Contains("existing MateMCP Agent scheduled task is still registered after cleanup", mode, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue", mode, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Windows_elevated_agent_keeps_companion_subtree_at_medium_integrity()
     {
         var root = FindRepositoryRoot();
@@ -144,6 +156,10 @@ public sealed class AgentDeliveryParityTests
         Assert.Contains("$PreserveNames", windows, StringComparison.Ordinal);
         Assert.Contains("& $AgentInstaller -Source $AgentPayload -NoStart -AgentOnly -AgentMode $AgentMode", desktop, StringComparison.Ordinal);
         Assert.Contains("& $CompanionInstaller -Source $CompanionPayload -NoStart", desktop, StringComparison.Ordinal);
+        Assert.Contains("$staleScheduledTask = if ($AgentMode -eq 'Normal')", desktop, StringComparison.Ordinal);
+        Assert.Contains("$requiresElevation = ($AgentMode -eq 'Elevated') -or ($null -ne $staleScheduledTask)", desktop, StringComparison.Ordinal);
+        Assert.Contains("remove a stale elevated MateMCP Agent scheduled task", desktop, StringComparison.Ordinal);
+        Assert.Contains("Start-Process -FilePath 'powershell.exe' -Verb RunAs", desktop, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

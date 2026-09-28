@@ -11,6 +11,7 @@ $CompanionPayload = Join-Path $PSScriptRoot 'companion-payload'
 $AgentInstaller = Join-Path $PSScriptRoot 'install-windows.ps1'
 $CompanionInstaller = Join-Path $PSScriptRoot 'install-companion-windows.ps1'
 $ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
+$TaskName = 'MateMCP Agent'
 
 if (-not (Test-Path $AgentInstaller)) { throw "Agent installer not found: $AgentInstaller" }
 if (-not (Test-Path $CompanionInstaller)) { throw "Companion installer not found: $CompanionInstaller" }
@@ -20,16 +21,20 @@ if ([string]::IsNullOrWhiteSpace($AgentMode)) {
     $AgentMode = if ($persistedMode -in @('Normal','Elevated')) { $persistedMode } else { 'Normal' }
 }
 
-if ($AgentMode -eq 'Elevated') {
-    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
-    if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"",'-AgentMode','Elevated')
-        if ($NoStart) { $arguments += '-NoStart' }
-        $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList ($arguments -join ' ') -Wait -PassThru
-        if ($process.ExitCode -ne 0) { throw "Elevated MateMCP Desktop installer exited with code $($process.ExitCode)." }
-        return
-    }
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+$isAdministrator = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+$staleScheduledTask = if ($AgentMode -eq 'Normal') { Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } else { $null }
+$requiresElevation = ($AgentMode -eq 'Elevated') -or ($null -ne $staleScheduledTask)
+
+if ($requiresElevation -and -not $isAdministrator) {
+    $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $PSCommandPath + '"'),'-AgentMode',$AgentMode)
+    if ($NoStart) { $arguments += '-NoStart' }
+    $reason = if ($AgentMode -eq 'Elevated') { 'configure Elevated Agent mode' } else { 'remove a stale elevated MateMCP Agent scheduled task' }
+    Write-Host "Administrator authorization is required to $reason."
+    $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList ($arguments -join ' ') -Wait -PassThru
+    if ($process.ExitCode -ne 0) { throw "Elevated MateMCP Desktop installer exited with code $($process.ExitCode)." }
+    return
 }
 
 # Agent installation intentionally runs first because it refreshes %LOCALAPPDATA%\MateMCP.

@@ -14,7 +14,15 @@ using ModelContextProtocol.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 var userConfigPath = ConfigurationBootstrap.EnsureUserConfiguration();
-var agentLogStore = new AgentLogStore(Path.Combine(Path.GetDirectoryName(userConfigPath)!, "agent-logs.jsonl"));
+var agentDataDirectory = Path.GetDirectoryName(userConfigPath)!;
+using var singleInstanceLock = AgentSingleInstanceLock.TryAcquire(agentDataDirectory);
+if (singleInstanceLock is null)
+{
+    Console.Error.WriteLine("MateMCP Agent is already running for this user. Duplicate startup ignored.");
+    return;
+}
+
+var agentLogStore = new AgentLogStore(Path.Combine(agentDataDirectory, "agent-logs.jsonl"));
 builder.Logging.AddProvider(new AgentLogProvider(agentLogStore));
 builder.Configuration.AddJsonFile(userConfigPath, optional: false, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables(prefix: "MATEMCP_");
@@ -410,7 +418,20 @@ app.MapDelete("/secrets/{name}", async (string name, HttpContext context, UserSe
 });
 
 app.MapMcp("/mcp").RequireRateLimiting("mcp");
-app.Run();
+try
+{
+    app.Run();
+}
+catch (IOException ex) when (IsAddressInUse(ex))
+{
+    app.Logger.LogCritical(ex, "MateMCP Agent could not bind {BindAddress}:{Port} because the endpoint is already in use.", options.BindAddress, options.Port);
+    Console.Error.WriteLine($"MateMCP Agent could not start because {options.BindAddress}:{options.Port} is already in use by another process.");
+    Environment.ExitCode = 1;
+}
+
+static bool IsAddressInUse(Exception exception)
+    => exception is Microsoft.AspNetCore.Connections.AddressInUseException
+       || (exception.InnerException is not null && IsAddressInUse(exception.InnerException));
 
 static bool IsLoopback(HttpContext context) { var remote = context.Connection.RemoteIpAddress; return remote is not null && IPAddress.IsLoopback(remote); }
 
