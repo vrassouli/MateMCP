@@ -63,6 +63,19 @@ public sealed class PublicSiteTests : IClassFixture<WebApplicationFactory<Progra
     }
 
     [Fact]
+    public async Task Forwarded_https_emits_hsts_for_reverse_proxy_requests()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+
+        using var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("Strict-Transport-Security", out var hsts));
+        Assert.Contains(hsts, value => value.Contains("max-age=31536000", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Health_endpoint_reports_public_web_service()
     {
         var response = await _client.GetAsync("/health");

@@ -109,6 +109,9 @@ app.Use(async (context, next) =>
 {
     context.Response.OnStarting(() =>
     {
+        if (context.Request.IsHttps)
+            context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000";
+
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
