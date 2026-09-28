@@ -77,10 +77,19 @@ cd "$INSTALL_DIR"
 docker compose pull
 docker compose up -d --force-recreate --remove-orphans
 
+WEB_BIND="$(sed -n 's/^MATEMCP_WEB_BIND=//p' "$ENV_FILE" | head -n 1)"
+WEB_BIND="${WEB_BIND:-127.0.0.1}"
 WEB_PORT="$(sed -n 's/^MATEMCP_WEB_PORT=//p' "$ENV_FILE" | head -n 1)"
 WEB_PORT="${WEB_PORT:-8082}"
+
+case "$WEB_BIND" in
+  0.0.0.0|"") HEALTH_HOST="127.0.0.1" ;;
+  ::|"[::]") HEALTH_HOST="[::1]" ;;
+  *) HEALTH_HOST="$WEB_BIND" ;;
+esac
+
 for _ in {1..45}; do
-  curl -fsS "http://127.0.0.1:${WEB_PORT}/health" >/dev/null 2>&1 && {
+  curl -fsS "http://${HEALTH_HOST}:${WEB_PORT}/health" >/dev/null 2>&1 && {
     echo "MateMCP public Web is running."
     exit 0
   }
