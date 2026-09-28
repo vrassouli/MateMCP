@@ -18,6 +18,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../../src/MateMCP.Agent.Companion/Services/TerminalOutputSanitizer.cs" Link="Companion/TerminalOutputSanitizer.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../src/MateMCP.Agent/MateMCP.Agent.csproj" />
     <ProjectReference Include="../MateMCP.Agent.CredentialPrompt/MateMCP.Agent.CredentialPrompt.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

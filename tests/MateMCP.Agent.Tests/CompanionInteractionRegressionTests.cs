@@ -171,6 +171,27 @@ public sealed class CompanionInteractionRegressionTests
     }
 
     [Fact]
+    public void Companion_interactive_shell_hides_ansi_vt_control_sequences()
+    {
+        const string raw = "\u001b[1t\u001b[?1004h\u001b[?9001h(root@192.168.200.34) Password: \u001b[2;1Hecho READY; uname -a\u001b[2;21H\u001b[2;21H READY FreeBSD OPNsense.internal";
+        var plain = MateMCP.Agent.Companion.Services.TerminalOutputSanitizer.ToPlainText(raw);
+
+        Assert.DoesNotContain('\u001b', plain);
+        Assert.DoesNotContain("[?1004h", plain, StringComparison.Ordinal);
+        Assert.DoesNotContain("[2;1H", plain, StringComparison.Ordinal);
+        Assert.Contains("(root@192.168.200.34) Password: ", plain, StringComparison.Ordinal);
+        Assert.Contains("echo READY; uname -a", plain, StringComparison.Ordinal);
+        Assert.Contains("READY FreeBSD OPNsense.internal", plain, StringComparison.Ordinal);
+
+        const string styled = "\u001b]0;server-title\u0007ready \u001b[31mred\u001b[0m";
+        Assert.Equal("ready red", MateMCP.Agent.Companion.Services.TerminalOutputSanitizer.ToPlainText(styled));
+
+        var main = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "Components", "Main.razor"));
+        Assert.Contains("@TerminalOutputSanitizer.ToPlainText(ShellOutput)", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("<div class=\"terminal\">@ShellOutput</div>", main, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Companion_terminal_follow_pauses_when_user_scrolls_up_and_resumes_at_bottom()
     {
         var index = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "MateMCP.Agent.Companion", "wwwroot", "index.html"));

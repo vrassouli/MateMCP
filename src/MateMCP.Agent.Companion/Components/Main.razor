@@ -275,7 +275,7 @@
                     }
                     else
                     {
-                        <div class="terminal">@ShellOutput</div>
+                        <div class="terminal">@TerminalOutputSanitizer.ToPlainText(ShellOutput)</div>
                         <div class="field shell-input-field">
                             <label for="shell-input">Input</label>
                             <TextField id="shell-input" @bind-Value="ShellInput" @onkeydown="HandleShellKeyDown" placeholder="Send input to the running process" />
