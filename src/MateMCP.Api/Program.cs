@@ -116,7 +116,7 @@ app.Use(async (context, next) =>
         context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
         context.Response.Headers["Content-Security-Policy"] =
-            "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; " +
+            "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; " +
             "base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
         return Task.CompletedTask;
     });
