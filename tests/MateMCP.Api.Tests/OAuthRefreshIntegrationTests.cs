@@ -243,6 +243,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         styles.EnsureSuccessStatusCode();
         var css = await styles.Content.ReadAsStringAsync();
         Assert.Contains(":focus-visible", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 980px)", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 820px)", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 560px)", css, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
@@ -442,6 +443,240 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Contains("Last seen", html, StringComparison.Ordinal);
         Assert.DoesNotContain(credentialHash, html, StringComparison.Ordinal);
         Assert.DoesNotContain("CredentialHash", html, StringComparison.Ordinal);
+    }
+    [Fact]
+    public async Task Approvals_page_separates_pending_history_and_expires_stale_requests()
+    {
+        var pendingId = Guid.NewGuid();
+        var allowedId = Guid.NewGuid();
+        var deniedId = Guid.NewGuid();
+        var staleId = Guid.NewGuid();
+
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var agent = await db.Agents.SingleAsync(x => x.PublicId == AgentId);
+            db.Approvals.AddRange(
+                new ApprovalRequest
+                {
+                    Id = pendingId,
+                    AgentDeviceId = agent.Id,
+                    Capability = "shell",
+                    Target = "dotnet test --filter \"VeryLongTarget\"",
+                    Summary = "<script>alert('nope')</script> run the focused test suite",
+                    OperationHash = "PENDING-HASH",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(4)
+                },
+                new ApprovalRequest
+                {
+                    Id = allowedId,
+                    AgentDeviceId = agent.Id,
+                    Capability = "filesystem",
+                    Target = "C:\\Projects\\MateMCP\\README.md",
+                    Summary = "Update documentation",
+                    OperationHash = "ALLOWED-HASH",
+                    Status = "allowed",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+                    DecidedAt = DateTimeOffset.UtcNow.AddMinutes(-6)
+                },
+                new ApprovalRequest
+                {
+                    Id = deniedId,
+                    AgentDeviceId = agent.Id,
+                    Capability = "shell",
+                    Target = "git push --force",
+                    Summary = "Dangerous operation",
+                    OperationHash = "DENIED-HASH",
+                    Status = "denied",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-4),
+                    DecidedAt = DateTimeOffset.UtcNow.AddMinutes(-5)
+                },
+                new ApprovalRequest
+                {
+                    Id = staleId,
+                    AgentDeviceId = agent.Id,
+                    Capability = "browser",
+                    Target = "https://example.test",
+                    Summary = "Expired request",
+                    OperationHash = "STALE-HASH",
+                    Status = "pending",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+                });
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await _client!.GetAsync("/approvals");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("Pending inbox", html, StringComparison.Ordinal);
+        Assert.Contains("Recent history", html, StringComparison.Ordinal);
+        Assert.Contains("dotnet test --filter", html, StringComparison.Ordinal);
+        Assert.Contains("git push --force", html, StringComparison.Ordinal);
+        Assert.Contains("Expired request", html, StringComparison.Ordinal);
+        Assert.Contains("&lt;script&gt;alert", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script>alert('nope')</script>", html, StringComparison.Ordinal);
+        Assert.Contains($"action=\"/approvals/{pendingId}/allow\"", html, StringComparison.Ordinal);
+        Assert.Contains($"action=\"/approvals/{pendingId}/deny\"", html, StringComparison.Ordinal);
+
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        Assert.Equal("expired", (await verifyDb.Approvals.SingleAsync(x => x.Id == staleId)).Status);
+    }
+
+    [Fact]
+    public async Task Approval_decisions_are_owner_scoped_and_audited()
+    {
+        var ownedApprovalId = Guid.NewGuid();
+        var foreignApprovalId = Guid.NewGuid();
+        var foreignOwnerId = Guid.NewGuid();
+
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var ownedAgent = await db.Agents.SingleAsync(x => x.PublicId == AgentId);
+
+            db.Users.Add(new UserAccount
+            {
+                Id = foreignOwnerId,
+                Email = "approval-owner@example.test",
+                NormalizedEmail = "APPROVAL-OWNER@EXAMPLE.TEST",
+                PasswordHash = "not-used"
+            });
+            var foreignAgent = new AgentDevice
+            {
+                PublicId = "agt_approval_foreign",
+                OwnerId = foreignOwnerId,
+                Name = "Foreign approval device",
+                Platform = "windows",
+                CredentialHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("approval-foreign-device")))
+            };
+            db.Agents.Add(foreignAgent);
+            db.Approvals.AddRange(
+                new ApprovalRequest
+                {
+                    Id = ownedApprovalId,
+                    AgentDeviceId = ownedAgent.Id,
+                    Capability = "shell",
+                    Target = "dotnet test",
+                    Summary = "Run tests",
+                    OperationHash = "OWNED-APPROVAL-HASH",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(3)
+                },
+                new ApprovalRequest
+                {
+                    Id = foreignApprovalId,
+                    AgentDeviceId = foreignAgent.Id,
+                    Capability = "filesystem",
+                    Target = "secret.txt",
+                    Summary = "Foreign request",
+                    OperationHash = "FOREIGN-APPROVAL-HASH",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(3)
+                });
+            await db.SaveChangesAsync();
+        }
+
+        using var allow = await _client!.PostAsync($"/approvals/{ownedApprovalId}/allow", new FormUrlEncodedContent([]));
+        Assert.Equal(HttpStatusCode.Redirect, allow.StatusCode);
+        Assert.NotNull(allow.Headers.Location);
+        Assert.Equal("/approvals?notice=allowed", allow.Headers.Location.OriginalString);
+
+        using var foreignDeny = await _client.PostAsync($"/approvals/{foreignApprovalId}/deny", new FormUrlEncodedContent([]));
+        Assert.Equal(HttpStatusCode.NotFound, foreignDeny.StatusCode);
+
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var owned = await verifyDb.Approvals.SingleAsync(x => x.Id == ownedApprovalId);
+        var foreign = await verifyDb.Approvals.SingleAsync(x => x.Id == foreignApprovalId);
+
+        Assert.Equal("allowed", owned.Status);
+        Assert.NotNull(owned.DecidedAt);
+        Assert.Equal("pending", foreign.Status);
+        Assert.True(await verifyDb.AuditEvents.AnyAsync(x =>
+            x.UserId == _ownerId &&
+            x.AgentDeviceId == owned.AgentDeviceId &&
+            x.EventType == "approval.allowed" &&
+            x.Detail == "OWNED-APPROVAL-HASH"));
+    }
+
+    [Fact]
+    public async Task Expired_approval_cannot_be_allowed_after_expiry()
+    {
+        var approvalId = Guid.NewGuid();
+
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var agent = await db.Agents.SingleAsync(x => x.PublicId == AgentId);
+            db.Approvals.Add(new ApprovalRequest
+            {
+                Id = approvalId,
+                AgentDeviceId = agent.Id,
+                Capability = "shell",
+                Target = "delayed command",
+                Summary = "This request already expired",
+                OperationHash = "EXPIRED-APPROVAL-HASH",
+                ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await _client!.PostAsync($"/approvals/{approvalId}/allow", new FormUrlEncodedContent([]));
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.NotNull(response.Headers.Location);
+        Assert.Equal("/approvals?notice=expired", response.Headers.Location.OriginalString);
+
+        await using var verifyScope = _factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var approval = await verifyDb.Approvals.SingleAsync(x => x.Id == approvalId);
+        Assert.Equal("expired", approval.Status);
+        Assert.Null(approval.DecidedAt);
+        Assert.False(await verifyDb.AuditEvents.AnyAsync(x => x.Detail == "EXPIRED-APPROVAL-HASH"));
+    }
+
+    [Fact]
+    public async Task Approval_history_filter_limits_completed_rows_by_status()
+    {
+        var allowedTarget = "allowed-target-" + Guid.NewGuid().ToString("N");
+        var deniedTarget = "denied-target-" + Guid.NewGuid().ToString("N");
+
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var agent = await db.Agents.SingleAsync(x => x.PublicId == AgentId);
+            db.Approvals.AddRange(
+                new ApprovalRequest
+                {
+                    AgentDeviceId = agent.Id,
+                    Capability = "shell",
+                    Target = allowedTarget,
+                    Summary = "Allowed history row",
+                    OperationHash = "FILTER-ALLOWED",
+                    Status = "allowed",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+                    DecidedAt = DateTimeOffset.UtcNow.AddMinutes(-3)
+                },
+                new ApprovalRequest
+                {
+                    AgentDeviceId = agent.Id,
+                    Capability = "shell",
+                    Target = deniedTarget,
+                    Summary = "Denied history row",
+                    OperationHash = "FILTER-DENIED",
+                    Status = "denied",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+                    DecidedAt = DateTimeOffset.UtcNow.AddMinutes(-3)
+                });
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await _client!.GetAsync("/approvals?filter=allowed");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains(allowedTarget, html, StringComparison.Ordinal);
+        Assert.DoesNotContain(deniedTarget, html, StringComparison.Ordinal);
+        Assert.Contains("aria-current=\"page\">Allowed</a>", html, StringComparison.Ordinal);
     }
     private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes)
     {
