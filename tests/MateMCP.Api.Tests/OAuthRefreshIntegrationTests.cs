@@ -244,6 +244,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.True(login.Headers.CacheControl?.NoStore);
         Assert.True(login.Headers.TryGetValues("Content-Security-Policy", out var csp));
         Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com", StringComparison.Ordinal));
 
         using var register = await client.GetAsync("/register");
         Assert.Equal(HttpStatusCode.OK, register.StatusCode);

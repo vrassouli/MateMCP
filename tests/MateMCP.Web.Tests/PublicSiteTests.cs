@@ -33,6 +33,8 @@ public sealed class PublicSiteTests : IClassFixture<WebApplicationFactory<Progra
         Assert.Contains("nosniff", contentTypeOptions);
         Assert.True(response.Headers.TryGetValues("Content-Security-Policy", out var csp));
         Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com", StringComparison.Ordinal));
         Assert.True(response.Headers.TryGetValues("Permissions-Policy", out var permissions));
         Assert.Contains(permissions, value => value.Contains("camera=()", StringComparison.Ordinal));
     }
