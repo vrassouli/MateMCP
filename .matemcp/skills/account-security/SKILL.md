@@ -22,6 +22,15 @@ Use this skill when changing authentication, account status, administration, Age
 - Disabling an account does **not** revoke its AgentDevice records. Re-enabling the account restores account-level access to devices that were not separately revoked.
 - Device revoke remains a distinct permanent credential action.
 
+## External identities
+
+- External provider identities are keyed by the provider's stable subject/account identifier, not by email alone.
+- A verified or provider-trusted external email that matches an existing MateMCP account must **not** silently link to that account. Require the user to authenticate the existing MateMCP account first, then explicitly connect the provider.
+- A provider identity may belong to only one MateMCP account, and one MateMCP account may have at most one identity for a given provider.
+- New external-only accounts require a usable verified/provider-trusted email. Disabled linked accounts remain disabled even when the provider authenticates successfully.
+- Provider client secrets and tokens stay outside source control and must never be written to portal HTML, logs, audit details, or AI-visible tool output.
+- Linking an external identity is security-sensitive and must be auditable.
+
 ## Administrator safety
 
 - An administrator cannot disable their own currently signed-in account.

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using MateMCP.Api.Data;
+using MateMCP.Api.ExternalAuth;
 using MateMCP.Api.Portal;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Antiforgery;
@@ -24,6 +25,7 @@ var connectionString = string.IsNullOrWhiteSpace(encodedConnectionString) ? conf
 var internalKey = configuration["MateMCP:InternalApiKey"] ?? throw new InvalidOperationException("Configure MateMCP:InternalApiKey.");
 var dataDirectory = configuration["MateMCP:KeyPath"] ?? "/data";
 Directory.CreateDirectory(dataDirectory);
+var externalAuthCatalog = ExternalAuthCatalog.FromConfiguration(configuration);
 
 builder.Services.Configure<ForwardedHeadersOptions>(o => { o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto; o.KnownIPNetworks.Clear(); o.KnownProxies.Clear(); });
 builder.Services.AddDbContext<ControlPlaneDbContext>(o =>
@@ -34,6 +36,8 @@ builder.Services.AddDbContext<ControlPlaneDbContext>(o =>
     o.UseOpenIddict();
 });
 builder.Services.AddSingleton<IPasswordHasher<UserAccount>, PasswordHasher<UserAccount>>();
+builder.Services.AddSingleton(externalAuthCatalog);
+builder.Services.AddScoped<ExternalAuthAccountService>();
 builder.Services.AddAntiforgery(o =>
 {
     o.Cookie.Name = "matemcp.csrf";
@@ -81,6 +85,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         }
     };
 });
+builder.Services.AddAuthentication().AddMateMcpExternalProviders(externalAuthCatalog);
 builder.Services.AddAuthorization(o => o.AddPolicy("admin", policy => policy.RequireRole("admin")));
 builder.Services.AddOpenIddict().AddCore(o => o.UseEntityFrameworkCore().UseDbContext<ControlPlaneDbContext>()).AddServer(o =>
 {
@@ -161,6 +166,7 @@ DeviceManagementEndpoints.Map(app, relayUrl);
 PortalDeviceEndpoints.Map(app, relayUrl);
 PortalApprovalEndpoints.Map(app);
 PortalAdminEndpoints.Map(app);
+ExternalAuthEndpoints.Map(app);
 
 app.MapGet("/register", (HttpContext context) =>
 {
@@ -460,6 +466,9 @@ static async Task EnsureDatabaseAsync(IServiceProvider services, IConfiguration 
     await using var scope = services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
     await db.Database.EnsureCreatedAsync();
+    await DatabaseSchemaUpgrade.EnsureExternalLoginsAsync(
+        db,
+        c["MateMCP:DatabaseProvider"]?.ToLowerInvariant() ?? "sqlite");
 
     var email = c["MateMCP:BootstrapAdminEmail"]?.Trim();
     var password = c["MateMCP:BootstrapAdminPassword"];

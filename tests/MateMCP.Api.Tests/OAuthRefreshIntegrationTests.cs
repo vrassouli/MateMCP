@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 
+[Collection("API integration serial")]
 public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
 {
     private const string ApiUrl = "https://api.test";
