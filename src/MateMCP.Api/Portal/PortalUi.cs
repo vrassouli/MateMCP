@@ -1,4 +1,6 @@
 using System.Net;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Antiforgery;
 
 namespace MateMCP.Api.Portal;
 
@@ -91,7 +93,7 @@ public static class PortalUi
             </div>
             """;
 
-        return Html(title, body, statusCode, "auth-page");
+        return Html(context, title, body, statusCode, "auth-page");
     }
 
     public static IResult AppPage(
@@ -123,12 +125,14 @@ public static class PortalUi
                     {Nav("overview", "/dashboard", "⌂", "Overview")}
                     {Nav("devices", "/devices", "◇", "Devices")}
                     {Nav("approvals", "/approvals", "!", "Approvals")}
+                    {(context.User.IsInRole("admin") ? Nav("admin", "/admin", "A", "Admin") : "")}
                     {Nav("device", "/device", "+", "Add device")}
                     <a class="portal-nav-link" href="https://matemcp.com/"><span class="nav-icon" aria-hidden="true">↗</span><span>Product site</span></a>
+                    <form class="portal-nav-signout" method="post" action="/logout"><button class="portal-nav-link portal-nav-button" type="submit"><span class="nav-icon" aria-hidden="true">↪</span><span>Sign out</span></button></form>
                   </nav>
                   <div class="account-cluster">
                     <div class="account-avatar" aria-hidden="true">{Initial(email)}</div>
-                    <div class="account-copy"><strong>{H(email)}</strong><span>Signed in</span></div>
+                    <div class="account-copy"><strong>{H(email)}</strong><span>{(context.User.IsInRole("admin") ? "Administrator" : "Signed in")}</span></div>
                     <form method="post" action="/logout"><button class="button button-ghost button-compact" type="submit">Sign out</button></form>
                   </div>
                 </div>
@@ -137,10 +141,10 @@ public static class PortalUi
                 <div class="portal-shell">{body}</div>
               </main>
             </div>
-            <script src="/portal/portal.js?v=300-2" defer></script>
+            <script src="/portal/portal.js?v=301-2" defer></script>
             """;
 
-        return Html(title, shell, statusCode, "portal-page");
+        return Html(context, title, shell, statusCode, "portal-page");
     }
 
     public static string PageHeading(string eyebrow, string title, string description, string? actions = null)
@@ -160,9 +164,9 @@ public static class PortalUi
         var normalized = status.ToLowerInvariant();
         var css = normalized switch
         {
-            "online" or "allowed" => "status-positive",
+            "online" or "allowed" or "active" or "enabled" => "status-positive",
             "pending" => "status-warning",
-            "revoked" or "denied" => "status-negative",
+            "revoked" or "denied" or "disabled" => "status-negative",
             _ => "status-neutral"
         };
 
@@ -193,8 +197,17 @@ public static class PortalUi
         context.Response.Headers.Pragma = "no-cache";
     }
 
-    private static IResult Html(string title, string body, int statusCode, string bodyClass)
+    private static IResult Html(HttpContext context, string title, string body, int statusCode, string bodyClass)
     {
+        var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
+        var tokens = antiforgery.GetAndStoreTokens(context);
+        var tokenInput = $"<input type=\"hidden\" name=\"{H(tokens.FormFieldName)}\" value=\"{H(tokens.RequestToken ?? string.Empty)}\">";
+        body = Regex.Replace(
+            body,
+            "<form(?=[^>]*\\bmethod=\"post\")[^>]*>",
+            match => match.Value + tokenInput,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
         var html = $"""
             <!doctype html>
             <html lang="en">
@@ -204,7 +217,7 @@ public static class PortalUi
               <meta name="theme-color" content="#07111f">
               <meta name="robots" content="noindex,nofollow">
               <link rel="icon" href="/portal/mark.svg?v=1" type="image/svg+xml">
-              <link rel="stylesheet" href="/portal/portal.css?v=300-2">
+              <link rel="stylesheet" href="/portal/portal.css?v=301-2">
               <title>{H(title)} · MateMCP</title>
             </head>
             <body class="{bodyClass}">

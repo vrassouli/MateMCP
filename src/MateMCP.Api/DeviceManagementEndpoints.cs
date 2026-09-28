@@ -87,9 +87,15 @@ public static class DeviceManagementEndpoints
         var authorization = context.Request.Headers.Authorization.ToString();
         if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
         var credentialHash = Hash(authorization[7..]);
-        return await db.Agents.SingleOrDefaultAsync(
-            x => x.PublicId == id && x.CredentialHash == credentialHash && !x.IsRevoked,
-            context.RequestAborted);
+        return await db.Agents
+            .Include(x => x.Owner)
+            .SingleOrDefaultAsync(
+                x => x.PublicId == id &&
+                     x.CredentialHash == credentialHash &&
+                     !x.IsRevoked &&
+                     x.Owner != null &&
+                     !x.Owner.IsDisabled,
+                context.RequestAborted);
     }
 
     private static string Hash(string value)
