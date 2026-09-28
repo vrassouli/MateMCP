@@ -19,6 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/MateMCP.Agent.Companion/Services/TerminalOutputSanitizer.cs" Link="Companion/TerminalOutputSanitizer.cs" />
+    <Compile Include="../../src/MateMCP.Agent.Companion/Services/CompanionLifecycleStore.cs" Link="Companion/CompanionLifecycleStore.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/MateMCP.Agent/MateMCP.Agent.csproj" />
