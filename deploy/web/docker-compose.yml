@@ -1,0 +1,10 @@
+services:
+  web:
+    image: ${MATEMCP_WEB_IMAGE:-vrassouli/matemcp-web:latest}
+    container_name: matemcp-web
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:8082
+      ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "${MATEMCP_WEB_BIND:-127.0.0.1}:${MATEMCP_WEB_PORT:-8082}:8082"

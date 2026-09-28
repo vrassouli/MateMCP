@@ -130,7 +130,7 @@ Companion is the user's local control surface. Current functionality includes:
 - **Prevent Sleep While Using** controls, with a 15-minute idle grace period after the latest Agent activity.
 - Manual update checks and optional automatic Desktop updates on supported platforms.
 
-## Self-host API + Relay
+## Self-host Web + API + Relay
 
 For the usual single-server deployment there is one canonical install/update command:
 
@@ -138,11 +138,14 @@ For the usual single-server deployment there is one canonical install/update com
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/install.sh | sudo bash
 ```
 
-The installer is update-safe: it preserves existing configuration, asks only for missing setup values, refreshes the current Compose definitions, pulls/recreates the server components, keeps the private API↔Relay credential synchronized, and health-checks both services before reporting success. On supported Debian/Ubuntu hosts it can bootstrap Docker Engine + Compose when needed.
+The installer is update-safe: it preserves existing configuration, asks only for missing setup values, refreshes the current Compose definitions, pulls/recreates the public Web, API, and Relay services, keeps the private API↔Relay credential synchronized, and health-checks the services before reporting success. On supported Debian/Ubuntu hosts it can bootstrap Docker Engine + Compose when needed.
 
-Use component installers only for advanced deployments where API and Relay are managed separately:
+Use component installers only for advanced deployments where Web, API, and Relay are managed separately:
 
 ```bash
+# Public product website
+curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/web/install.sh | sudo bash
+
 # API / Control Plane
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/api/install.sh | sudo bash
 
@@ -150,9 +153,9 @@ curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/api/i
 curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/relay/install.sh | sudo bash
 ```
 
-The API supports SQLite for a small single-server deployment and SQL Server for external database deployments. API and Relay should sit behind HTTPS reverse proxies; their container ports should not be exposed directly to the Internet.
+The API supports SQLite for a small single-server deployment and SQL Server for external database deployments. Web, API, and Relay should sit behind HTTPS reverse proxies; their container ports should not be exposed directly to the Internet. Keep `matemcp.com`, `api.matemcp.com`, and `relay.matemcp.com` routed to their independent backends.
 
-Relay reverse-proxy guidance is in [`deploy/relay/README.md`](deploy/relay/README.md), including the example Nginx configuration and graceful-drain settings.
+Production hostname/TLS routing is documented in [`docs/production-web-deployment.md`](docs/production-web-deployment.md). Web deployment details are in [`deploy/web/README.md`](deploy/web/README.md), and Relay-specific reverse-proxy guidance remains in [`deploy/relay/README.md`](deploy/relay/README.md).
 
 ## Documentation
 
@@ -172,6 +175,7 @@ Relay reverse-proxy guidance is in [`deploy/relay/README.md`](deploy/relay/READM
 | Connectivity / chaos coverage | [`docs/connectivity-chaos-testing.md`](docs/connectivity-chaos-testing.md) |
 | ChatGPT tool refresh | [`docs/chatgpt-tool-refresh.md`](docs/chatgpt-tool-refresh.md) |
 | Project context & repository Skills | [`docs/project-context-bootstrap.md`](docs/project-context-bootstrap.md) |
+| Production web deployment | [`docs/production-web-deployment.md`](docs/production-web-deployment.md) |
 | Development workflow | [`docs/development-workflow.md`](docs/development-workflow.md) |
 | Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
 
