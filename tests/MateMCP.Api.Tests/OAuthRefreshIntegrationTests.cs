@@ -49,7 +49,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using (var health = await _client.GetAsync("/health"))
             health.EnsureSuccessStatusCode();
 
-        await using (var scope = _factory.Services.CreateAsyncScope())
+        await using (var scope = _factory!.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<UserAccount>>();
@@ -288,6 +288,160 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Contains("Pending approvals", html, StringComparison.Ordinal);
         Assert.Contains("action=\"/logout\"", html, StringComparison.Ordinal);
         Assert.True(response.Headers.CacheControl?.NoStore);
+    }
+    [Fact]
+    public async Task Devices_page_keeps_revoked_history_out_of_the_active_working_list()
+    {
+        const string revokedId = "agt_revoked_history";
+        const string foreignId = "agt_foreign_owner";
+        var foreignOwnerId = Guid.NewGuid();
+
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            db.Agents.Add(new AgentDevice
+            {
+                PublicId = revokedId,
+                OwnerId = _ownerId,
+                Name = "Old revoked device",
+                Platform = "windows",
+                CredentialHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("revoked-device-token"))),
+                IsRevoked = true
+            });
+            db.Users.Add(new UserAccount
+            {
+                Id = foreignOwnerId,
+                Email = "foreign-device-owner@example.test",
+                NormalizedEmail = "FOREIGN-DEVICE-OWNER@EXAMPLE.TEST",
+                PasswordHash = "not-used"
+            });
+            db.Agents.Add(new AgentDevice
+            {
+                PublicId = foreignId,
+                OwnerId = foreignOwnerId,
+                Name = "Someone else's device",
+                Platform = "macos",
+                CredentialHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("foreign-device-token")))
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var activeResponse = await _client!.GetAsync("/devices");
+        Assert.Equal(HttpStatusCode.OK, activeResponse.StatusCode);
+        var activeHtml = await activeResponse.Content.ReadAsStringAsync();
+        Assert.Contains(AgentId, activeHtml, StringComparison.Ordinal);
+        Assert.Contains("Revoked history", activeHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(revokedId, activeHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(foreignId, activeHtml, StringComparison.Ordinal);
+
+        using var historyResponse = await _client.GetAsync("/devices?showRevoked=true");
+        Assert.Equal(HttpStatusCode.OK, historyResponse.StatusCode);
+        var historyHtml = await historyResponse.Content.ReadAsStringAsync();
+        Assert.Contains(revokedId, historyHtml, StringComparison.Ordinal);
+        Assert.Contains("Old revoked device", historyHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(foreignId, historyHtml, StringComparison.Ordinal);
+
+        using var dashboardResponse = await _client.GetAsync("/dashboard");
+        var dashboardHtml = await dashboardResponse.Content.ReadAsStringAsync();
+        Assert.Contains(AgentId, dashboardHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(revokedId, dashboardHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Device_revoke_requires_confirmation_then_removes_device_from_active_list()
+    {
+        using var confirmation = await _client!.GetAsync($"/devices/{AgentId}/revoke");
+        Assert.Equal(HttpStatusCode.OK, confirmation.StatusCode);
+        var confirmationHtml = await confirmation.Content.ReadAsStringAsync();
+        Assert.Contains("Revoke device access", confirmationHtml, StringComparison.Ordinal);
+        Assert.Contains($"action=\"/devices/{AgentId}/revoke\"", confirmationHtml, StringComparison.Ordinal);
+        Assert.Contains("security history will remain available", confirmationHtml, StringComparison.Ordinal);
+
+        using var revoke = await _client.PostAsync($"/devices/{AgentId}/revoke", new FormUrlEncodedContent([]));
+        Assert.Equal(HttpStatusCode.Redirect, revoke.StatusCode);
+        Assert.NotNull(revoke.Headers.Location);
+        Assert.Equal("/devices?notice=revoked", revoke.Headers.Location.OriginalString);
+
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var agent = await db.Agents.SingleAsync(x => x.PublicId == AgentId);
+            Assert.True(agent.IsRevoked);
+            Assert.True(await db.AuditEvents.AnyAsync(x =>
+                x.AgentDeviceId == agent.Id &&
+                x.UserId == _ownerId &&
+                x.EventType == "agent.revoked"));
+        }
+
+        using var activeResponse = await _client.GetAsync("/devices?notice=revoked");
+        var activeHtml = await activeResponse.Content.ReadAsStringAsync();
+        Assert.Contains("removed from your active device list", activeHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AgentId, activeHtml, StringComparison.Ordinal);
+
+        using var historyResponse = await _client.GetAsync("/devices?showRevoked=true");
+        var historyHtml = await historyResponse.Content.ReadAsStringAsync();
+        Assert.Contains(AgentId, historyHtml, StringComparison.Ordinal);
+        Assert.Contains("revoked", historyHtml, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Device_management_never_allows_access_to_another_owners_device()
+    {
+        const string foreignId = "agt_not_yours";
+        var foreignOwnerId = Guid.NewGuid();
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            db.Users.Add(new UserAccount
+            {
+                Id = foreignOwnerId,
+                Email = "not-your-device-owner@example.test",
+                NormalizedEmail = "NOT-YOUR-DEVICE-OWNER@EXAMPLE.TEST",
+                PasswordHash = "not-used"
+            });
+            db.Agents.Add(new AgentDevice
+            {
+                PublicId = foreignId,
+                OwnerId = foreignOwnerId,
+                Name = "Foreign device",
+                Platform = "windows",
+                CredentialHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("foreign-owner-token")))
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var details = await _client!.GetAsync($"/devices/{foreignId}");
+        Assert.Equal(HttpStatusCode.NotFound, details.StatusCode);
+
+        using var confirmation = await _client.GetAsync($"/devices/{foreignId}/revoke");
+        Assert.Equal(HttpStatusCode.NotFound, confirmation.StatusCode);
+
+        using var revoke = await _client.PostAsync($"/devices/{foreignId}/revoke", new FormUrlEncodedContent([]));
+        Assert.Equal(HttpStatusCode.NotFound, revoke.StatusCode);
+
+        await using var verifyScope = _factory!.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        Assert.False((await verifyDb.Agents.SingleAsync(x => x.PublicId == foreignId)).IsRevoked);
+    }
+
+    [Fact]
+    public async Task Device_details_show_connection_metadata_but_never_render_credentials()
+    {
+        string credentialHash;
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            credentialHash = (await db.Agents.AsNoTracking().SingleAsync(x => x.PublicId == AgentId)).CredentialHash;
+        }
+
+        using var response = await _client!.GetAsync($"/devices/{AgentId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains($"{RelayUrl}/mcp/{AgentId}", html, StringComparison.Ordinal);
+        Assert.Contains("Device ID", html, StringComparison.Ordinal);
+        Assert.Contains("Last seen", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(credentialHash, html, StringComparison.Ordinal);
+        Assert.DoesNotContain("CredentialHash", html, StringComparison.Ordinal);
     }
     private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes)
     {

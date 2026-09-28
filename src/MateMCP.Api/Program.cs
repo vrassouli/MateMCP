@@ -85,6 +85,7 @@ app.UseAuthentication(); app.UseAuthorization(); await EnsureDatabaseAsync(app.S
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "ok", database = provider }));
 app.MapGet("/", (ClaimsPrincipal user) => user.Identity?.IsAuthenticated == true ? Results.Redirect("/dashboard") : Results.Redirect("/login"));
 DeviceManagementEndpoints.Map(app, relayUrl);
+PortalDeviceEndpoints.Map(app, relayUrl);
 
 app.MapGet("/register", (HttpContext context) =>
 {
@@ -141,7 +142,10 @@ app.MapPost("/logout", async (HttpContext context) =>
 app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
 {
     var userId = UserId(principal);
-    var agents = await db.Agents.Where(x => x.OwnerId == userId).OrderBy(x => x.Name).ToListAsync();
+    var agents = await db.Agents
+        .Where(x => x.OwnerId == userId && !x.IsRevoked)
+        .OrderBy(x => x.Name)
+        .ToListAsync();
     var now = DateTimeOffset.UtcNow;
     var onlineAfter = now.AddMinutes(-2);
     var approvals = (await db.Approvals
@@ -152,28 +156,24 @@ app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, 
         .OrderBy(x => x.CreatedAt)
         .ToList();
 
-    var activeAgents = agents.Count(x => !x.IsRevoked);
-    var onlineAgents = agents.Count(x => !x.IsRevoked && x.LastSeenAt > onlineAfter);
-    var rows = string.Join("", agents.Select(x =>
+    var onlineAgents = agents.Count(x => x.LastSeenAt > onlineAfter);
+    var displayAgents = agents.Take(5).ToList();
+    var rows = string.Join("", displayAgents.Select(x =>
     {
-        var status = x.IsRevoked ? "revoked" : x.LastSeenAt > onlineAfter ? "online" : "offline";
-        var revokeAction = x.IsRevoked
-            ? "<span class=\"status-badge status-neutral\">Unavailable</span>"
-            : $"""<form method="post" action="/dashboard/agents/{x.PublicId}/revoke"><button class="button button-danger button-compact" type="submit">Revoke</button></form>""";
-
+        var status = x.LastSeenAt > onlineAfter ? "online" : "offline";
         return $"""
             <tr>
               <td><div class="device-name"><span class="device-icon" aria-hidden="true">{PortalUi.H(x.Platform.Length > 0 ? x.Platform[..1].ToUpperInvariant() : "D")}</span><div><strong>{PortalUi.H(x.Name)}</strong><span>{PortalUi.H(x.PublicId)}</span></div></div></td>
               <td>{PortalUi.H(x.Platform)}</td>
               <td>{PortalUi.StatusBadge(status)}</td>
               <td><code class="endpoint-code" title="{PortalUi.H(relayUrl)}/mcp/{PortalUi.H(x.PublicId)}">{PortalUi.H(relayUrl)}/mcp/{PortalUi.H(x.PublicId)}</code></td>
-              <td>{revokeAction}</td>
+              <td><a class="button button-secondary button-compact" href="/devices/{PortalUi.H(x.PublicId)}">Manage</a></td>
             </tr>
             """;
     }));
 
     var devicesContent = rows.Length == 0
-        ? PortalUi.EmptyState("No devices yet", "Enroll MateMCP Desktop on a computer to see it here.", """<a class="button button-secondary" href="/device">Add a device</a>""")
+        ? PortalUi.EmptyState("No active devices", "Enroll MateMCP Desktop on a computer to see it here.", """<a class="button button-secondary" href="/device">Add a device</a>""")
         : $"""
           <div class="table-wrap">
             <table class="portal-table">
@@ -181,6 +181,7 @@ app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, 
               <tbody>{rows}</tbody>
             </table>
           </div>
+          {(agents.Count > displayAgents.Count ? $"""<div class="section-footer"><a class="button button-ghost button-compact" href="/devices">View all {agents.Count} active devices</a></div>""" : "")}
           """;
 
     var approvalsContent = approvals.Count == 0
@@ -202,17 +203,17 @@ app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, 
           </div>
           """;
 
-    var actions = """<a class="button button-secondary" href="/device">Add device</a>""";
+    var actions = """<a class="button button-ghost" href="/devices">View devices</a><a class="button button-secondary" href="/device">Add device</a>""";
     var body = $"""
         {PortalUi.PageHeading("Control plane", "Overview", "Your devices and time-sensitive approvals in one place.", actions)}
         <div class="summary-grid">
-          <article class="summary-card"><div class="summary-card-head"><span class="summary-card-label">Active devices</span><span class="summary-card-icon" aria-hidden="true">D</span></div><div class="summary-value">{activeAgents}</div><div class="summary-detail">{onlineAgents} online right now</div></article>
+          <article class="summary-card"><div class="summary-card-head"><span class="summary-card-label">Active devices</span><span class="summary-card-icon" aria-hidden="true">D</span></div><div class="summary-value">{agents.Count}</div><div class="summary-detail">{onlineAgents} online right now</div></article>
           <article class="summary-card"><div class="summary-card-head"><span class="summary-card-label">Online</span><span class="summary-card-icon" aria-hidden="true">●</span></div><div class="summary-value">{onlineAgents}</div><div class="summary-detail">Seen in the last 2 minutes</div></article>
           <article class="summary-card"><div class="summary-card-head"><span class="summary-card-label">Needs approval</span><span class="summary-card-icon" aria-hidden="true">!</span></div><div class="summary-value">{approvals.Count}</div><div class="summary-detail">Pending decisions</div></article>
         </div>
         <div class="portal-grid">
           <section class="portal-section">
-            <div class="portal-section-header"><div><h2>Devices</h2><p>Computers enrolled in your MateMCP account.</p></div><span class="section-count">{agents.Count}</span></div>
+            <div class="portal-section-header"><div><h2>Active devices</h2><p>Revoked devices are kept out of this working list.</p></div><span class="section-count">{agents.Count}</span></div>
             {devicesContent}
           </section>
           <section class="portal-section" id="approvals">
@@ -224,11 +225,6 @@ app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, 
 
     return PortalUi.AppPage(context, "Overview", principal.Identity?.Name ?? "MateMCP user", body);
 }).RequireAuthorization();
-app.MapPost("/dashboard/agents/{agentId}/revoke", async (string agentId, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
-{
-    var userId = UserId(principal); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == agentId && x.OwnerId == userId && !x.IsRevoked); if (agent is null) return Results.NotFound(); agent.IsRevoked = true; db.AuditEvents.Add(new AuditEvent { UserId = userId, AgentDeviceId = agent.Id, EventType = "agent.revoked", Detail = agent.Name }); await db.SaveChangesAsync(); return Results.Redirect("/dashboard");
-}).RequireAuthorization();
-
 app.MapPost("/api/enrollment/start", async (EnrollmentStart request, ControlPlaneDbContext db) =>
 {
     var recoverAgentId = string.IsNullOrWhiteSpace(request.RecoverAgentId) ? null : request.RecoverAgentId.Trim();
