@@ -4,6 +4,7 @@ using System.Text;
 using MateMCP.Api.Data;
 using MateMCP.Api.Portal;
 using Microsoft.AspNetCore;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -33,8 +34,54 @@ builder.Services.AddDbContext<ControlPlaneDbContext>(o =>
     o.UseOpenIddict();
 });
 builder.Services.AddSingleton<IPasswordHasher<UserAccount>, PasswordHasher<UserAccount>>();
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o => { o.Cookie.Name = "matemcp.auth"; o.Cookie.HttpOnly = true; o.Cookie.SameSite = SameSiteMode.Lax; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; o.LoginPath = "/login"; o.ReturnUrlParameter = "returnUrl"; });
-builder.Services.AddAuthorization();
+builder.Services.AddAntiforgery(o =>
+{
+    o.Cookie.Name = "matemcp.csrf";
+    o.Cookie.HttpOnly = true;
+    o.Cookie.SameSite = SameSiteMode.Strict;
+    o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+});
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o =>
+{
+    o.Cookie.Name = "matemcp.auth";
+    o.Cookie.HttpOnly = true;
+    o.Cookie.SameSite = SameSiteMode.Lax;
+    o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    o.LoginPath = "/login";
+    o.ReturnUrlParameter = "returnUrl";
+    o.Events.OnRedirectToAccessDenied = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
+    };
+    o.Events.OnValidatePrincipal = async context =>
+    {
+        var idValue = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(idValue, out var userId))
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return;
+        }
+
+        var db = context.HttpContext.RequestServices.GetRequiredService<ControlPlaneDbContext>();
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
+        if (user is null || user.IsDisabled)
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return;
+        }
+
+        if (!string.Equals(context.Principal?.Identity?.Name, user.Email, StringComparison.Ordinal) ||
+            context.Principal!.IsInRole("admin") != user.IsAdmin)
+        {
+            context.ReplacePrincipal(CreateCookiePrincipal(user));
+            context.ShouldRenew = true;
+        }
+    };
+});
+builder.Services.AddAuthorization(o => o.AddPolicy("admin", policy => policy.RequireRole("admin")));
 builder.Services.AddOpenIddict().AddCore(o => o.UseEntityFrameworkCore().UseDbContext<ControlPlaneDbContext>()).AddServer(o =>
 {
     o.SetIssuer(new Uri(publicUrl + "/")); o.SetAuthorizationEndpointUris("/connect/authorize"); o.SetTokenEndpointUris("/connect/token"); o.SetJsonWebKeySetEndpointUris("/.well-known/jwks");
@@ -81,12 +128,36 @@ app.Use(async (context, next) =>
     }
     await next();
 });
-app.UseAuthentication(); app.UseAuthorization(); await EnsureDatabaseAsync(app.Services, configuration);
+app.UseAuthentication();
+app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsPost(context.Request.Method) &&
+        context.Request.HasFormContentType &&
+        RequiresAntiforgery(context.Request.Path))
+    {
+        try
+        {
+            await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "text/plain; charset=utf-8";
+            await context.Response.WriteAsync("Invalid request verification token.");
+            return;
+        }
+    }
+
+    await next();
+});
+await EnsureDatabaseAsync(app.Services, configuration);
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "ok", database = provider }));
 app.MapGet("/", (ClaimsPrincipal user) => user.Identity?.IsAuthenticated == true ? Results.Redirect("/dashboard") : Results.Redirect("/login"));
 DeviceManagementEndpoints.Map(app, relayUrl);
 PortalDeviceEndpoints.Map(app, relayUrl);
 PortalApprovalEndpoints.Map(app);
+PortalAdminEndpoints.Map(app);
 
 app.MapGet("/register", (HttpContext context) =>
 {
@@ -313,6 +384,7 @@ app.MapPost("/device/approve", async (HttpContext context, ClaimsPrincipal princ
 app.MapPost("/api/enrollment/token", async (EnrollmentToken request, ControlPlaneDbContext db) =>
 {
     var deviceCodeHash = Hash(request.DeviceCode); var enrollment = await db.Enrollments.SingleOrDefaultAsync(x => x.DeviceCodeHash == deviceCodeHash); if (enrollment is null || enrollment.ExpiresAt <= DateTimeOffset.UtcNow) return Results.BadRequest(new { error = "expired_token" }); if (enrollment.ApprovedByUserId is null) return Results.StatusCode(428); if (enrollment.Consumed) return Results.BadRequest(new { error = "invalid_grant" });
+    if (!await db.Users.AnyAsync(x => x.Id == enrollment.ApprovedByUserId.Value && !x.IsDisabled)) return Results.Forbid();
     var (platform, recoverAgentId) = DecodeEnrollmentPlatform(enrollment.Platform);
     var credential = Token(48);
     AgentDevice agent;
@@ -351,7 +423,7 @@ app.MapPost("/connect/register", async (HttpContext context, IOpenIddictApplicat
 
 app.MapPost("/internal/agents/authenticate", async (HttpContext c, AgentAuthentication r, ControlPlaneDbContext db) =>
 {
-    if (!Internal(c, internalKey)) return Results.Unauthorized(); var credentialHash = Hash(r.Credential); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && x.CredentialHash == credentialHash && !x.IsRevoked); if (agent is null) return Results.Unauthorized(); agent.LastSeenAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(); return Results.Ok(new { agentId = agent.PublicId, ownerId = agent.OwnerId, scopes = agent.AllowedScopes.Split(' ') });
+    if (!Internal(c, internalKey)) return Results.Unauthorized(); var credentialHash = Hash(r.Credential); var agent = await db.Agents.Include(x => x.Owner).SingleOrDefaultAsync(x => x.PublicId == r.AgentId && x.CredentialHash == credentialHash && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled); if (agent is null) return Results.Unauthorized(); agent.LastSeenAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(); return Results.Ok(new { agentId = agent.PublicId, ownerId = agent.OwnerId, scopes = agent.AllowedScopes.Split(' ') });
 });
 app.MapPost("/internal/agents/offline", async (HttpContext c, AgentOffline r, ControlPlaneDbContext db) =>
 {
@@ -367,7 +439,7 @@ app.MapPost("/internal/agents/offline", async (HttpContext c, AgentOffline r, Co
 });
 app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db) =>
 {
-    if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked); if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid(); return MateMCP.Api.OAuthScopePolicy.AreGrantedAgentScopesAllowed(r.Scopes, agent.AllowedScopes) ? Results.Ok() : Results.Forbid();
+    if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.Include(x => x.Owner).SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled); if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid(); return MateMCP.Api.OAuthScopePolicy.AreGrantedAgentScopesAllowed(r.Scopes, agent.AllowedScopes) ? Results.Ok() : Results.Forbid();
 });
 app.MapPost("/api/agents/{agentId}/approvals", async (string agentId, HttpContext c, NewApproval r, ControlPlaneDbContext db) =>
 {
@@ -380,20 +452,70 @@ app.MapGet("/api/agents/{agentId}/approvals/{id:guid}", async (string agentId, G
 
 app.Run();
 
-static async Task EnsureDatabaseAsync(IServiceProvider services, IConfiguration c) { await using var s = services.CreateAsyncScope(); var db = s.ServiceProvider.GetRequiredService<ControlPlaneDbContext>(); await db.Database.EnsureCreatedAsync(); var email = c["MateMCP:BootstrapAdminEmail"]; var password = c["MateMCP:BootstrapAdminPassword"]; if (!string.IsNullOrWhiteSpace(email) && !string.IsNullOrWhiteSpace(password) && !await db.Users.AnyAsync()) { var h = s.ServiceProvider.GetRequiredService<IPasswordHasher<UserAccount>>(); var u = new UserAccount { Email = email, NormalizedEmail = email.ToUpperInvariant(), PasswordHash = "pending", IsAdmin = true }; u.PasswordHash = h.HashPassword(u, password); db.Users.Add(u); await db.SaveChangesAsync(); } }
-static async Task SignInAsync(HttpContext c, UserAccount u) { var i = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme); i.AddClaim(new Claim(ClaimTypes.NameIdentifier, u.Id.ToString())); i.AddClaim(new Claim(ClaimTypes.Name, u.Email)); await c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(i)); }
+static async Task EnsureDatabaseAsync(IServiceProvider services, IConfiguration c)
+{
+    await using var scope = services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+    await db.Database.EnsureCreatedAsync();
+
+    var email = c["MateMCP:BootstrapAdminEmail"]?.Trim();
+    var password = c["MateMCP:BootstrapAdminPassword"];
+    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        return;
+
+    var normalizedEmail = email.ToUpperInvariant();
+    var existing = await db.Users.SingleOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail);
+    if (existing is not null)
+    {
+        if (!existing.IsAdmin)
+        {
+            existing.IsAdmin = true;
+            await db.SaveChangesAsync();
+        }
+        return;
+    }
+
+    var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<UserAccount>>();
+    var admin = new UserAccount
+    {
+        Email = email,
+        NormalizedEmail = normalizedEmail,
+        PasswordHash = "pending",
+        IsAdmin = true
+    };
+    admin.PasswordHash = hasher.HashPassword(admin, password);
+    db.Users.Add(admin);
+    await db.SaveChangesAsync();
+}
+static ClaimsPrincipal CreateCookiePrincipal(UserAccount u)
+{
+    var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme, ClaimTypes.Name, ClaimTypes.Role);
+    identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, u.Id.ToString()));
+    identity.AddClaim(new Claim(ClaimTypes.Name, u.Email));
+    if (u.IsAdmin) identity.AddClaim(new Claim(ClaimTypes.Role, "admin"));
+    return new ClaimsPrincipal(identity);
+}
+static async Task SignInAsync(HttpContext c, UserAccount u) => await c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, CreateCookiePrincipal(u));
 static Guid UserId(ClaimsPrincipal p) => Guid.Parse(p.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static string Token(int bytes) => Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(bytes));
 static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 static string CreateUserCode() { const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; var b = RandomNumberGenerator.GetBytes(8); return string.Concat(b.Select((x, i) => chars[x % chars.Length] + (i == 3 ? "-" : ""))); }
 static bool Internal(HttpContext c, string expected) => SecretEquals(c.Request.Headers["X-MateMCP-Internal-Key"].ToString(), expected);
-static async Task<AgentDevice?> AuthenticateAgent(HttpContext c, string id, ControlPlaneDbContext db) { var auth = c.Request.Headers.Authorization.ToString(); if (!auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null; var credentialHash = Hash(auth[7..]); return await db.Agents.SingleOrDefaultAsync(x => x.PublicId == id && x.CredentialHash == credentialHash && !x.IsRevoked); }
+static async Task<AgentDevice?> AuthenticateAgent(HttpContext c, string id, ControlPlaneDbContext db) { var auth = c.Request.Headers.Authorization.ToString(); if (!auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null; var credentialHash = Hash(auth[7..]); return await db.Agents.Include(x => x.Owner).SingleOrDefaultAsync(x => x.PublicId == id && x.CredentialHash == credentialHash && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled); }
 static bool SecretEquals(string a, string b) { var x = Encoding.UTF8.GetBytes(a); var y = Encoding.UTF8.GetBytes(b); return x.Length == y.Length && CryptographicOperations.FixedTimeEquals(x, y); }
 static bool TryAgentId(string resource, string relay, out string id) { var prefix = relay + "/mcp/"; id = resource.StartsWith(prefix, StringComparison.Ordinal) ? resource[prefix.Length..] : ""; return IsAgentId(id); }
 static bool IsAgentId(string id) => id.StartsWith("agt_", StringComparison.Ordinal) && id.Length > 4 && !id.Contains('/');
 const string RecoveryMarker = "\nMATEMCP_RECOVER:";
 static string EncodeEnrollmentPlatform(string platform, string? recoverAgentId) => recoverAgentId is null ? platform : platform + RecoveryMarker + recoverAgentId;
 static (string Platform, string? RecoverAgentId) DecodeEnrollmentPlatform(string value) { var index = value.LastIndexOf(RecoveryMarker, StringComparison.Ordinal); if (index < 0) return (value, null); var agentId = value[(index + RecoveryMarker.Length)..]; return IsAgentId(agentId) ? (value[..index], agentId) : (value, null); }
+static bool RequiresAntiforgery(PathString path) =>
+    path == "/login" ||
+    path == "/register" ||
+    path == "/logout" ||
+    path == "/device/approve" ||
+    path.StartsWithSegments("/devices") ||
+    path.StartsWithSegments("/approvals") ||
+    path.StartsWithSegments("/admin");
 static bool IsLocal(string s) => !string.IsNullOrEmpty(s) && s[0] == '/' && (s.Length == 1 || s[1] != '/' && s[1] != '\\');
 static string SafeReturnUrl(string? value) => !string.IsNullOrWhiteSpace(value) && IsLocal(value) ? value : "/dashboard";
 static RSA LoadOrCreateRsaKey(string path) { var rsa = RSA.Create(3072); if (File.Exists(path)) { rsa.ImportFromPem(File.ReadAllText(path)); return rsa; } File.WriteAllText(path, rsa.ExportPkcs8PrivateKeyPem()); return rsa; }

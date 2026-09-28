@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using MateMCP.Api.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Identity;
@@ -20,10 +21,13 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
     private const string InternalKey = "oauth-refresh-integration-internal-key";
     private const string Email = "oauth-refresh@example.test";
     private const string Password = "oauth-refresh-password";
+    private const string AdminEmail = "admin@example.test";
+    private const string AdminPassword = "admin-integration-password";
     private const string RedirectUri = "https://client.test/callback";
 
     private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), "matemcp-oauth-" + Guid.NewGuid().ToString("N"));
     private readonly Guid _ownerId = Guid.NewGuid();
+    private readonly Guid _adminId = Guid.NewGuid();
     private readonly Dictionary<string, string?> _originalEnvironment = new(StringComparer.Ordinal);
     private WebApplicationFactory<Program>? _factory;
     private HttpClient? _client;
@@ -61,7 +65,16 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
                 PasswordHash = "pending"
             };
             user.PasswordHash = hasher.HashPassword(user, Password);
-            db.Users.Add(user);
+            var admin = new UserAccount
+            {
+                Id = _adminId,
+                Email = AdminEmail,
+                NormalizedEmail = AdminEmail.ToUpperInvariant(),
+                PasswordHash = "pending",
+                IsAdmin = true
+            };
+            admin.PasswordHash = hasher.HashPassword(admin, AdminPassword);
+            db.Users.AddRange(user, admin);
             db.Agents.Add(new AgentDevice
             {
                 PublicId = AgentId,
@@ -74,12 +87,12 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        using var login = await _client.PostAsync("/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        using var login = await PostPortalFormAsync(_client, "/login", "/login", new Dictionary<string, string>
         {
             ["email"] = Email,
             ["password"] = Password,
             ["returnUrl"] = "/dashboard"
-        }));
+        });
         Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
     }
 
@@ -256,16 +269,16 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         {
             BaseAddress = new Uri(ApiUrl),
             AllowAutoRedirect = false,
-            HandleCookies = false
+            HandleCookies = true
         });
 
         const string attemptedPassword = "definitely-the-wrong-password";
-        using var response = await client.PostAsync("/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        using var response = await PostPortalFormAsync(client, "/login", "/login", new Dictionary<string, string>
         {
             ["email"] = Email,
             ["password"] = attemptedPassword,
             ["returnUrl"] = "/dashboard"
-        }));
+        });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();
@@ -358,7 +371,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Contains($"action=\"/devices/{AgentId}/revoke\"", confirmationHtml, StringComparison.Ordinal);
         Assert.Contains("security history will remain available", confirmationHtml, StringComparison.Ordinal);
 
-        using var revoke = await _client.PostAsync($"/devices/{AgentId}/revoke", new FormUrlEncodedContent([]));
+        using var revoke = await PostPortalFormAsync(_client, $"/devices/{AgentId}/revoke", $"/devices/{AgentId}/revoke");
         Assert.Equal(HttpStatusCode.Redirect, revoke.StatusCode);
         Assert.NotNull(revoke.Headers.Location);
         Assert.Equal("/devices?notice=revoked", revoke.Headers.Location.OriginalString);
@@ -417,7 +430,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var confirmation = await _client.GetAsync($"/devices/{foreignId}/revoke");
         Assert.Equal(HttpStatusCode.NotFound, confirmation.StatusCode);
 
-        using var revoke = await _client.PostAsync($"/devices/{foreignId}/revoke", new FormUrlEncodedContent([]));
+        using var revoke = await PostPortalFormAsync(_client, $"/devices/{foreignId}/revoke", "/dashboard");
         Assert.Equal(HttpStatusCode.NotFound, revoke.StatusCode);
 
         await using var verifyScope = _factory!.Services.CreateAsyncScope();
@@ -576,12 +589,12 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        using var allow = await _client!.PostAsync($"/approvals/{ownedApprovalId}/allow", new FormUrlEncodedContent([]));
+        using var allow = await PostPortalFormAsync(_client!, $"/approvals/{ownedApprovalId}/allow", "/approvals");
         Assert.Equal(HttpStatusCode.Redirect, allow.StatusCode);
         Assert.NotNull(allow.Headers.Location);
         Assert.Equal("/approvals?notice=allowed", allow.Headers.Location.OriginalString);
 
-        using var foreignDeny = await _client.PostAsync($"/approvals/{foreignApprovalId}/deny", new FormUrlEncodedContent([]));
+        using var foreignDeny = await PostPortalFormAsync(_client!, $"/approvals/{foreignApprovalId}/deny", "/approvals");
         Assert.Equal(HttpStatusCode.NotFound, foreignDeny.StatusCode);
 
         await using var verifyScope = _factory.Services.CreateAsyncScope();
@@ -621,7 +634,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        using var response = await _client!.PostAsync($"/approvals/{approvalId}/allow", new FormUrlEncodedContent([]));
+        using var response = await PostPortalFormAsync(_client!, $"/approvals/{approvalId}/allow", "/dashboard");
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.NotNull(response.Headers.Location);
         Assert.Equal("/approvals?notice=expired", response.Headers.Location.OriginalString);
@@ -678,6 +691,222 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.DoesNotContain(deniedTarget, html, StringComparison.Ordinal);
         Assert.Contains("aria-current=\"page\">Allowed</a>", html, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Regular_user_is_forbidden_from_administration_routes()
+    {
+        using var response = await _client!.GetAsync("/admin");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        using var detail = await _client.GetAsync($"/admin/users/{_ownerId}");
+        Assert.Equal(HttpStatusCode.Forbidden, detail.StatusCode);
+    }
+
+    [Fact]
+    public async Task Administrator_can_search_users_without_rendering_credentials()
+    {
+        using var adminClient = await CreateLoggedInClientAsync(AdminEmail, AdminPassword);
+
+        using var response = await adminClient.GetAsync("/admin?q=oauth-refresh");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("Administration", html, StringComparison.Ordinal);
+        Assert.Contains(Email, html, StringComparison.Ordinal);
+        Assert.Contains("/admin/users/", html, StringComparison.Ordinal);
+        Assert.Contains("Admin", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("oauth-refresh-password", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("agent-credential", html, StringComparison.Ordinal);
+
+        string passwordHash;
+        string credentialHash;
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            passwordHash = (await db.Users.AsNoTracking().SingleAsync(x => x.Id == _ownerId)).PasswordHash;
+            credentialHash = (await db.Agents.AsNoTracking().SingleAsync(x => x.PublicId == AgentId)).CredentialHash;
+        }
+
+        Assert.DoesNotContain(passwordHash, html, StringComparison.Ordinal);
+        Assert.DoesNotContain(credentialHash, html, StringComparison.Ordinal);
+
+        using var detail = await adminClient.GetAsync($"/admin/users/{_ownerId}");
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        var detailHtml = await detail.Content.ReadAsStringAsync();
+        Assert.Contains(AgentId, detailHtml, StringComparison.Ordinal);
+        Assert.Contains("Disable account", detailHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(credentialHash, detailHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Disabling_user_invalidates_existing_session_and_agent_access_until_reenabled()
+    {
+        using var adminClient = await CreateLoggedInClientAsync(AdminEmail, AdminPassword);
+
+        using var confirmation = await adminClient.GetAsync($"/admin/users/{_ownerId}/disable");
+        Assert.Equal(HttpStatusCode.OK, confirmation.StatusCode);
+        var confirmationHtml = await confirmation.Content.ReadAsStringAsync();
+        Assert.Contains("Disable user account", confirmationHtml, StringComparison.Ordinal);
+        Assert.Contains($"action=\"/admin/users/{_ownerId}/disable\"", confirmationHtml, StringComparison.Ordinal);
+
+        using var disable = await PostPortalFormAsync(adminClient, $"/admin/users/{_ownerId}/disable", $"/admin/users/{_ownerId}/disable");
+        Assert.Equal(HttpStatusCode.Redirect, disable.StatusCode);
+
+        using var staleSession = await _client!.GetAsync("/dashboard");
+        Assert.Equal(HttpStatusCode.Redirect, staleSession.StatusCode);
+        Assert.NotNull(staleSession.Headers.Location);
+        Assert.Equal("/login", staleSession.Headers.Location.AbsolutePath);
+
+        using var agentAuth = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/authenticate")
+        {
+            Content = JsonContent.Create(new { agentId = AgentId, credential = "agent-credential" })
+        };
+        agentAuth.Headers.Add("X-MateMCP-Internal-Key", InternalKey);
+        using var agentAuthResponse = await adminClient.SendAsync(agentAuth);
+        Assert.Equal(HttpStatusCode.Unauthorized, agentAuthResponse.StatusCode);
+
+        using var createApproval = new HttpRequestMessage(HttpMethod.Post, $"/api/agents/{AgentId}/approvals")
+        {
+            Content = JsonContent.Create(new { capability = "shell", target = "dotnet test", summary = "disabled owner", expiresIn = 120 })
+        };
+        createApproval.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "agent-credential");
+        using var createApprovalResponse = await adminClient.SendAsync(createApproval);
+        Assert.Equal(HttpStatusCode.Unauthorized, createApprovalResponse.StatusCode);
+
+        using var deviceListRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/agents/{AgentId}/devices");
+        deviceListRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "agent-credential");
+        using var deviceListResponse = await adminClient.SendAsync(deviceListRequest);
+        Assert.Equal(HttpStatusCode.Unauthorized, deviceListResponse.StatusCode);
+
+        using var enable = await PostPortalFormAsync(adminClient, $"/admin/users/{_ownerId}/enable", $"/admin/users/{_ownerId}");
+        Assert.Equal(HttpStatusCode.Redirect, enable.StatusCode);
+
+        using var freshUserClient = await CreateLoggedInClientAsync(Email, Password);
+        using var dashboard = await freshUserClient.GetAsync("/dashboard");
+        Assert.Equal(HttpStatusCode.OK, dashboard.StatusCode);
+
+        using var restoredAuth = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/authenticate")
+        {
+            Content = JsonContent.Create(new { agentId = AgentId, credential = "agent-credential" })
+        };
+        restoredAuth.Headers.Add("X-MateMCP-Internal-Key", InternalKey);
+        using var restoredAuthResponse = await adminClient.SendAsync(restoredAuth);
+        Assert.Equal(HttpStatusCode.OK, restoredAuthResponse.StatusCode);
+
+        await using var verifyScope = _factory!.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        Assert.False((await verifyDb.Users.SingleAsync(x => x.Id == _ownerId)).IsDisabled);
+        Assert.True(await verifyDb.AuditEvents.AnyAsync(x => x.UserId == _adminId && x.EventType == "admin.user.disabled" && x.Detail == _ownerId.ToString()));
+        Assert.True(await verifyDb.AuditEvents.AnyAsync(x => x.UserId == _adminId && x.EventType == "admin.user.enabled" && x.Detail == _ownerId.ToString()));
+    }
+
+    [Fact]
+    public async Task Administrator_cannot_disable_self_and_can_revoke_a_users_device_with_audit()
+    {
+        using var adminClient = await CreateLoggedInClientAsync(AdminEmail, AdminPassword);
+
+        using var selfConfirmation = await adminClient.GetAsync($"/admin/users/{_adminId}/disable");
+        Assert.Equal(HttpStatusCode.Conflict, selfConfirmation.StatusCode);
+        var selfHtml = await selfConfirmation.Content.ReadAsStringAsync();
+        Assert.Contains("cannot disable your own administrator account", selfHtml, StringComparison.OrdinalIgnoreCase);
+
+        using var selfDisable = await PostPortalFormAsync(adminClient, $"/admin/users/{_adminId}/disable", $"/admin/users/{_adminId}");
+        Assert.Equal(HttpStatusCode.BadRequest, selfDisable.StatusCode);
+
+        using var revokeConfirmation = await adminClient.GetAsync($"/admin/devices/{AgentId}/revoke");
+        Assert.Equal(HttpStatusCode.OK, revokeConfirmation.StatusCode);
+        var revokeHtml = await revokeConfirmation.Content.ReadAsStringAsync();
+        Assert.Contains("Revoke user device", revokeHtml, StringComparison.Ordinal);
+        Assert.Contains(Email, revokeHtml, StringComparison.Ordinal);
+        Assert.Contains($"action=\"/admin/devices/{AgentId}/revoke\"", revokeHtml, StringComparison.Ordinal);
+
+        using var revoke = await PostPortalFormAsync(adminClient, $"/admin/devices/{AgentId}/revoke", $"/admin/devices/{AgentId}/revoke");
+        Assert.Equal(HttpStatusCode.Redirect, revoke.StatusCode);
+
+        await using var verifyScope = _factory!.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var agent = await verifyDb.Agents.SingleAsync(x => x.PublicId == AgentId);
+        Assert.True(agent.IsRevoked);
+        Assert.True(await verifyDb.AuditEvents.AnyAsync(x =>
+            x.UserId == _adminId &&
+            x.AgentDeviceId == agent.Id &&
+            x.EventType == "admin.agent.revoked" &&
+            x.Detail == _ownerId.ToString()));
+    }
+
+    [Fact]
+    public async Task Administrative_mutations_reject_missing_antiforgery_token()
+    {
+        using var adminClient = await CreateLoggedInClientAsync(AdminEmail, AdminPassword);
+        using var response = await adminClient.PostAsync($"/admin/users/{_ownerId}/disable", new FormUrlEncodedContent([]));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        await using var verifyScope = _factory!.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        Assert.False((await verifyDb.Users.SingleAsync(x => x.Id == _ownerId)).IsDisabled);
+    }
+
+    [Fact]
+    public async Task Admin_styles_keep_responsive_operational_layout_contracts()
+    {
+        using var client = _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri(ApiUrl),
+            AllowAutoRedirect = false,
+            HandleCookies = false
+        });
+
+        using var response = await client.GetAsync("/portal/portal.css");
+        response.EnsureSuccessStatusCode();
+        var css = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains(".admin-user-row", css, StringComparison.Ordinal);
+        Assert.Contains(".admin-account-grid", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 980px)", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 620px)", css, StringComparison.Ordinal);
+    }
+
+    private static async Task<HttpResponseMessage> PostPortalFormAsync(
+        HttpClient client,
+        string postPath,
+        string tokenPage,
+        Dictionary<string, string>? fields = null)
+    {
+        using var page = await client.GetAsync(tokenPage);
+        Assert.True(
+            page.StatusCode is HttpStatusCode.OK or HttpStatusCode.Conflict,
+            $"Expected an HTML form page for anti-forgery token but received {(int)page.StatusCode} from {tokenPage}.");
+        var html = await page.Content.ReadAsStringAsync();
+        var match = Regex.Match(html, "name=\"__RequestVerificationToken\" value=\"([^\"]+)\"", RegexOptions.CultureInvariant);
+        Assert.True(match.Success, $"Anti-forgery token was not rendered by {tokenPage}.");
+
+        var payload = fields is null
+            ? new Dictionary<string, string>()
+            : new Dictionary<string, string>(fields, StringComparer.Ordinal);
+        payload["__RequestVerificationToken"] = WebUtility.HtmlDecode(match.Groups[1].Value);
+
+        return await client.PostAsync(postPath, new FormUrlEncodedContent(payload));
+    }
+
+    private async Task<HttpClient> CreateLoggedInClientAsync(string email, string password)
+    {
+        var client = _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri(ApiUrl),
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+
+        using var login = await PostPortalFormAsync(client, "/login", "/login", new Dictionary<string, string>
+        {
+            ["email"] = email,
+            ["password"] = password,
+            ["returnUrl"] = "/dashboard"
+        });
+        Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
+        return client;
+    }
+
     private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/authorize")
