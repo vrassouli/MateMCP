@@ -40,16 +40,16 @@ replace_env_value() {
 }
 
 printf '\n==> Downloading MateMCP server installers\n'
+download web
 download api
 download relay
+
+printf '\n==> Installing/updating MateMCP public Web\n'
+bash "$TMP_DIR/install-web.sh"
 
 printf '\n==> Installing/updating MateMCP API / Control Plane\n'
 bash "$TMP_DIR/install-api.sh"
 
-# The API installer owns the canonical public URL prompts on a fresh setup.
-# Reuse the resulting configuration for Relay so users are not asked for the
-# same values twice. On normal updates the existing API .env is preserved and
-# no public URL prompt is needed at all.
 API_ENV_FILE="${MATEMCP_API_ENV_FILE:-${API_INSTALL_DIR}/.env}"
 RELAY_ENV_FILE="${RELAY_INSTALL_DIR}/.env"
 export MATEMCP_API_ENV_FILE="$API_ENV_FILE"
@@ -67,11 +67,8 @@ if [[ -r "$API_ENV_FILE" ]]; then
     export MATEMCP_RELAY_PUBLIC_URL_INPUT="${MATEMCP_RELAY_PUBLIC_URL_INPUT:-$RELAY_PUBLIC_URL}"
   fi
 
-  # If Relay already has a modern configuration, keep its shared Control Plane
-  # key aligned with the API. This also handles an API legacy-config migration
-  # that rotates the internal key without exposing the secret to the terminal.
-  if [[ -n "${API_INTERNAL_KEY:-}" && -f "$RELAY_ENV_FILE" ]] && \
-     grep -q '^MATEMCP_INTERNAL_API_KEY=.' "$RELAY_ENV_FILE" && \
+  if [[ -n "${API_INTERNAL_KEY:-}" && -f "$RELAY_ENV_FILE" ]] &&
+     grep -q '^MATEMCP_INTERNAL_API_KEY=.' "$RELAY_ENV_FILE" &&
      grep -q '^MATEMCP_API_INTERNAL_URL=.' "$RELAY_ENV_FILE"; then
     RELAY_INTERNAL_KEY="$(read_env_value "$RELAY_ENV_FILE" MATEMCP_INTERNAL_API_KEY)"
     if [[ "$RELAY_INTERNAL_KEY" != "$API_INTERNAL_KEY" ]]; then
@@ -85,6 +82,7 @@ printf '\n==> Installing/updating MateMCP Relay\n'
 bash "$TMP_DIR/install-relay.sh"
 
 printf '\nMateMCP server installation/update completed successfully.\n'
+printf 'Public Web:   https://matemcp.com/health\n'
 if [[ -n "${MATEMCP_API_PUBLIC_URL_INPUT:-}" ]]; then
   printf 'API health:   %s/health\n' "$MATEMCP_API_PUBLIC_URL_INPUT"
 fi
