@@ -86,6 +86,7 @@ app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "
 app.MapGet("/", (ClaimsPrincipal user) => user.Identity?.IsAuthenticated == true ? Results.Redirect("/dashboard") : Results.Redirect("/login"));
 DeviceManagementEndpoints.Map(app, relayUrl);
 PortalDeviceEndpoints.Map(app, relayUrl);
+PortalApprovalEndpoints.Map(app);
 
 app.MapGet("/register", (HttpContext context) =>
 {
@@ -184,19 +185,20 @@ app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, 
           {(agents.Count > displayAgents.Count ? $"""<div class="section-footer"><a class="button button-ghost button-compact" href="/devices">View all {agents.Count} active devices</a></div>""" : "")}
           """;
 
-    var approvalsContent = approvals.Count == 0
+    var dashboardApprovals = approvals.Take(3).ToList();
+    var approvalsContent = dashboardApprovals.Count == 0
         ? PortalUi.EmptyState("Nothing waiting", "Approval requests that need your decision will appear here.")
         : $"""
           <div class="approval-list">
-            {string.Join("", approvals.Select(x => $"""
+            {string.Join("", dashboardApprovals.Select(x => $"""
               <article class="approval-item">
                 <div>
                   <div class="approval-meta"><strong>{PortalUi.H(x.Capability)}</strong>{PortalUi.StatusBadge("pending")}<span class="approval-device">on {PortalUi.H(x.AgentDevice!.Name)}</span></div>
                   <p class="approval-summary">{PortalUi.H(x.Summary)}</p>
                 </div>
                 <div class="approval-actions">
-                  <form method="post" action="/dashboard/approvals/{x.Id}/allow"><button class="button button-secondary button-compact" type="submit">Allow once</button></form>
-                  <form method="post" action="/dashboard/approvals/{x.Id}/deny"><button class="button button-danger button-compact" type="submit">Deny</button></form>
+                  <form method="post" action="/approvals/{x.Id}/allow"><button class="button button-secondary button-compact" type="submit">Allow once</button></form>
+                  <form method="post" action="/approvals/{x.Id}/deny"><button class="button button-danger button-compact" type="submit">Deny</button></form>
                 </div>
               </article>
             """))}
@@ -219,6 +221,7 @@ app.MapGet("/dashboard", async (HttpContext context, ClaimsPrincipal principal, 
           <section class="portal-section" id="approvals">
             <div class="portal-section-header"><div><h2>Pending approvals</h2><p>Sensitive actions waiting for your decision.</p></div><span class="section-count">{approvals.Count}</span></div>
             {approvalsContent}
+            <div class="section-footer"><a class="button button-ghost button-compact" href="/approvals">Open approvals inbox</a></div>
           </section>
         </div>
         """;
@@ -374,10 +377,6 @@ app.MapGet("/api/agents/{agentId}/approvals/{id:guid}", async (string agentId, G
 {
     var agent = await AuthenticateAgent(c, agentId, db); if (agent is null) return Results.Unauthorized(); var a = await db.Approvals.SingleOrDefaultAsync(x => x.Id == id && x.AgentDeviceId == agent.Id); if (a is null) return Results.NotFound(); if (a.Status == "pending" && a.ExpiresAt <= DateTimeOffset.UtcNow) { a.Status = "expired"; await db.SaveChangesAsync(); } return Results.Ok(new { a.Status });
 });
-app.MapPost("/dashboard/approvals/{id:guid}/{decision}", async (Guid id, string decision, ClaimsPrincipal principal, ControlPlaneDbContext db) =>
-{
-    if (decision is not ("allow" or "deny")) return Results.NotFound(); var userId = UserId(principal); var a = await db.Approvals.Include(x => x.AgentDevice).SingleOrDefaultAsync(x => x.Id == id && x.AgentDevice!.OwnerId == userId && x.Status == "pending"); if (a is null || a.ExpiresAt <= DateTimeOffset.UtcNow) return Results.NotFound(); a.Status = decision == "allow" ? "allowed" : "denied"; a.DecidedAt = DateTimeOffset.UtcNow; db.AuditEvents.Add(new AuditEvent { UserId = userId, AgentDeviceId = a.AgentDeviceId, EventType = "approval." + a.Status, Detail = a.OperationHash }); await db.SaveChangesAsync(); return Results.Redirect("/dashboard");
-}).RequireAuthorization();
 
 app.Run();
 

@@ -24,7 +24,7 @@ document.addEventListener('click', event => {
 });
 
 window.addEventListener('resize', () => {
-  if (window.innerWidth > 820) setPortalMenu(false);
+  if (window.innerWidth > 980) setPortalMenu(false);
 });
 
 async function copyPortalValue(button) {

@@ -25,3 +25,4 @@ Read `docs/web-design-system.md` before making visual changes.
 - Perform real browser QA and check console diagnostics before considering web UI complete.
 - Add or update automated smoke tests for critical metadata, headers, and primary page content when the public surface changes.
 - In device management, revoking access must remove the device from the normal active workflow immediately. Preserve security/audit history separately instead of leaving revoked devices mixed into the everyday device list, and require explicit confirmation for revoke actions.
+- Approval UX keeps pending requests prominent and separate from completed history. Long targets/summaries must wrap safely, history should be filterable, and allow/deny actions must remain owner-scoped and auditable.

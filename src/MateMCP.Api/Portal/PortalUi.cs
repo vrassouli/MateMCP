@@ -122,6 +122,7 @@ public static class PortalUi
                   <nav class="portal-nav" id="portal-nav" aria-label="Account navigation" data-portal-nav>
                     {Nav("overview", "/dashboard", "⌂", "Overview")}
                     {Nav("devices", "/devices", "◇", "Devices")}
+                    {Nav("approvals", "/approvals", "!", "Approvals")}
                     {Nav("device", "/device", "+", "Add device")}
                     <a class="portal-nav-link" href="https://matemcp.com/"><span class="nav-icon" aria-hidden="true">↗</span><span>Product site</span></a>
                   </nav>
@@ -136,7 +137,7 @@ public static class PortalUi
                 <div class="portal-shell">{body}</div>
               </main>
             </div>
-            <script src="/portal/portal.js?v=299-1" defer></script>
+            <script src="/portal/portal.js?v=300-2" defer></script>
             """;
 
         return Html(title, shell, statusCode, "portal-page");
@@ -203,7 +204,7 @@ public static class PortalUi
               <meta name="theme-color" content="#07111f">
               <meta name="robots" content="noindex,nofollow">
               <link rel="icon" href="/portal/mark.svg?v=1" type="image/svg+xml">
-              <link rel="stylesheet" href="/portal/portal.css?v=299-1">
+              <link rel="stylesheet" href="/portal/portal.css?v=300-2">
               <title>{H(title)} · MateMCP</title>
             </head>
             <body class="{bodyClass}">
