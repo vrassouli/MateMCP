@@ -22,8 +22,28 @@ New-Item -ItemType Directory -Force -Path $ConfigRoot | Out-Null
 
 # Stop whichever startup mechanism is currently active before changing it.
 Get-Process 'MateMCP.Agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } catch { }
-try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+$existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($existingTask) {
+    if ($existingTask.State -eq 'Running') {
+        try {
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        }
+        catch {
+            throw "Could not stop the existing MateMCP Agent scheduled task. Re-run this operation with Administrator authorization. $($_.Exception.Message)"
+        }
+    }
+
+    try {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+    }
+    catch {
+        throw "Could not remove the existing MateMCP Agent scheduled task. Re-run this operation with Administrator authorization. $($_.Exception.Message)"
+    }
+
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        throw 'The existing MateMCP Agent scheduled task is still registered after cleanup.'
+    }
+}
 Remove-Item $StartupShortcut -Force -ErrorAction SilentlyContinue
 
 if ($Mode -eq 'Elevated') {
