@@ -24,3 +24,4 @@ Read `docs/web-design-system.md` before making visual changes.
 - Prefer inline/original SVG icons and CSS product visuals over decorative stock imagery.
 - Perform real browser QA and check console diagnostics before considering web UI complete.
 - Add or update automated smoke tests for critical metadata, headers, and primary page content when the public surface changes.
+- In device management, revoking access must remove the device from the normal active workflow immediately. Preserve security/audit history separately instead of leaving revoked devices mixed into the everyday device list, and require explicit confirmation for revoke actions.

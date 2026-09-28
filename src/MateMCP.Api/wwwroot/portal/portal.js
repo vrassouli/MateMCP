@@ -24,5 +24,40 @@ document.addEventListener('click', event => {
 });
 
 window.addEventListener('resize', () => {
-  if (window.innerWidth > 780) setPortalMenu(false);
+  if (window.innerWidth > 820) setPortalMenu(false);
+});
+
+async function copyPortalValue(button) {
+  const value = button.dataset.copyValue;
+  if (!value) return;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+
+    const original = button.textContent;
+    button.textContent = original?.trim() === 'Copy' ? 'Copied' : '✓';
+    button.setAttribute('aria-label', 'Copied MCP endpoint');
+    window.setTimeout(() => {
+      button.textContent = original;
+      button.setAttribute('aria-label', original?.trim() === 'Copy' ? 'Copy MCP endpoint' : 'Copy MCP endpoint');
+    }, 1400);
+  } catch {
+    button.setAttribute('aria-label', 'Could not copy MCP endpoint');
+  }
+}
+
+document.querySelectorAll('[data-copy-value]').forEach(button => {
+  button.addEventListener('click', () => copyPortalValue(button));
 });
