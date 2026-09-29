@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.vrassouli/matemcp",
+  "title": "MateMCP",
+  "description": "Your agent hit a limit? Keep working. MateMCP securely connects AI chats to your computer via MCP.",
+  "version": "0.1.0",
+  "websiteUrl": "https://matemcp.com",
+  "repository": {
+    "url": "https://github.com/vrassouli/MateMCP",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://relay.matemcp.com/mcp/{agent_id}",
+      "variables": {
+        "agent_id": {
+          "description": "Your MateMCP Agent ID (for example, agt_...). Copy it from MateMCP Companion or the account portal.",
+          "isRequired": true
+        }
+      }
+    }
+  ]
+}
