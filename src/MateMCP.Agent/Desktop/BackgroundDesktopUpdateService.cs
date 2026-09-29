@@ -285,6 +285,8 @@ $Marker = {{PowerShellQuote(markerPath)}}
 $Status = {{PowerShellQuote(statusPath)}}
 $Failure = {{PowerShellQuote(failurePath)}}
 $InstalledRoot = Join-Path $env:LOCALAPPDATA 'MateMCP'
+$Companion = Join-Path $InstalledRoot 'Companion\MateMCP.Agent.Companion.exe'
+$CompanionWasRunning = @(Get-Process 'MateMCP.Agent.Companion' -ErrorAction SilentlyContinue).Count -gt 0
 $HiddenLauncher = Join-Path $InstalledRoot 'start-agent-hidden.vbs'
 $ModeFile = Join-Path (Join-Path $env:APPDATA 'MateMCP') 'agent-run-mode.txt'
 $TaskName = 'MateMCP Agent'
@@ -299,6 +301,13 @@ function Wait-AgentHealth {
         Start-Sleep -Milliseconds 250
     }
     throw 'MateMCP Agent process did not become healthy after update.'
+}
+function Restore-Companion {
+    if ($CompanionWasRunning -and
+        -not (Get-Process 'MateMCP.Agent.Companion' -ErrorAction SilentlyContinue) -and
+        (Test-Path $Companion)) {
+        Start-Process -FilePath $Companion -WorkingDirectory (Split-Path $Companion)
+    }
 }
 Start-Sleep -Seconds 2
 New-Item -ItemType Directory -Force -Path $Package, (Split-Path $Marker) | Out-Null
@@ -319,6 +328,7 @@ try {
     [IO.File]::WriteAllText($Marker, '{{assetId.ToString(CultureInfo.InvariantCulture)}}')
     [IO.File]::WriteAllText($Status, "$Now|updated|MateMCP Desktop was updated automatically in the background.")
     Remove-Item $Failure -Force -ErrorAction SilentlyContinue
+    Restore-Companion
 }
 catch {
     New-Item -ItemType Directory -Force -Path (Split-Path $Failure) | Out-Null
@@ -328,6 +338,7 @@ catch {
     $AgentMode = if ((Test-Path $ModeFile) -and ((Get-Content $ModeFile -Raw).Trim() -eq 'Elevated')) { 'Elevated' } else { 'Normal' }
     if ($AgentMode -eq 'Elevated') { & schtasks.exe /Run /TN $TaskName *> $null }
     elseif (Test-Path $HiddenLauncher) { Start-Process -FilePath $WScript -ArgumentList "`"$HiddenLauncher`"" -ErrorAction SilentlyContinue }
+    try { Restore-Companion } catch { }
 }
 finally {
     Remove-Item $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -413,6 +424,10 @@ TARGET_HOME={{ShellQuote(home)}}
 TARGET_USER={{ShellQuote(user)}}
 TARGET_UID={{ShellQuote(uid ?? string.Empty)}}
 [ -n "$TARGET_UID" ] || TARGET_UID="$(id -u)"
+COMPANION_APP="$TARGET_HOME/Applications/MateMCP Agent Companion.app"
+COMPANION_PROCESS_PATTERN="$COMPANION_APP/Contents/MacOS/"
+COMPANION_WAS_RUNNING=0
+/usr/bin/pgrep -f "$COMPANION_PROCESS_PATTERN" >/dev/null 2>&1 && COMPANION_WAS_RUNNING=1
 UPDATE_JOB_LABEL={{ShellQuote(jobLabel)}}
 UPDATE_JOB_DOMAIN={{ShellQuote(jobDomain)}}
 cleanup_update_job() {
@@ -429,6 +444,16 @@ wait_agent_health() {
         sleep 0.25
     done
     return 1
+}
+restore_companion() {
+    [ "$COMPANION_WAS_RUNNING" -eq 1 ] || return 0
+    [ -d "$COMPANION_APP" ] || return 0
+    /usr/bin/pgrep -f "$COMPANION_PROCESS_PATTERN" >/dev/null 2>&1 && return 0
+    if [ "$(id -u)" = "$TARGET_UID" ]; then
+        /usr/bin/open "$COMPANION_APP" >/dev/null 2>&1
+    else
+        /bin/launchctl asuser "$TARGET_UID" /usr/bin/open "$COMPANION_APP" >/dev/null 2>&1
+    fi
 }
 sleep 2
 mkdir -p "$PACKAGE" "$(dirname "$MARKER")"
@@ -449,6 +474,7 @@ if tar -xzf "$ARCHIVE" -C "$PACKAGE" && \
     printf '%s' '{{assetId.ToString(CultureInfo.InvariantCulture)}}' > "$MARKER"
     printf '%s|updated|%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 'MateMCP Desktop was updated automatically in the background.' > "$STATUS"
     rm -f "$FAILURE"
+    restore_companion || true
 else
     code=$?
     printf '%s\n' 'Background Desktop update installation failed; the previous installation will be restarted if possible.' > "$FAILURE"
@@ -456,6 +482,7 @@ else
     if [ -x "$CONFIGURE_MODE" ]; then
         MATEMCP_TARGET_USER="$TARGET_USER" MATEMCP_TARGET_UID="$TARGET_UID" MATEMCP_TARGET_HOME="$TARGET_HOME" "$CONFIGURE_MODE" "$AGENT_MODE" >/dev/null 2>&1 || true
     fi
+    restore_companion || true
     exit "$code"
 fi
 """;
