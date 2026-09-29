@@ -239,6 +239,7 @@ public static class PortalUi
               <meta name="robots" content="noindex,nofollow">
               <link rel="icon" href="/portal/mark.svg?v=1" type="image/svg+xml">
               <link rel="stylesheet" href="/portal/portal.css?v=301-2">
+              <script src="/portal/analytics.js?v=1" defer></script>
               <title>{H(title)} · MateMCP</title>
             </head>
             <body class="{bodyClass}">

@@ -240,13 +240,14 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var loginHtml = await login.Content.ReadAsStringAsync();
         Assert.Contains("class=\"auth-layout\"", loginHtml, StringComparison.Ordinal);
         Assert.Contains("/portal/portal.css", loginHtml, StringComparison.Ordinal);
+        Assert.Contains("/portal/analytics.js", loginHtml, StringComparison.Ordinal);
         Assert.Contains("autocomplete=\"current-password\"", loginHtml, StringComparison.Ordinal);
         Assert.Contains("Create an account", loginHtml, StringComparison.Ordinal);
         Assert.True(login.Headers.CacheControl?.NoStore);
         Assert.True(login.Headers.TryGetValues("Content-Security-Policy", out var csp));
         Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
-        Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com", StringComparison.Ordinal));
-        Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com", StringComparison.Ordinal));
 
         using var register = await client.GetAsync("/register");
         Assert.Equal(HttpStatusCode.OK, register.StatusCode);
