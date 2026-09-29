@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.vrassouli/matemcp",
   "title": "MateMCP",
-  "description": "Your agent hit a limit? Keep working. MateMCP securely connects MCP-capable AI chats to your computer for files, shell, browser and desktop control, approvals, secrets, and more.",
+  "description": "Your agent hit a limit? Keep working. MateMCP securely connects AI chats to your computer via MCP.",
   "version": "0.1.0",
   "websiteUrl": "https://matemcp.com",
   "repository": {
