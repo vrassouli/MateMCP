@@ -88,6 +88,29 @@ public sealed class DesktopUpdateCompatibilityTests
     }
 
     [Fact]
+    public void Background_updater_preserves_an_already_running_companion_without_enabling_autostart()
+    {
+        var root = FindRepositoryRoot();
+        var updater = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Desktop", "BackgroundDesktopUpdateService.cs"));
+        var windowsInstaller = File.ReadAllText(Path.Combine(root, "scripts", "install-companion-windows.ps1"));
+        var macInstaller = File.ReadAllText(Path.Combine(root, "scripts", "install-companion-macos.sh"));
+
+        Assert.Contains("$CompanionWasRunning = @(Get-Process 'MateMCP.Agent.Companion'", updater, StringComparison.Ordinal);
+        Assert.Contains("function Restore-Companion", updater, StringComparison.Ordinal);
+        Assert.Contains("$CompanionWasRunning -and", updater, StringComparison.Ordinal);
+        Assert.Contains("COMPANION_WAS_RUNNING=0", updater, StringComparison.Ordinal);
+        Assert.Contains("restore_companion()", updater, StringComparison.Ordinal);
+        Assert.Contains("/bin/launchctl asuser \"$TARGET_UID\" /usr/bin/open \"$COMPANION_APP\"", updater, StringComparison.Ordinal);
+
+        Assert.Contains("CloseMainWindow()", windowsInstaller, StringComparison.Ordinal);
+        Assert.True(windowsInstaller.IndexOf("CloseMainWindow()", StringComparison.Ordinal)
+            < windowsInstaller.IndexOf("Stop-Process -Force", StringComparison.Ordinal));
+        Assert.Contains("osascript -e 'tell application \"MateMCP Agent Companion\" to quit'", macInstaller, StringComparison.Ordinal);
+        Assert.True(macInstaller.IndexOf("tell application \"MateMCP Agent Companion\" to quit", StringComparison.Ordinal)
+            < macInstaller.IndexOf("rm -rf \"$APP_TARGET\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Windows_companion_upgrade_preserves_webview_user_data()
     {
         var root = FindRepositoryRoot();

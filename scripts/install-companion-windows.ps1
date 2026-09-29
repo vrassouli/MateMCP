@@ -17,7 +17,21 @@ if (-not (Test-Path (Join-Path $Source 'MateMCP.Agent.Companion.exe'))) {
     throw "MateMCP Agent Companion payload not found at: $Source"
 }
 
-Get-Process 'MateMCP.Agent.Companion' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+$companionProcesses = @(Get-Process 'MateMCP.Agent.Companion' -ErrorAction SilentlyContinue)
+foreach ($process in $companionProcesses) {
+    try { $null = $process.CloseMainWindow() } catch { }
+}
+
+# Give MAUI/WinUI a chance to run its normal window/process shutdown hooks so
+# lifecycle diagnostics record a clean terminal event during upgrades. Force is
+# only a last resort when the GUI cannot close itself.
+$closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+while ((Get-Process 'MateMCP.Agent.Companion' -ErrorAction SilentlyContinue) -and
+       [DateTime]::UtcNow -lt $closeDeadline) {
+    Start-Sleep -Milliseconds 100
+}
+Get-Process 'MateMCP.Agent.Companion' -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
 Remove-Item $StartupShortcut -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 # WebView2 keeps its user-data/cache beside the executable. That directory is

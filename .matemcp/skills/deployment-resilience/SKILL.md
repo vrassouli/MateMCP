@@ -26,3 +26,10 @@ Use this skill when changing production installers, container image delivery, or
 
 - Companion package CI must pin the .NET MAUI workload-set version that is known to match the selected GitHub runner/Xcode image; do not rely on the floating latest workload set.
 - Treat MAUI workload-set, .NET SDK, macOS runner, and Xcode upgrades as one intentional compatibility change. Update the pin only after both macOS and Windows Companion package jobs pass.
+
+## Desktop update lifecycle
+
+- Background Desktop updates must preserve the user's Companion residency state: a Companion that was closed stays closed, while one that was running is restored after the update.
+- Before replacing a running Companion, prefer a graceful window/application shutdown so lifecycle diagnostics record a clean terminal event; force termination is a last resort.
+- Restore a previously-running Companion on both successful and failed update paths when the installed application is still launchable.
+- Preserve the same behavior on Windows and macOS; do not turn background update recovery into implicit Companion autostart.

@@ -23,6 +23,19 @@ mkdir -p "$APPLICATIONS" "$SUPPORT" "$HOME/Library/LaunchAgents"
 launchctl bootout "$LAUNCH_DOMAIN/$LAUNCH_LABEL" >/dev/null 2>&1 || true
 rm -f "$LAUNCH_PLIST"
 
+COMPANION_PROCESS_PATTERN="$APP_TARGET/Contents/MacOS/"
+if /usr/bin/pgrep -f "$COMPANION_PROCESS_PATTERN" >/dev/null 2>&1; then
+  # Prefer an ordinary app quit so the Companion can persist a clean lifecycle
+  # terminal event. Fall back to TERM only if the GUI does not exit promptly.
+  /usr/bin/osascript -e 'tell application "MateMCP Agent Companion" to quit' >/dev/null 2>&1 || true
+  close_attempt=0
+  while /usr/bin/pgrep -f "$COMPANION_PROCESS_PATTERN" >/dev/null 2>&1 && [[ "$close_attempt" -lt 50 ]]; do
+    sleep 0.1
+    close_attempt=$((close_attempt + 1))
+  done
+  /usr/bin/pkill -TERM -f "$COMPANION_PROCESS_PATTERN" >/dev/null 2>&1 || true
+fi
+
 rm -rf "$APP_TARGET"
 cp -R "$APP_SOURCE" "$APP_TARGET"
 # CI test artifacts are ad-hoc signed rather than notarized. Clear quarantine so local development/test installs can launch.
