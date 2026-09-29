@@ -21,3 +21,8 @@ Use this skill when changing production installers, container image delivery, or
 - For registry-failure changes, perform a production-path test where the primary image acquisition fails and confirm the fallback succeeds.
 - After update, verify local health and the public HTTPS health endpoint.
 - When all acquisition paths fail, verify the existing container remains running and healthy.
+
+## Reproducible Desktop packaging toolchain
+
+- Companion package CI must pin the .NET MAUI workload-set version that is known to match the selected GitHub runner/Xcode image; do not rely on the floating latest workload set.
+- Treat MAUI workload-set, .NET SDK, macOS runner, and Xcode upgrades as one intentional compatibility change. Update the pin only after both macOS and Windows Companion package jobs pass.

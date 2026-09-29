@@ -79,7 +79,7 @@ jobs:
       - name: Build ScreenCaptureKit preview helper
         run: scripts/build-screen-capture-kit-macos.sh /tmp/MateMCP.ScreenCaptureKitHelper osx-arm64
       - name: Install .NET MAUI workload
-        run: dotnet workload install maui
+        run: dotnet workload install maui --version 10.0.401
       - name: Restore Companion
         run: dotnet restore src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -r maccatalyst-arm64
       - name: Build Mac Catalyst Companion
@@ -155,7 +155,7 @@ jobs:
           [void][scriptblock]::Create((Get-Content scripts/install-desktop-windows.ps1 -Raw))
           [void][scriptblock]::Create((Get-Content scripts/uninstall-windows.ps1 -Raw))
       - name: Install .NET MAUI workload
-        run: dotnet workload install maui
+        run: dotnet workload install maui --version 10.0.401
       - name: Restore Companion
         run: dotnet restore src/MateMCP.Agent.Companion/MateMCP.Agent.Companion.csproj -r win-x64
       - name: Build Windows Companion
