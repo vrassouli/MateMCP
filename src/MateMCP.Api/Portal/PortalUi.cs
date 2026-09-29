@@ -19,11 +19,11 @@ public static class PortalUi
         if (string.IsNullOrWhiteSpace(error))
             error = context.Request.Query["externalError"].ToString();
 
-        var title = registration ? "Create your account" : "Welcome back";
-        var eyebrow = registration ? "Start with MateMCP" : "MateMCP Control";
+        var title = registration ? "Ready to keep working?" : "Keep your AI working";
+        var eyebrow = registration ? "Bring your own AI" : "Pick up where you left off";
         var subtitle = registration
-            ? "Create an account to enroll devices and manage approvals from one place."
-            : "Sign in to manage your devices, approvals, and local AI access.";
+            ? "Create an account and connect the AI chat you already use to the computers you already own."
+            : "Sign in and give your available AI chat a controlled path back to your enrolled devices.";
         var submit = registration ? "Create account" : "Sign in";
         var action = registration ? "/register" : "/login";
         var alternateLabel = registration ? "Already have an account?" : "New to MateMCP?";
@@ -52,14 +52,14 @@ public static class PortalUi
                   <span>MateMCP</span>
                 </a>
                 <div class="auth-story-copy">
-                  <div class="eyebrow"><span class="status-dot"></span> Secure local execution</div>
-                  <h1>Your machines.<br><span>Your rules.</span></h1>
-                  <p>Connect AI assistants to the computers you choose, while keeping access scoped, approval-aware, and auditable.</p>
+                  <div class="eyebrow"><span class="status-dot"></span> Keep your AI working</div>
+                  <h1>Built-in agent hit a limit?<br><span>Keep going.</span></h1>
+                  <p>When your AI chat is still available, MateMCP can connect that conversation to your own computers so the work does not have to stop.</p>
                 </div>
                 <div class="auth-trust-list">
-                  <div><span class="trust-icon">01</span><div><strong>Scoped access</strong><small>Projects and capabilities stay within explicit boundaries.</small></div></div>
-                  <div><span class="trust-icon">02</span><div><strong>Human approvals</strong><small>Sensitive operations can wait for your decision.</small></div></div>
-                  <div><span class="trust-icon">03</span><div><strong>Local credentials</strong><small>Secrets can be resolved on your Agent instead of entering model context.</small></div></div>
+                  <div><span class="trust-icon">01</span><div><strong>Make more of your existing AI plan</strong><small>When chat remains available, MateMCP gives it local tools to keep useful work moving.</small></div></div>
+                  <div><span class="trust-icon">02</span><div><strong>Bring your own AI</strong><small>Use the same enrolled machines from ChatGPT, Claude, Grok, or another compatible MCP client.</small></div></div>
+                  <div><span class="trust-icon">03</span><div><strong>Your machines, your rules</strong><small>Keep access scoped, approval-aware, and backed by local credential handling.</small></div></div>
                 </div>
                 <a class="back-link" href="https://matemcp.com/">
                   <span aria-hidden="true">←</span> Back to matemcp.com
