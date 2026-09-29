@@ -23,6 +23,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Validate server installer scripts
         run: bash -n deploy/install.sh deploy/api/install.sh deploy/relay/install.sh
+      - name: Test API image acquisition fallback
+        run: bash tests/deploy/api-image-acquisition-tests.sh
       - name: Restore
         run: dotnet restore MateMCP.slnx
       - name: Build

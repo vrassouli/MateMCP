@@ -46,6 +46,55 @@ install_docker() {
   systemctl enable --now docker
 }
 
+build_api_image_from_source() {
+  local image="$1"
+  local source_dir
+  source_dir="$(mktemp -d)"
+
+  echo "Primary API image pull failed."
+  echo "Falling back to a local API image build from GitHub ref: $REF"
+  echo "Fallback image target: $image"
+
+  if curl -fsSL "https://codeload.github.com/vrassouli/MateMCP/tar.gz/${REF}" -o "$source_dir/source.tar.gz" &&
+     mkdir -p "$source_dir/source" &&
+     tar -xzf "$source_dir/source.tar.gz" -C "$source_dir/source" --strip-components=1 &&
+     docker build --pull=false \
+       -f "$source_dir/source/src/MateMCP.Api/Dockerfile" \
+       -t "$image" \
+       "$source_dir/source"; then
+    rm -rf "$source_dir"
+    echo "API image source: local source build from GitHub ref '$REF'."
+    return 0
+  else
+    local status=$?
+    rm -rf "$source_dir"
+    echo "Fallback API image build failed; the existing API container has not been recreated." >&2
+    return "$status"
+  fi
+}
+
+acquire_api_image() {
+  local image
+  image="$(docker compose config --images | head -n 1)"
+  [[ -n "$image" ]] || { echo "Unable to resolve the API image from Docker Compose." >&2; return 1; }
+
+  if docker compose pull; then
+    echo "API image source: registry pull ($image)."
+    return 0
+  fi
+
+  case "$image" in
+    vrassouli/matemcp-api:*)
+      build_api_image_from_source "$image"
+      ;;
+    *)
+      echo "API image pull failed for custom image '$image'." >&2
+      echo "Automatic source-build fallback is limited to vrassouli/matemcp-api:* so a custom image is never replaced silently." >&2
+      return 1
+      ;;
+  esac
+}
+
 install_docker
 
 mkdir -p "$INSTALL_DIR"
@@ -119,7 +168,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 cd "$INSTALL_DIR"
-docker compose pull
-docker compose up -d --force-recreate --remove-orphans
+acquire_api_image
+docker compose up -d --force-recreate --pull never --remove-orphans
 for _ in {1..45}; do curl -fsS http://127.0.0.1:8081/health >/dev/null 2>&1 && { echo "MateMCP API is running."; echo "Relay must use the same MATEMCP_INTERNAL_API_KEY from $ENV_FILE"; exit 0; }; sleep 1; done
 echo "MateMCP API did not become healthy. Run: cd $INSTALL_DIR && docker compose logs" >&2; exit 1

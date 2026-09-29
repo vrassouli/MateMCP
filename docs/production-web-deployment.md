@@ -40,6 +40,15 @@ External login providers are optional and independently configurable. See [Exter
 
 The Web service has no private application secrets.
 
+## API image delivery fallback
+
+The API installer prefers the configured container registry image. It acquires the replacement image **before** recreating the running container.
+
+If the default `vrassouli/matemcp-api:*` image cannot be pulled, the installer automatically falls back to downloading the same `MATEMCP_INSTALL_REF` source archive from GitHub and building `src/MateMCP.Api/Dockerfile` locally. The fallback uses the Microsoft Container Registry for the .NET base images and does not require another MateMCP registry credential.
+
+If both image acquisition paths fail, the installer exits without recreating the existing API container.
+
+Custom `MATEMCP_API_IMAGE` values do not use the source-build fallback. A failed custom-image pull stops the update rather than silently replacing a custom image with the official MateMCP source build.
 ## Release verification
 
 A release is not complete until all of the following pass on the public hostnames:
