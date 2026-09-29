@@ -251,7 +251,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var register = await client.GetAsync("/register");
         Assert.Equal(HttpStatusCode.OK, register.StatusCode);
         var registerHtml = await register.Content.ReadAsStringAsync();
-        Assert.Contains("Create your account", registerHtml, StringComparison.Ordinal);
+        Assert.Contains("Ready to keep working?", registerHtml, StringComparison.Ordinal);
+        Assert.Contains("Built-in agent hit a limit?", registerHtml, StringComparison.Ordinal);
         Assert.Contains("autocomplete=\"new-password\"", registerHtml, StringComparison.Ordinal);
         Assert.Contains("minlength=\"10\"", registerHtml, StringComparison.Ordinal);
 
