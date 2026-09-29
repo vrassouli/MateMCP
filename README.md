@@ -2,13 +2,15 @@
 
 **Your agent hit a limit? Keep working.**
 
+**Website:** [matemcp.com](https://matemcp.com) · **Account portal:** [api.matemcp.com](https://api.matemcp.com) · **Releases:** [agent-latest](https://github.com/vrassouli/MateMCP/releases/tag/agent-latest)
+
 MateMCP helps you get more useful work from the AI plan you already pay for. When a provider's built-in coding or agent tool reaches its usage limit but the AI chat itself is still available, MateMCP gives that conversation a controlled path to your own Windows or macOS computer — so useful work can keep moving on your real projects and tools.
 
 **MateMCP does not increase or bypass a provider's usage quota.** It gives compatible AI clients another way to work through MCP, using your machines and your access rules.
 
 Bring your own AI. Connect ChatGPT, Claude, Grok, or another compatible MCP client to an enrolled MateMCP Agent. The Agent can work with project files, shells, browsers, desktop applications, attachments, secrets, and durable project context while MateMCP keeps access scoped, authenticated, observable, and approval-aware.
 
-The normal user experience is simple: install MateMCP Desktop, enroll the device, copy its MCP URL into your AI client, and authorize it with OAuth. You do not copy Agent credentials or expose local ports to the Internet.
+The public website at **matemcp.com** is the product and onboarding surface. The authenticated account portal at **api.matemcp.com** handles account access, enrolled devices, approvals, and administration. The normal desktop experience remains simple: install MateMCP Desktop, enroll the device, copy its MCP URL into your AI client, and authorize it with OAuth. You do not copy Agent credentials or expose local ports to the Internet.
 
 ## Why MateMCP?
 
@@ -36,6 +38,9 @@ The normal user experience is simple: install MateMCP Desktop, enroll the device
 
 ```mermaid
 flowchart LR
+    User[User / Admin]
+    Site[Public website\nmatemcp.com]
+    Portal[Account portal\napi.matemcp.com]
     AI[AI client\nChatGPT / Claude / Grok / MCP client]
     Relay[MateMCP Relay]
     API[OAuth Control Plane]
@@ -43,6 +48,9 @@ flowchart LR
     Companion[Companion]
     Machine[Projects · Shell · Browser · Desktop · Secrets]
 
+    User --> Site
+    User --> Portal
+    Portal -->|account / devices / approvals / admin| API
     AI -->|OAuth + MCP| Relay
     AI -->|Authorize| API
     Relay <-->|resilient Agent channel| Agent
@@ -52,7 +60,7 @@ flowchart LR
     Relay -->|authorization checks| API
 ```
 
-The **Relay** carries remote MCP traffic to the correct online Agent. The **Control Plane** handles accounts, Agent ownership, OAuth, authorization, and remote approval coordination. The **Agent** performs work locally. The **Companion** gives the user a native view of status, approvals, shells, secrets, activity, diagnostics, updates, and Agent lifecycle controls.
+The **public website** explains the product and provides onboarding entry points. The **account portal** is the browser-based user/admin surface for accounts, devices, approvals, and administration. The **Relay** carries remote MCP traffic to the correct online Agent. The **Control Plane** handles accounts, Agent ownership, OAuth, authorization, and remote approval coordination. The **Agent** performs work locally. The **Companion** gives the user a native view of status, approvals, shells, secrets, activity, diagnostics, updates, and Agent lifecycle controls.
 
 ## Trust and security model
 
@@ -73,13 +81,14 @@ See [`docs/security.md`](docs/security.md) and [`docs/approval.md`](docs/approva
 
 ## Quick start
 
-1. **Install MateMCP Desktop** for your computer using one of the commands below.
-2. Open Companion and finish **device enrollment** if prompted.
-3. Copy the Agent's unique MCP URL, for example `https://relay.matemcp.com/mcp/agt_...`.
-4. Add that URL to ChatGPT, Claude, Grok, or another MCP-capable AI client.
-5. Complete OAuth with the same MateMCP account that owns the Agent.
-6. Try a safe first task, such as asking the AI to list a configured project or inspect a file.
-7. Review approvals in Companion when a sensitive operation requires consent.
+1. Create or sign in to your MateMCP account at **[api.matemcp.com](https://api.matemcp.com)**.
+2. **Install MateMCP Desktop** for your computer using one of the commands below.
+3. Open Companion and finish **device enrollment** if prompted.
+4. Copy the Agent's unique MCP URL, for example `https://relay.matemcp.com/mcp/agt_...`.
+5. Add that URL to ChatGPT, Claude, Grok, or another MCP-capable AI client.
+6. Complete OAuth with the same MateMCP account that owns the Agent.
+7. Try a safe first task, such as asking the AI to list a configured project or inspect a file.
+8. Review approvals in Companion or the account portal when a sensitive operation requires consent.
 
 > **After an Agent update that adds or changes MCP tools:** some clients can retain a previous tool snapshot. For ChatGPT, see [ChatGPT MCP tool refresh after Agent updates](docs/chatgpt-tool-refresh.md).
 
@@ -124,7 +133,16 @@ Private configuration lives under `%APPDATA%\MateMCP`; enrolled credentials and 
 | Windows x64 | ✅ | ✅ | ✅ | Native Windows Graphics Capture preview plus screenshot fallback. |
 | Windows ARM64 | ✅ | Agent-only package | Partial | Native WGC helper is not yet shipped for ARM64; screenshot fallback remains available. |
 
-Current field testing includes successful remote MCP connectivity with ChatGPT, Claude, and Grok. MateMCP uses standards-based MCP/OAuth interfaces, but interoperability and product behavior can still vary between providers and change over time; client-specific compatibility is tracked and tested separately.
+## Remote MCP client status
+
+| Client | Current validation |
+| --- | --- |
+| ChatGPT | Primary end-to-end field-tested remote MCP client. |
+| Claude | Successful connection through the public MateMCP Relay has been verified; client-specific feature behavior can still vary. |
+| Grok | Successful connection through the public MateMCP Relay has been verified; client-specific feature behavior can still vary. |
+| Other MCP clients | MateMCP uses standards-based MCP/OAuth interfaces; compatibility should be validated per client/provider. |
+
+Public Relay reachability can depend on the network path used by the client provider. The production MateMCP deployment can use Cloudflare or another HTTPS edge/reverse proxy in front of the public hostnames without changing the Agent-facing MCP URL model.
 
 ## Companion at a glance
 
@@ -142,7 +160,17 @@ Companion is the user's local control surface. Current functionality includes:
 - **Prevent Sleep While Using** controls, with a 15-minute idle grace period after the latest Agent activity.
 - Manual update checks and optional automatic Desktop updates on supported platforms.
 
-## Self-host Web + API + Relay
+## Account portal at a glance
+
+The browser-based account portal at **[api.matemcp.com](https://api.matemcp.com)** complements the local Companion. Current portal capabilities include:
+
+- **Login and registration** with normal account/session controls.
+- **Device management** for enrolled devices, including status and revoke/remove flows supported by the control plane.
+- **Approvals** with pending actions and recent/history views supported by the backend.
+- **Administration** for authorized admins, including user search/status management and appropriate device management.
+- Server-side authorization for user/admin actions; sensitive Agent credentials and stored secrets are not exposed through the portal.
+
+## Self-host Web + Account Portal/API + Relay
 
 For the usual single-server deployment there is one canonical install/update command:
 
@@ -167,7 +195,9 @@ curl -fsSL https://raw.githubusercontent.com/vrassouli/MateMCP/main/deploy/relay
 
 The API supports SQLite for a small single-server deployment and SQL Server for external database deployments. Web, API, and Relay should sit behind HTTPS reverse proxies; their container ports should not be exposed directly to the Internet. Keep `matemcp.com`, `api.matemcp.com`, and `relay.matemcp.com` routed to their independent backends.
 
-The account portal can optionally enable Google, Microsoft, GitHub, and Apple sign-in while retaining local password authentication. See [`docs/external-login-providers.md`](docs/external-login-providers.md) for provider setup, callback URLs, and safe account-linking behavior.
+External identity providers are optional and deployment-specific. Provider configuration, callback URLs, and account-linking behavior are documented in [`docs/external-login-providers.md`](docs/external-login-providers.md); enable only providers that have been configured and verified for the deployment.
+
+Cloudflare is optional. When it is used in front of MateMCP, keep the three public hostnames independently routed, preserve the original HTTPS host/scheme, and do not cache authenticated API responses. The same deployment pattern also works with other HTTPS reverse proxies/edges.
 
 Production hostname/TLS routing is documented in [`docs/production-web-deployment.md`](docs/production-web-deployment.md). Web deployment details are in [`deploy/web/README.md`](deploy/web/README.md), and Relay-specific reverse-proxy guidance remains in [`deploy/relay/README.md`](deploy/relay/README.md).
 
@@ -190,6 +220,7 @@ Production hostname/TLS routing is documented in [`docs/production-web-deploymen
 | ChatGPT tool refresh | [`docs/chatgpt-tool-refresh.md`](docs/chatgpt-tool-refresh.md) |
 | Project context & repository Skills | [`docs/project-context-bootstrap.md`](docs/project-context-bootstrap.md) |
 | Production web deployment | [`docs/production-web-deployment.md`](docs/production-web-deployment.md) |
+| External login providers | [`docs/external-login-providers.md`](docs/external-login-providers.md) |
 | Development workflow | [`docs/development-workflow.md`](docs/development-workflow.md) |
 | Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
 
@@ -201,7 +232,7 @@ MateMCP is under active development. Some areas intentionally remain conservativ
 - Windows ARM64 uses screenshot fallback rather than the native WGC preview helper.
 - macOS production signing/TCC identity still needs hardening so permissions survive every production update reliably.
 - Global Skills & Memory and repository Skills exist today, but proactive automatic context use across different AI clients is still evolving.
-- Third-party MCP/OAuth clients can have provider-specific interoperability differences and need real external validation.
+- ChatGPT remains the primary full end-to-end compatibility target; Claude and Grok connectivity has also been verified, while provider-specific feature behavior can still differ.
 - Safe & Informed Approvals is being expanded so approval dialogs explain consequences and risk rather than relying only on raw command syntax.
 
 ## Releases
