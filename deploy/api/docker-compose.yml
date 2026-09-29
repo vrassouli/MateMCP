@@ -12,6 +12,18 @@ services:
       MateMCP__ConnectionStringBase64: ${MATEMCP_DB_CONNECTION_STRING_BASE64:-}
       MateMCP__BootstrapAdminEmail: ${MATEMCP_BOOTSTRAP_ADMIN_EMAIL:-}
       MateMCP__BootstrapAdminPassword: ${MATEMCP_BOOTSTRAP_ADMIN_PASSWORD:-}
+      MateMCP__ExternalAuth__Providers__Google__Enabled: ${MATEMCP_EXTERNAL_AUTH_GOOGLE_ENABLED:-false}
+      MateMCP__ExternalAuth__Providers__Google__ClientId: ${MATEMCP_EXTERNAL_AUTH_GOOGLE_CLIENT_ID:-}
+      MateMCP__ExternalAuth__Providers__Google__ClientSecret: ${MATEMCP_EXTERNAL_AUTH_GOOGLE_CLIENT_SECRET:-}
+      MateMCP__ExternalAuth__Providers__Microsoft__Enabled: ${MATEMCP_EXTERNAL_AUTH_MICROSOFT_ENABLED:-false}
+      MateMCP__ExternalAuth__Providers__Microsoft__ClientId: ${MATEMCP_EXTERNAL_AUTH_MICROSOFT_CLIENT_ID:-}
+      MateMCP__ExternalAuth__Providers__Microsoft__ClientSecret: ${MATEMCP_EXTERNAL_AUTH_MICROSOFT_CLIENT_SECRET:-}
+      MateMCP__ExternalAuth__Providers__GitHub__Enabled: ${MATEMCP_EXTERNAL_AUTH_GITHUB_ENABLED:-false}
+      MateMCP__ExternalAuth__Providers__GitHub__ClientId: ${MATEMCP_EXTERNAL_AUTH_GITHUB_CLIENT_ID:-}
+      MateMCP__ExternalAuth__Providers__GitHub__ClientSecret: ${MATEMCP_EXTERNAL_AUTH_GITHUB_CLIENT_SECRET:-}
+      MateMCP__ExternalAuth__Providers__Apple__Enabled: ${MATEMCP_EXTERNAL_AUTH_APPLE_ENABLED:-false}
+      MateMCP__ExternalAuth__Providers__Apple__ClientId: ${MATEMCP_EXTERNAL_AUTH_APPLE_CLIENT_ID:-}
+      MateMCP__ExternalAuth__Providers__Apple__ClientSecret: ${MATEMCP_EXTERNAL_AUTH_APPLE_CLIENT_SECRET:-}
       MateMCP__KeyPath: /data
     volumes:
       - matemcp-api-data:/data

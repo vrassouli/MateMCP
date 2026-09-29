@@ -30,36 +30,38 @@ The reverse proxy must forward the original HTTPS scheme and host so the authent
 
 Use deployment secrets or environment variables. Do not commit provider credentials.
 
+For the packaged Docker deployment, set the `MATEMCP_EXTERNAL_AUTH_*` variables in `/opt/matemcp-api/.env`. Docker Compose maps them to the nested ASP.NET Core configuration keys inside the API container.
+
 Google example:
 
 ```text
-MateMCP__ExternalAuth__Providers__Google__Enabled=true
-MateMCP__ExternalAuth__Providers__Google__ClientId=<client-id>
-MateMCP__ExternalAuth__Providers__Google__ClientSecret=<client-secret>
+MATEMCP_EXTERNAL_AUTH_GOOGLE_ENABLED=true
+MATEMCP_EXTERNAL_AUTH_GOOGLE_CLIENT_ID=<client-id>
+MATEMCP_EXTERNAL_AUTH_GOOGLE_CLIENT_SECRET=<client-secret>
 ```
 
 Microsoft:
 
 ```text
-MateMCP__ExternalAuth__Providers__Microsoft__Enabled=true
-MateMCP__ExternalAuth__Providers__Microsoft__ClientId=<client-id>
-MateMCP__ExternalAuth__Providers__Microsoft__ClientSecret=<client-secret>
+MATEMCP_EXTERNAL_AUTH_MICROSOFT_ENABLED=true
+MATEMCP_EXTERNAL_AUTH_MICROSOFT_CLIENT_ID=<client-id>
+MATEMCP_EXTERNAL_AUTH_MICROSOFT_CLIENT_SECRET=<client-secret>
 ```
 
 GitHub:
 
 ```text
-MateMCP__ExternalAuth__Providers__GitHub__Enabled=true
-MateMCP__ExternalAuth__Providers__GitHub__ClientId=<client-id>
-MateMCP__ExternalAuth__Providers__GitHub__ClientSecret=<client-secret>
+MATEMCP_EXTERNAL_AUTH_GITHUB_ENABLED=true
+MATEMCP_EXTERNAL_AUTH_GITHUB_CLIENT_ID=<client-id>
+MATEMCP_EXTERNAL_AUTH_GITHUB_CLIENT_SECRET=<client-secret>
 ```
 
 Apple:
 
 ```text
-MateMCP__ExternalAuth__Providers__Apple__Enabled=true
-MateMCP__ExternalAuth__Providers__Apple__ClientId=<services-id>
-MateMCP__ExternalAuth__Providers__Apple__ClientSecret=<signed-client-secret>
+MATEMCP_EXTERNAL_AUTH_APPLE_ENABLED=true
+MATEMCP_EXTERNAL_AUTH_APPLE_CLIENT_ID=<services-id>
+MATEMCP_EXTERNAL_AUTH_APPLE_CLIENT_SECRET=<signed-client-secret>
 ```
 
 Apple's client secret is a signed JWT with an expiration date. Generate and rotate it outside the repository.
