@@ -1,10 +1,22 @@
 # MateMCP
 
-**Give AI useful access to your computer without handing it an unrestricted machine.**
+**Your agent hit a limit? Keep working.**
 
-MateMCP connects MCP-capable AI clients to a local Agent running on your Windows or macOS computer. The Agent can work with project files, shells, browsers, desktop applications, attachments, secrets, and durable project context while MateMCP keeps access scoped, authenticated, observable, and approval-aware.
+MateMCP helps you get more useful work from the AI plan you already pay for. When a provider's built-in coding or agent tool reaches its usage limit but the AI chat itself is still available, MateMCP gives that conversation a controlled path to your own Windows or macOS computer — so useful work can keep moving on your real projects and tools.
+
+**MateMCP does not increase or bypass a provider's usage quota.** It gives compatible AI clients another way to work through MCP, using your machines and your access rules.
+
+Bring your own AI. Connect ChatGPT, Claude, Grok, or another compatible MCP client to an enrolled MateMCP Agent. The Agent can work with project files, shells, browsers, desktop applications, attachments, secrets, and durable project context while MateMCP keeps access scoped, authenticated, observable, and approval-aware.
 
 The normal user experience is simple: install MateMCP Desktop, enroll the device, copy its MCP URL into your AI client, and authorize it with OAuth. You do not copy Agent credentials or expose local ports to the Internet.
+
+## Why MateMCP?
+
+- **Keep going when built-in agents stop** — if the chat is still available, give it a controlled path to your own tools instead of ending the work session.
+- **Make more of the AI plan you already have** — use capable chat time for real local work without requiring MateMCP to replace your AI provider.
+- **Bring your own AI** — use ChatGPT, Claude, Grok, or another compatible MCP client with the same local Agent model.
+- **Work on real machines** — files, shells, browsers, desktop apps, attachments, and project context live where your work already lives.
+- **Stay in control** — project scopes, OAuth, approvals, auditability, and local secret handling keep powerful access explicit.
 
 ## What can MateMCP do?
 
@@ -24,7 +36,7 @@ The normal user experience is simple: install MateMCP Desktop, enroll the device
 
 ```mermaid
 flowchart LR
-    AI[AI client\nChatGPT / MCP client]
+    AI[AI client\nChatGPT / Claude / Grok / MCP client]
     Relay[MateMCP Relay]
     API[OAuth Control Plane]
     Agent[Local MateMCP Agent]
@@ -64,7 +76,7 @@ See [`docs/security.md`](docs/security.md) and [`docs/approval.md`](docs/approva
 1. **Install MateMCP Desktop** for your computer using one of the commands below.
 2. Open Companion and finish **device enrollment** if prompted.
 3. Copy the Agent's unique MCP URL, for example `https://relay.matemcp.com/mcp/agt_...`.
-4. Add that URL to an MCP-capable AI client. ChatGPT is the primary field-tested client today.
+4. Add that URL to ChatGPT, Claude, Grok, or another MCP-capable AI client.
 5. Complete OAuth with the same MateMCP account that owns the Agent.
 6. Try a safe first task, such as asking the AI to list a configured project or inspect a file.
 7. Review approvals in Companion when a sensitive operation requires consent.
@@ -112,7 +124,7 @@ Private configuration lives under `%APPDATA%\MateMCP`; enrolled credentials and 
 | Windows x64 | ✅ | ✅ | ✅ | Native Windows Graphics Capture preview plus screenshot fallback. |
 | Windows ARM64 | ✅ | Agent-only package | Partial | Native WGC helper is not yet shipped for ARM64; screenshot fallback remains available. |
 
-ChatGPT is the primary end-to-end tested remote MCP client. MateMCP uses standards-based MCP/OAuth interfaces and is intended to work with other compatible clients, but interoperability can vary between providers; client-specific compatibility is tracked and tested separately.
+Current field testing includes successful remote MCP connectivity with ChatGPT, Claude, and Grok. MateMCP uses standards-based MCP/OAuth interfaces, but interoperability and product behavior can still vary between providers and change over time; client-specific compatibility is tracked and tested separately.
 
 ## Companion at a glance
 
