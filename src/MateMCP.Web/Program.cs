@@ -22,8 +22,8 @@ app.Use(async (context, next) =>
         context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
         context.Response.Headers["Content-Security-Policy"] =
-            "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' https://static.cloudflareinsights.com; " +
-            "connect-src 'self' https://cloudflareinsights.com; base-uri 'self'; frame-ancestors 'none'; form-action 'self' https://api.matemcp.com";
+            "default-src 'self'; img-src 'self' data: https://*.google-analytics.com https://*.googletagmanager.com; style-src 'self'; script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com; " +
+            "connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; base-uri 'self'; frame-ancestors 'none'; form-action 'self' https://api.matemcp.com";
         return Task.CompletedTask;
     });
 

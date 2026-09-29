@@ -19,7 +19,7 @@ public sealed class PublicSiteTests : IClassFixture<WebApplicationFactory<Progra
         var html = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("Give your AI a secure", html, StringComparison.Ordinal);
+        Assert.Contains("Your agent hit a limit?", html, StringComparison.Ordinal);
         Assert.Contains("id=\"product\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"security\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"how-it-works\"", html, StringComparison.Ordinal);
@@ -28,13 +28,14 @@ public sealed class PublicSiteTests : IClassFixture<WebApplicationFactory<Progra
         Assert.Contains("https://github.com/vrassouli/MateMCP#install--upgrade-matemcp-desktop", html, StringComparison.Ordinal);
         Assert.Contains("rel=\"canonical\" href=\"https://matemcp.com/\"", html, StringComparison.Ordinal);
         Assert.Contains("property=\"og:title\"", html, StringComparison.Ordinal);
+        Assert.Contains("<script src=\"/analytics.js\" defer></script>", html, StringComparison.Ordinal);
 
         Assert.True(response.Headers.TryGetValues("X-Content-Type-Options", out var contentTypeOptions));
         Assert.Contains("nosniff", contentTypeOptions);
         Assert.True(response.Headers.TryGetValues("Content-Security-Policy", out var csp));
         Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
-        Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com", StringComparison.Ordinal));
-        Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com", StringComparison.Ordinal));
         Assert.True(response.Headers.TryGetValues("Permissions-Policy", out var permissions));
         Assert.Contains(permissions, value => value.Contains("camera=()", StringComparison.Ordinal));
     }
@@ -42,6 +43,7 @@ public sealed class PublicSiteTests : IClassFixture<WebApplicationFactory<Progra
     [Theory]
     [InlineData("/site.css", "text/css")]
     [InlineData("/site.js", "text/javascript")]
+    [InlineData("/analytics.js", "text/javascript")]
     [InlineData("/brand/mark.svg", "image/svg+xml")]
     public async Task Static_assets_are_served_with_long_lived_cache_headers(string path, string contentType)
     {
