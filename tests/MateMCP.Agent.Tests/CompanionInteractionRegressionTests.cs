@@ -247,7 +247,13 @@ public sealed class CompanionInteractionRegressionTests
         Assert.Contains("<SelectField TValue=\"string\" id=\"audit-project-filter\"", main, StringComparison.Ordinal);
         Assert.Contains("id=\"audit-project-filter\"", main, StringComparison.Ordinal);
         Assert.Contains("id=\"audit-capability-filter\"", main, StringComparison.Ordinal);
-        Assert.Contains("ClearAuditFiltersAsync", main, StringComparison.Ordinal);
+        Assert.Contains("@bind-Value:after=\"AuditFiltersChangedAsync\"", main, StringComparison.Ordinal);
+        Assert.Contains("BindValueEvent=\"oninput\"", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"Apply filters\"", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"Clear filters\"", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearAuditFiltersAsync", main, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.Increment(ref _auditLoadVersion)", main, StringComparison.Ordinal);
+        Assert.Contains("loadVersion != Volatile.Read(ref _auditLoadVersion)", main, StringComparison.Ordinal);
         Assert.Contains("AuditLiveRefresh", main, StringComparison.Ordinal);
         Assert.Contains("Section == \"audit\"", main, StringComparison.Ordinal);
         Assert.Contains("_auditPollTicks >= 5", main, StringComparison.Ordinal);
