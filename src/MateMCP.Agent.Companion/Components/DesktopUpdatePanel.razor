@@ -59,17 +59,28 @@
     @if (Updating)
     {
         <div class="row update-progress-row" aria-live="polite">
-            @if (UpdateProgress?.Percentage is { } percentage)
+            @if (ManualUpdate.Percentage is { } percentage)
             {
                 <progress class="update-progress-bar" max="100" value="@percentage"></progress>
-                <div class="muted">@UpdateProgress.Message @percentage%</div>
+                <div class="muted">@ManualUpdate.Message @percentage%</div>
             }
             else
             {
                 <progress class="update-progress-bar" max="100"></progress>
-                <div class="muted">@(UpdateProgress?.Message ?? "Preparing update...")</div>
+                <div class="muted">@ManualUpdate.Message</div>
             }
-            <div class="muted">Companion will stay open while a manual package downloads and will close only when installation is ready to start. The desktop package updates both Companion and the local Agent, restarts the Agent, and verifies compatibility when Companion relaunches.</div>
+            <div class="muted">Download and verification continue at application scope even if you navigate away. After staging, installation waits for MateMCP to become idle by default.</div>
+            @if (ManualUpdate.WaitingForIdle)
+            {
+                <div class="muted">The verified update is staged. Installation will start automatically when active commands, shell sessions, and approvals finish.</div>
+                @if (ManualUpdate.CanInstallNow)
+                {
+                    <div class="actions">
+                        <Button Text="Install now" OnClick="InstallNow" />
+                    </div>
+                    <div class="error">Install now can interrupt active MateMCP work. New work will be blocked before the installer starts.</div>
+                }
+            }
         </div>
     }
     else
@@ -81,6 +92,10 @@
                 <Button Text="@(UpdateStatus.UpdateAvailable ? "Update now" : "Repair current package")" OnClick="() => BeginUpdateAsync(assetId)" />
             }
         </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(ManualUpdate.Error))
+    {
+        <div class="error">@ManualUpdate.Error</div>
     }
     @if (!string.IsNullOrWhiteSpace(Error))
     {
@@ -96,15 +111,15 @@
     private DesktopUpdateStatus? UpdateStatus { get; set; }
     private DesktopBackgroundUpdateStatus? BackgroundUpdate { get; set; }
     private AgentCompatibilityStatus? CompatibilityStatus { get; set; }
-    private DesktopUpdateProgress? UpdateProgress { get; set; }
+    private DesktopUpdateOperationState ManualUpdate { get; set; } = DesktopUpdateOperationState.Idle;
     private string? Error { get; set; }
     private bool Checking { get; set; }
-    private bool Updating { get; set; }
+    private bool Updating => ManualUpdate.IsActive;
     private bool RestartingAgent { get; set; }
     private bool AutoUpdateEnabled { get; set; }
 
     private string StatusText => Updating
-        ? UpdateProgress?.Message ?? "Preparing update..."
+        ? ManualUpdate.Message
         : RestartingAgent
             ? "Restarting Agent and verifying compatibility..."
             : Checking
@@ -113,6 +128,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        ManualUpdate = Updates.OperationState;
+        Updates.StateChanged += HandleUpdateStateChanged;
         await CheckCompatibilityAsync();
         try
         {
@@ -196,37 +213,28 @@
         }
     }
 
-    private async Task BeginUpdateAsync(long assetId)
+    private Task BeginUpdateAsync(long assetId)
     {
-        if (Updating) return;
-        Updating = true;
-        UpdateProgress = new DesktopUpdateProgress("Preparing", "Preparing coordinated Companion + Agent update...", 0, null);
+        Error = null;
         if (UpdateStatus is not null)
             UpdateStatus = UpdateStatus with { LastFailure = null };
-        Error = null;
-        StateHasChanged();
 
-        var progress = new Progress<DesktopUpdateProgress>(value =>
-        {
-            UpdateProgress = value;
-            _ = InvokeAsync(StateHasChanged);
-        });
+        if (!Updates.StartUpdate(assetId))
+            Error = "A Desktop update is already running.";
 
-        try
+        ManualUpdate = Updates.OperationState;
+        return Task.CompletedTask;
+    }
+
+    private void InstallNow() => Updates.InstallNow();
+
+    private void HandleUpdateStateChanged()
+    {
+        _ = InvokeAsync(() =>
         {
-            await Updates.BeginUpdateAsync(assetId, progress, _cts.Token);
-        }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
-        catch (Exception ex)
-        {
-            Error = $"Update failed before installation started: {ex.Message}. Companion is still running; check your network and try again.";
-        }
-        finally
-        {
-            Updating = false;
-            UpdateProgress = null;
+            ManualUpdate = Updates.OperationState;
             StateHasChanged();
-        }
+        });
     }
 
     private async Task RunUpdateLoopAsync(CancellationToken ct)
@@ -243,6 +251,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        Updates.StateChanged -= HandleUpdateStateChanged;
         _cts.Cancel();
         if (_worker is not null)
         {

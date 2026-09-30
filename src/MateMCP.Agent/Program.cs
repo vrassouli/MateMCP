@@ -137,7 +137,7 @@ app.MapGet("/status", (HttpContext context, Microsoft.Extensions.Options.IOption
         version = agentVersion,
         endpoint = $"{(current.AllowInsecureHttp ? "http" : "https")}://{current.BindAddress}:{current.Port}/mcp",
         management = $"http://127.0.0.1:{current.Port}/ui",
-        managementApi = new { revision = 5, capabilities = new[] { "projects-stable-id", "skills-memory", "global-skills-memory", "repository-skills", "desktop-update", "agent-logs", "power-inhibition", "computer-use-preview" } },
+        managementApi = new { revision = 6, capabilities = new[] { "projects-stable-id", "skills-memory", "global-skills-memory", "repository-skills", "desktop-update", "desktop-update-handoff", "agent-logs", "power-inhibition", "computer-use-preview" } },
         configuration = userConfigPath,
         projects = projects.All.Select(p => p.Name).ToArray(),
         shellApproval = current.RequireShellApproval,
@@ -207,6 +207,86 @@ app.MapPut("/desktop-update/auto", async (DesktopAutoUpdateUpdate update, HttpCo
     await settings.SetAutoUpdateEnabledAsync(update.Enabled, ct);
     updates.RequestCheck();
     return Results.Ok(await updates.GetStatusAsync(ct));
+});
+app.MapGet("/desktop-update/readiness", (HttpContext context, AgentActivityGate activity, InteractiveShellSessionManager sessions, ApprovalService approvals) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    var interactiveSessions = sessions.ActiveSessionCount;
+    var pendingApprovals = approvals.GetPending().Count;
+    var ready = activity.ActiveCount == 0 && !activity.IsDraining && interactiveSessions == 0 && pendingApprovals == 0;
+    return Results.Ok(new
+    {
+        ready,
+        drainHeld = false,
+        activeLeases = activity.ActiveCount,
+        interactiveSessions,
+        pendingApprovals,
+        message = ready
+            ? "MateMCP is idle and ready for a Desktop update."
+            : "Waiting for active MateMCP work, shell sessions, or approvals to finish."
+    });
+});
+app.MapPost("/desktop-update/handoff", (HttpContext context, bool? force, AgentActivityGate activity, InteractiveShellSessionManager sessions, ApprovalService approvals) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+
+    if (force == true)
+    {
+        activity.ForceBeginDrain();
+        return Results.Ok(new
+        {
+            ready = true,
+            drainHeld = true,
+            activeLeases = activity.ActiveCount,
+            interactiveSessions = sessions.ActiveSessionCount,
+            pendingApprovals = approvals.GetPending().Count,
+            message = "Forced update handoff is active. New MateMCP work is blocked; current work may be interrupted by installation."
+        });
+    }
+if (!activity.TryBeginDrain())
+    {
+        return Results.Ok(new
+        {
+            ready = false,
+            drainHeld = false,
+            activeLeases = activity.ActiveCount,
+            interactiveSessions = sessions.ActiveSessionCount,
+            pendingApprovals = approvals.GetPending().Count,
+            message = "Waiting for active MateMCP work to finish."
+        });
+    }
+
+    var interactiveSessions = sessions.ActiveSessionCount;
+    var pendingApprovals = approvals.GetPending().Count;
+    if (interactiveSessions != 0 || pendingApprovals != 0)
+    {
+        activity.CancelDrain();
+        return Results.Ok(new
+        {
+            ready = false,
+            drainHeld = false,
+            activeLeases = activity.ActiveCount,
+            interactiveSessions,
+            pendingApprovals,
+            message = "Waiting for active shell sessions or approvals to finish."
+        });
+    }
+
+    return Results.Ok(new
+    {
+        ready = true,
+        drainHeld = true,
+        activeLeases = 0,
+        interactiveSessions = 0,
+        pendingApprovals = 0,
+        message = "Agent activity is drained. Desktop installation can start safely."
+    });
+});
+app.MapDelete("/desktop-update/handoff", (HttpContext context, AgentActivityGate activity) =>
+{
+    if (!IsLoopback(context)) return Results.NotFound();
+    activity.CancelDrain();
+    return Results.Ok(new { status = "released" });
 });
 app.MapGet("/power", async (HttpContext context, AgentPowerInhibitionService power, CancellationToken ct) =>
 {
