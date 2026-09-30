@@ -411,7 +411,7 @@
                     <div class="audit-filters">
                         <div class="field">
                             <label for="audit-project-filter">Project</label>
-                            <SelectField TValue="string" id="audit-project-filter" @bind-Value="AuditProjectFilter">
+                            <SelectField TValue="string" id="audit-project-filter" @bind-Value="AuditProjectFilter" @bind-Value:after="AuditFiltersChangedAsync">
                                 <option value="">All projects</option>
                                 @foreach (var projectName in AuditProjectOptions)
                                 {
@@ -421,7 +421,7 @@
                         </div>
                         <div class="field">
                             <label for="audit-capability-filter">Action / capability</label>
-                            <TextField id="audit-capability-filter" list="audit-capability-options" placeholder="All actions" @bind-Value="AuditCapabilityFilter" />
+                            <TextField id="audit-capability-filter" list="audit-capability-options" placeholder="All actions" BindValueEvent="oninput" @bind-Value="AuditCapabilityFilter" @bind-Value:after="AuditFiltersChangedAsync" />
                             <datalist id="audit-capability-options">
                                 @foreach (var capability in AuditCapabilityOptions)
                                 {
@@ -430,10 +430,6 @@
                             </datalist>
                         </div>
                         <div class="audit-filter-actions">
-                            <div class="actions">
-                                <Button Text="Apply filters" OnClick="LoadAuditAsync" />
-                                <Button Text="Clear filters" OnClick="ClearAuditFiltersAsync" />
-                            </div>
                             <Checkbox TValue="bool" @bind-Value="AuditLiveRefresh" Label="Live refresh" />
                         </div>
                     </div>
@@ -522,6 +518,7 @@
     private IReadOnlyList<string> AuditCapabilityOptions { get; set; } = [];
     private bool AuditLiveRefresh { get; set; } = true;
     private int _auditPollTicks;
+    private int _auditLoadVersion;
     private bool ConfirmAuditCleanup { get; set; }
     private string? AuditMessage { get; set; }
 
@@ -951,10 +948,14 @@
 
     private async Task LoadAuditAsync()
     {
+        var loadVersion = Interlocked.Increment(ref _auditLoadVersion);
         var (from, to) = GetAuditRange();
         var project = string.IsNullOrWhiteSpace(AuditProjectFilter) ? null : AuditProjectFilter.Trim();
         var capability = string.IsNullOrWhiteSpace(AuditCapabilityFilter) ? null : AuditCapabilityFilter.Trim();
-        Audit = await Api.GetAuditAsync(500, from, to, project, capability, _disposeCts.Token);
+        var audit = await Api.GetAuditAsync(500, from, to, project, capability, _disposeCts.Token);
+        if (loadVersion != Volatile.Read(ref _auditLoadVersion)) return;
+
+        Audit = audit;
 
         AuditProjectOptions = (Status?.Projects ?? Array.Empty<string>())
             .Concat(AuditProjectOptions)
@@ -969,10 +970,8 @@
             .ToArray();
     }
 
-    private async Task ClearAuditFiltersAsync()
+    private async Task AuditFiltersChangedAsync()
     {
-        AuditProjectFilter = string.Empty;
-        AuditCapabilityFilter = string.Empty;
         AuditMessage = null;
         await LoadAuditAsync();
     }
