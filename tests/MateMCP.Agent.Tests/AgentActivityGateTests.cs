@@ -70,4 +70,25 @@ public sealed class AgentActivityGateTests
         Assert.True(gate.TryEnter(out var lease));
         lease!.Dispose();
     }
-}
+
+    [Fact]
+    public void Force_drain_blocks_new_work_even_while_existing_work_finishes()
+    {
+        var gate = new AgentActivityGate();
+        Assert.True(gate.TryEnter(out var existing));
+        Assert.Equal(1, gate.ActiveCount);
+
+        gate.ForceBeginDrain();
+
+        Assert.True(gate.IsDraining);
+        Assert.Equal(1, gate.ActiveCount);
+        Assert.False(gate.TryEnter(out _));
+
+        existing!.Dispose();
+        Assert.Equal(0, gate.ActiveCount);
+        Assert.True(gate.IsDraining);
+
+        gate.CancelDrain();
+        Assert.True(gate.TryEnter(out var next));
+        next!.Dispose();
+    }}

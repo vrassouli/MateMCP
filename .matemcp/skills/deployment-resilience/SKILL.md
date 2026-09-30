@@ -33,3 +33,6 @@ Use this skill when changing production installers, container image delivery, or
 - Before replacing a running Companion, prefer a graceful window/application shutdown so lifecycle diagnostics record a clean terminal event; force termination is a last resort.
 - Restore a previously-running Companion on both successful and failed update paths when the installed application is still launchable.
 - Preserve the same behavior on Windows and macOS; do not turn background update recovery into implicit Companion autostart.
+- Manual Desktop download/verification state is application-owned, not page/component-owned; navigation or component disposal must never cancel or restart an in-flight package download.
+- Keep a verified manual package staged until the local Agent grants an update handoff. The default path must wait for active MCP requests, interactive shell sessions, and approvals to finish before installation.
+- An explicit **Install now** override may force the Agent into drain mode so no new work starts, but the UI must warn that existing work can be interrupted.

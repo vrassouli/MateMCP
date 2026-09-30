@@ -113,27 +113,55 @@ public sealed class CompanionHostUiTests
     }
 
     [Fact]
-    public void Desktop_updater_downloads_before_exit_and_surfaces_progress_for_both_platforms()
+    public void Desktop_updater_is_application_owned_stages_until_idle_and_supports_explicit_install_now()
     {
         var root = FindRepositoryRoot();
-        var service = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Services", "DesktopUpdateService.cs"));
-        var panel = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "Components", "DesktopUpdatePanel.razor"));
-        var css = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent.Companion", "wwwroot", "css", "app.css"));
+        var companionRoot = Path.Combine(root, "src", "MateMCP.Agent.Companion");
+        var service = File.ReadAllText(Path.Combine(companionRoot, "Services", "DesktopUpdateService.cs"));
+        var api = File.ReadAllText(Path.Combine(companionRoot, "Services", "AgentApiClient.cs"));
+        var panel = File.ReadAllText(Path.Combine(companionRoot, "Components", "DesktopUpdatePanel.razor"));
+        var overview = File.ReadAllText(Path.Combine(companionRoot, "Components", "DesktopUpdateOverviewCard.razor"));
+        var program = File.ReadAllText(Path.Combine(root, "src", "MateMCP.Agent", "Program.cs"));
+        var css = File.ReadAllText(Path.Combine(companionRoot, "wwwroot", "css", "app.css"));
 
-        Assert.Contains("BeginUpdateAsync", service, StringComparison.Ordinal);
+        Assert.Contains("public bool StartUpdate(long assetId)", service, StringComparison.Ordinal);
+        Assert.Contains("_operationTask = Task.Run(() => RunUpdateAsync", service, StringComparison.Ordinal);
+        Assert.Contains("_lifetimeCts.Token", service, StringComparison.Ordinal);
+        Assert.Contains("DesktopUpdateOperationState OperationState", service, StringComparison.Ordinal);
+        Assert.Contains("event Action? StateChanged", service, StringComparison.Ordinal);
+        Assert.Contains("\"WaitingForIdle\"", service, StringComparison.Ordinal);
+        Assert.Contains("BeginDesktopUpdateHandoffAsync(force, ct)", service, StringComparison.Ordinal);
+        Assert.Contains("public void InstallNow()", service, StringComparison.Ordinal);
         Assert.Contains("HttpCompletionOption.ResponseHeadersRead", service, StringComparison.Ordinal);
         Assert.Contains("DownloadAssetAsync", service, StringComparison.Ordinal);
+        Assert.Contains("CryptographicOperations.FixedTimeEquals", service, StringComparison.Ordinal);
         Assert.Contains("BuildMacInstallScript", service, StringComparison.Ordinal);
         Assert.Contains("BuildWindowsInstallScript", service, StringComparison.Ordinal);
         Assert.Contains("install-desktop-macos.sh\" --no-start", service, StringComparison.Ordinal);
         Assert.Contains("-File $Installer -NoStart", service, StringComparison.Ordinal);
         Assert.Contains("MateMCP-Update", service, StringComparison.Ordinal);
         Assert.Contains("Environment.Exit(0)", service, StringComparison.Ordinal);
-        Assert.DoesNotContain("WindowsBootstrap", service, StringComparison.Ordinal);
-        Assert.DoesNotContain("MacBootstrap", service, StringComparison.Ordinal);
+
+        Assert.Contains("BeginDesktopUpdateHandoffAsync(bool force = false", api, StringComparison.Ordinal);
+        Assert.Contains("desktop-update/handoff?force=", api, StringComparison.Ordinal);
+        Assert.Contains("bool? force", program, StringComparison.Ordinal);
+        Assert.Contains("activity.ForceBeginDrain()", program, StringComparison.Ordinal);
+        Assert.Contains("Forced update handoff is active", program, StringComparison.Ordinal);
+
+        foreach (var component in new[] { panel, overview })
+        {
+            Assert.Contains("Updates.OperationState", component, StringComparison.Ordinal);
+            Assert.Contains("Updates.StateChanged += HandleUpdateStateChanged", component, StringComparison.Ordinal);
+            Assert.Contains("Updates.StateChanged -= HandleUpdateStateChanged", component, StringComparison.Ordinal);
+            Assert.Contains("Updates.StartUpdate(assetId)", component, StringComparison.Ordinal);
+            Assert.Contains("Install now", component, StringComparison.Ordinal);
+            Assert.DoesNotContain("Updates.BeginUpdateAsync", component, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("application scope even if you navigate away", panel, StringComparison.Ordinal);
+        Assert.Contains("Installation will start automatically", panel, StringComparison.Ordinal);
+        Assert.Contains("can interrupt active MateMCP work", panel, StringComparison.Ordinal);
         Assert.Contains("<progress class=\"update-progress-bar\"", panel, StringComparison.Ordinal);
-        Assert.Contains("manual package downloads", panel, StringComparison.Ordinal);
-        Assert.Contains("Update failed before installation started", panel, StringComparison.Ordinal);
         Assert.Contains("update-progress-bar", css, StringComparison.Ordinal);
     }
 

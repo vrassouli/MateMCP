@@ -68,6 +68,8 @@ public sealed class AgentActivityGate
         return false;
     }
 
+    public void ForceBeginDrain() => Volatile.Write(ref _draining, 1);
+
     public void CancelDrain() => Volatile.Write(ref _draining, 0);
 
     private void Exit()

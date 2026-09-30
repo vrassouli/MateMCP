@@ -54,6 +54,21 @@ public sealed class AgentApiClient : IDisposable
         return await response.Content.ReadFromJsonAsync<DesktopBackgroundUpdateStatus>(Json, ct);
     }
 
+    public async Task<DesktopUpdateReadiness?> GetDesktopUpdateReadinessAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<DesktopUpdateReadiness>("desktop-update/readiness", Json, ct);
+
+    public async Task<DesktopUpdateReadiness?> BeginDesktopUpdateHandoffAsync(bool force = false, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsync($"desktop-update/handoff?force={force.ToString().ToLowerInvariant()}", null, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<DesktopUpdateReadiness>(Json, ct);
+    }
+
+    public async Task ReleaseDesktopUpdateHandoffAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync("desktop-update/handoff", ct);
+        response.EnsureSuccessStatusCode();
+    }
     public async Task<ComputerUsePreviewState?> GetComputerUsePreviewAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<ComputerUsePreviewState>("computer-use/preview", Json, ct);
 
@@ -225,6 +240,7 @@ public sealed record ManagedDevice(string Id, string Name, string Platform, stri
 
 public sealed record DesktopBackgroundUpdateStatus(bool AutoUpdateEnabled, string State, string Message,
     DateTimeOffset? LastChangedAt, long InstalledAssetId, string? LastFailure);
+public sealed record DesktopUpdateReadiness(bool Ready, bool DrainHeld, int ActiveLeases, int InteractiveSessions, int PendingApprovals, string Message);
 public sealed record RelayStatus(bool Enabled, string? Url, string? DeviceId, bool EnrollmentSuppressed = false);
 public sealed record PendingApproval(string Id, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Capability, string Target, string Summary, string? Risk = null, string? Effect = null);
 public sealed record UserSecretInfo(string Name, string? Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int Kind, IReadOnlyList<string>? AllowedTools);

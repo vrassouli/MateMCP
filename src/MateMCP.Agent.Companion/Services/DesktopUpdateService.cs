@@ -15,17 +15,28 @@ public sealed class DesktopUpdateService : IDisposable
     private const string FailureFileName = ".desktop-update-error";
 
     private readonly CompanionLifecycleStore _lifecycle;
+    private readonly AgentApiClient _agent;
+    private readonly object _operationGate = new();
+    private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly HttpClient _http = new()
     {
         Timeout = Timeout.InfiniteTimeSpan
     };
+    private Task? _operationTask;
+    private int _forceInstallRequested;
+    private DesktopUpdateOperationState _operationState = DesktopUpdateOperationState.Idle;
 
-    public DesktopUpdateService(CompanionLifecycleStore lifecycle)
+    public DesktopUpdateService(CompanionLifecycleStore lifecycle, AgentApiClient agent)
     {
         _lifecycle = lifecycle;
+        _agent = agent;
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("MateMCP-Agent-Companion/1.0");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
     }
+
+    public DesktopUpdateOperationState OperationState => Volatile.Read(ref _operationState);
+
+    public event Action? StateChanged;
 
     public bool AutoUpdateEnabled
     {
@@ -62,39 +73,172 @@ public sealed class DesktopUpdateService : IDisposable
             LastFailure: lastFailure);
     }
 
-    public async Task BeginUpdateAsync(
-        long assetId,
-        IProgress<DesktopUpdateProgress>? progress = null,
-        CancellationToken ct = default)
+    public bool StartUpdate(long assetId)
     {
         if (assetId <= 0) throw new ArgumentOutOfRangeException(nameof(assetId));
 
-        var assetName = GetAssetName() ?? throw new PlatformNotSupportedException("MateMCP Desktop self-update is supported on Windows x64 and Apple Silicon macOS.");
-        progress?.Report(new DesktopUpdateProgress("Preparing", "Preparing update...", 0, null));
+        lock (_operationGate)
+        {
+            if (_operationTask is { IsCompleted: false }) return false;
+            Interlocked.Exchange(ref _forceInstallRequested, 0);
+            _operationTask = Task.Run(() => RunUpdateAsync(assetId, _lifetimeCts.Token));
+            return true;
+        }
+    }
 
-        var release = await GetReleaseAsync(ct)
-            ?? throw new InvalidOperationException("Could not read the MateMCP Desktop release metadata.");
-        var asset = release.Assets.FirstOrDefault(a => a.Id == assetId && string.Equals(a.Name, assetName, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException($"Release asset {assetName} is no longer available. Check for updates again.");
+    public void InstallNow()
+    {
+        var current = OperationState;
+        if (!current.CanInstallNow) return;
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), "matemcp-update-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempRoot);
-        var archivePath = Path.Combine(tempRoot, asset.Name);
+        Interlocked.Exchange(ref _forceInstallRequested, 1);
+        SetOperationState(current with
+        {
+            Message = "Install now requested. New MateMCP work will be blocked and active work may be interrupted."
+        });
+    }
 
+    private async Task RunUpdateAsync(long assetId, CancellationToken ct)
+    {
+        string? tempRoot = null;
+        var drainHeld = false;
         try
         {
-            await DownloadAssetAsync(asset, archivePath, progress, ct);
-            progress?.Report(new DesktopUpdateProgress("Installing", "Download complete. Restarting Companion to install the update...", asset.Size, asset.Size));
-            LaunchInstaller(tempRoot, archivePath, assetId);
-        }
-        catch
-        {
-            TryDeleteDirectory(tempRoot);
-            throw;
-        }
+            SetOperationState(new DesktopUpdateOperationState(
+                "Preparing",
+                "Preparing coordinated Companion + Agent update...",
+                0,
+                null,
+                true,
+                false,
+                false,
+                null));
 
-        _lifecycle.MarkTerminal("update-handoff");
-        Environment.Exit(0);
+            var assetName = GetAssetName()
+                ?? throw new PlatformNotSupportedException("MateMCP Desktop self-update is supported on Windows x64 and Apple Silicon macOS.");
+
+            var release = await GetReleaseAsync(ct)
+                ?? throw new InvalidOperationException("Could not read the MateMCP Desktop release metadata.");
+            var asset = release.Assets.FirstOrDefault(a =>
+                a.Id == assetId && string.Equals(a.Name, assetName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Release asset {assetName} is no longer available. Check for updates again.");
+
+            tempRoot = Path.Combine(Path.GetTempPath(), "matemcp-update-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            var archivePath = Path.Combine(tempRoot, asset.Name);
+
+            await DownloadAssetAsync(asset, archivePath, progress =>
+            {
+                SetOperationState(new DesktopUpdateOperationState(
+                    progress.Stage,
+                    progress.Message,
+                    progress.BytesReceived,
+                    progress.TotalBytes,
+                    true,
+                    false,
+                    false,
+                    null));
+            }, ct);
+
+            SetOperationState(new DesktopUpdateOperationState(
+                "WaitingForIdle",
+                "Update downloaded and verified. Waiting for active MateMCP work to finish before installation.",
+                asset.Size,
+                asset.Size,
+                true,
+                true,
+                true,
+                null));
+
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                var force = Volatile.Read(ref _forceInstallRequested) != 0;
+                DesktopUpdateReadiness? readiness;
+                try
+                {
+                    readiness = await _agent.BeginDesktopUpdateHandoffAsync(force, ct);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    SetOperationState(OperationState with
+                    {
+                        Stage = "WaitingForIdle",
+                        Message = $"Update is staged. Waiting for the local Agent update handoff: {ex.Message}",
+                        IsActive = true,
+                        WaitingForIdle = true,
+                        CanInstallNow = true,
+                        Error = null
+                    });
+                    await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                    continue;
+                }
+
+                if (readiness is { Ready: true, DrainHeld: true })
+                {
+                    drainHeld = true;
+                    break;
+                }
+
+                SetOperationState(OperationState with
+                {
+                    Stage = "WaitingForIdle",
+                    Message = readiness?.Message
+                        ?? "Update is staged. Waiting for the local Agent to become ready for installation.",
+                    IsActive = true,
+                    WaitingForIdle = true,
+                    CanInstallNow = true,
+                    Error = null
+                });
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
+
+            SetOperationState(new DesktopUpdateOperationState(
+                "Installing",
+                "Update is staged and the Agent handoff is secured. Restarting Companion to install...",
+                asset.Size,
+                asset.Size,
+                true,
+                false,
+                false,
+                null));
+
+            LaunchInstaller(tempRoot, archivePath, assetId);
+            _lifecycle.MarkTerminal("update-handoff");
+            Environment.Exit(0);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            if (drainHeld) await TryReleaseHandoffAsync();
+            if (tempRoot is not null) TryDeleteDirectory(tempRoot);
+        }
+        catch (Exception ex)
+        {
+            if (drainHeld) await TryReleaseHandoffAsync();
+            if (tempRoot is not null) TryDeleteDirectory(tempRoot);
+            SetOperationState(new DesktopUpdateOperationState(
+                "Failed",
+                "Update failed before installation started. Companion and Agent are still running.",
+                OperationState.BytesReceived,
+                OperationState.TotalBytes,
+                false,
+                false,
+                false,
+                ex.Message));
+        }
+    }
+
+    private async Task TryReleaseHandoffAsync()
+    {
+        try { await _agent.ReleaseDesktopUpdateHandoffAsync(CancellationToken.None); }
+        catch { }
+    }
+
+    private void SetOperationState(DesktopUpdateOperationState state)
+    {
+        Volatile.Write(ref _operationState, state);
+        try { StateChanged?.Invoke(); }
+        catch { }
     }
 
     private async Task<GitHubRelease?> GetReleaseAsync(CancellationToken ct)
@@ -114,7 +258,7 @@ public sealed class DesktopUpdateService : IDisposable
     private async Task DownloadAssetAsync(
         GitHubAsset asset,
         string archivePath,
-        IProgress<DesktopUpdateProgress>? progress,
+        Action<DesktopUpdateProgress>? progress,
         CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -139,7 +283,7 @@ public sealed class DesktopUpdateService : IDisposable
                 await target.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
                 hash.AppendData(buffer, 0, read);
                 received += read;
-                progress?.Report(new DesktopUpdateProgress("Downloading", "Downloading and verifying update...", received, totalBytes));
+                progress?.Invoke(new DesktopUpdateProgress("Downloading", "Downloading and verifying update...", received, totalBytes));
             }
 
             await target.FlushAsync(timeout.Token);
@@ -495,7 +639,12 @@ finally {
         }
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _lifetimeCts.Cancel();
+        _http.Dispose();
+        _lifetimeCts.Dispose();
+    }
 
     private sealed record GitHubRelease([property: JsonPropertyName("assets")] IReadOnlyList<GitHubAsset> Assets);
     private sealed record GitHubAsset(
@@ -517,6 +666,31 @@ public sealed record DesktopUpdateStatus(
 
 public sealed record DesktopUpdateProgress(string Stage, string Message, long BytesReceived, long? TotalBytes)
 {
+    public int? Percentage => TotalBytes is > 0
+        ? (int)Math.Clamp(BytesReceived * 100 / TotalBytes.Value, 0, 100)
+        : null;
+}
+
+public sealed record DesktopUpdateOperationState(
+    string Stage,
+    string Message,
+    long BytesReceived,
+    long? TotalBytes,
+    bool IsActive,
+    bool WaitingForIdle,
+    bool CanInstallNow,
+    string? Error)
+{
+    public static DesktopUpdateOperationState Idle { get; } = new(
+        "Idle",
+        "No manual Desktop update is running.",
+        0,
+        null,
+        false,
+        false,
+        false,
+        null);
+
     public int? Percentage => TotalBytes is > 0
         ? (int)Math.Clamp(BytesReceived * 100 / TotalBytes.Value, 0, 100)
         : null;
