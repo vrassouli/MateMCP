@@ -98,7 +98,10 @@ public static class PortalDeviceEndpoints
             string agentId,
             HttpContext context,
             ClaimsPrincipal principal,
-            ControlPlaneDbContext db) =>
+            ControlPlaneDbContext db,
+            string? activityType = null,
+            string? activityStatus = null,
+            string? q = null) =>
         {
             var ownerId = UserId(principal);
             var agent = await db.Agents
@@ -108,6 +111,28 @@ public static class PortalDeviceEndpoints
                     context.RequestAborted);
 
             if (agent is null) return Results.NotFound();
+
+            var recentAudit = await db.AuditEvents
+                .Where(x => x.AgentDeviceId == agent.Id && (
+                    x.EventType.StartsWith("runtime.") ||
+                    x.EventType.StartsWith("agent.") ||
+                    x.EventType.StartsWith("approval.") ||
+                    x.EventType == "admin.agent.revoked"))
+                .OrderByDescending(x => x.Id)
+                .Take(500)
+                .AsNoTracking()
+                .ToListAsync(context.RequestAborted);
+
+            var entries = recentAudit.Select(AgentActivityEndpoints.ToEntry).Where(x => x is not null).Cast<AgentActivityEntry>().ToList();
+            var normalizedType = NormalizeActivityType(activityType);
+            var normalizedStatus = NormalizeActivityStatus(activityStatus);
+            var search = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
+            if (search?.Length > 120) search = search[..120];
+            var filteredEntries = entries.Where(x =>
+                (normalizedType is null || x.Category == normalizedType) &&
+                (normalizedStatus is null || x.Status == normalizedStatus) &&
+                (search is null || x.Operation.Contains(search, StringComparison.OrdinalIgnoreCase) || x.Message.Contains(search, StringComparison.OrdinalIgnoreCase) || x.Type.Contains(search, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
 
             var status = agent.IsRevoked ? "revoked" : IsOnline(agent) ? "online" : "offline";
             var action = agent.IsRevoked
@@ -134,6 +159,7 @@ public static class PortalDeviceEndpoints
                       <div><dt>Device ID</dt><dd><code>{PortalUi.H(agent.PublicId)}</code></dd></div>
                       <div><dt>Enrolled</dt><dd>{PortalUi.H(FormatDate(agent.CreatedAt))}</dd></div>
                       <div><dt>Last seen</dt><dd>{PortalUi.H(FormatLastSeen(agent.LastSeenAt))}</dd></div>
+                      <div><dt>Last activity</dt><dd>{PortalUi.H(entries.Count == 0 ? "No activity yet" : FormatLastSeen(entries[0].CreatedAt))}</dd></div>
                     </dl>
                   </article>
                   <article class="portal-section device-endpoint-card">
@@ -144,6 +170,20 @@ public static class PortalDeviceEndpoints
                     </div>
                     <p class="endpoint-note">The endpoint is safe to display. Device credentials and secret material are never rendered in this portal.</p>
                   </article>
+                </section>
+                <section class="portal-section activity-panel" id="activity">
+                  <div class="portal-section-header activity-header">
+                    <div><h2>Recent activity</h2><p>Newest first · up to 500 recent Agent events. Command arguments and secret values are not stored here.</p></div>
+                    <span class="section-count">{filteredEntries.Count}</span>
+                  </div>
+                  <form class="activity-filters" method="get" action="/devices/{PortalUi.H(agent.PublicId)}#activity">
+                    <label><span>Type</span><select name="activityType">{ActivityOption("all", "All activity", normalizedType)}{ActivityOption("connection", "Connection", normalizedType)}{ActivityOption("request", "MCP requests", normalizedType)}{ActivityOption("security", "Security", normalizedType)}{ActivityOption("approval", "Approvals", normalizedType)}</select></label>
+                    <label><span>Status</span><select name="activityStatus">{ActivityOption("all", "All statuses", normalizedStatus)}{ActivityOption("success", "Success", normalizedStatus)}{ActivityOption("warning", "Warning", normalizedStatus)}{ActivityOption("failure", "Failure", normalizedStatus)}</select></label>
+                    <label class="activity-search"><span>Search</span><input name="q" value="{PortalUi.H(search ?? string.Empty)}" placeholder="Tool, event, or message" autocomplete="off"></label>
+                    <button class="button button-secondary button-compact" type="submit">Filter</button>
+                    {(normalizedType is not null || normalizedStatus is not null || search is not null ? $"""<a class="button button-ghost button-compact" href="/devices/{PortalUi.H(agent.PublicId)}#activity">Clear</a>""" : "")}
+                  </form>
+                  {(filteredEntries.Count == 0 ? PortalUi.EmptyState("No matching activity", entries.Count == 0 ? "No activity has been recorded for this Agent yet." : "Try changing or clearing the activity filters.") : $"""<div class="activity-list">{string.Join("", filteredEntries.Select(ActivityRow))}</div>""")}
                 </section>
                 """;
 
@@ -271,6 +311,40 @@ public static class PortalDeviceEndpoints
              <a class="button button-ghost button-compact" href="/devices/{PortalUi.H(agent.PublicId)}">View history</a>
            </article>
            """;
+
+    private static string? NormalizeActivityType(string? value)
+        => value?.Trim().ToLowerInvariant() switch { "connection" => "connection", "request" => "request", "security" => "security", "approval" => "approval", _ => null };
+
+    private static string? NormalizeActivityStatus(string? value)
+        => value?.Trim().ToLowerInvariant() switch { "success" => "success", "warning" => "warning", "failure" => "failure", _ => null };
+
+    private static string ActivityOption(string value, string label, string? selected)
+    {
+        var normalizedValue = value == "all" ? null : value;
+        var isSelected = string.Equals(normalizedValue, selected, StringComparison.Ordinal);
+        return $"""<option value="{PortalUi.H(value)}"{(isSelected ? " selected" : "")}>{PortalUi.H(label)}</option>""";
+    }
+
+    private static string ActivityRow(AgentActivityEntry entry)
+    {
+        var icon = entry.Category switch { "connection" => "↔", "request" => "›_", "security" => "◇", "approval" => "✓", _ => "·" };
+        var details = string.IsNullOrWhiteSpace(entry.Message) ? "" : $"""<p>{PortalUi.H(entry.Message)}</p>""";
+        var duration = entry.DurationMs is null ? "" : $"""<span>{PortalUi.H(FormatDuration(entry.DurationMs.Value))}</span>""";
+        var requestId = string.IsNullOrWhiteSpace(entry.RequestId) ? "" : $"""<span class="activity-request-id" title="{PortalUi.H(entry.RequestId)}">req {PortalUi.H(ShortId(entry.RequestId))}</span>""";
+        return $"""
+            <article class="activity-row activity-{PortalUi.H(entry.Level)}">
+              <div class="activity-icon" aria-hidden="true">{PortalUi.H(icon)}</div>
+              <div class="activity-body">
+                <div class="activity-title"><strong>{PortalUi.H(entry.Operation)}</strong>{PortalUi.StatusBadge(entry.Status)}</div>
+                {details}
+                <div class="activity-meta"><time datetime="{entry.CreatedAt:O}" title="{PortalUi.H(entry.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'"))}">{PortalUi.H(FormatLastSeen(entry.CreatedAt))}</time><span>{PortalUi.H(entry.Category)}</span>{duration}{requestId}</div>
+              </div>
+            </article>
+            """;
+    }
+
+    private static string FormatDuration(double milliseconds) => milliseconds < 1000 ? $"{milliseconds:0} ms" : $"{milliseconds / 1000:0.0} s";
+    private static string ShortId(string value) => value.Length <= 12 ? value : value[..12];
 
     private static bool IsOnline(AgentDevice agent)
         => !agent.IsRevoked &&

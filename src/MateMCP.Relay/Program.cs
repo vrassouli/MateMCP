@@ -12,6 +12,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection(RelayOptions.SectionName));
 builder.Services.AddSingleton<RelayInstanceIdentity>();
 builder.Services.AddSingleton<AgentRegistry>();
+builder.Services.AddSingleton<AgentActivityReporter>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentActivityReporter>());
 builder.Services.AddHostedService<AgentPresenceLeaseService>();
 builder.Services.AddHttpClient("control-plane", client => client.BaseAddress = new Uri((builder.Configuration["Relay:ControlPlaneUrl"] ?? "https://api.matemcp.com").TrimEnd('/') + "/"));
 
@@ -105,7 +107,7 @@ app.MapGet("/.well-known/oauth-protected-resource/mcp/{deviceId}", (string devic
     bearer_methods_supported = new[] { "header" }
 }));
 
-app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
+app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients, AgentActivityReporter activity) =>
 {
     if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
     var credential = Bearer(context);
@@ -126,6 +128,14 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
         connection.ConnectedAt,
         socket.State,
         relayInstance.InstanceId);
+
+    activity.Record(
+        deviceId,
+        "connected",
+        "success",
+        "Relay connection",
+        "Agent connected to the relay.",
+        requestId: context.TraceIdentifier);
 
     using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
     var heartbeatTask = RunAgentHeartbeatAsync(clients, options, deviceId, credential, heartbeatCts.Token);
@@ -212,10 +222,21 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
             disconnectException?.Message ?? "none",
             enteredReconnectGrace,
             relayInstance.InstanceId);
+
+        activity.Record(
+            deviceId,
+            "disconnected",
+            "warning",
+            "Relay connection",
+            enteredReconnectGrace
+                ? "Agent disconnected; reconnect grace started."
+                : "Agent disconnected.",
+            (disconnectedAt - connection.ConnectedAt).TotalMilliseconds,
+            context.TraceIdentifier);
     }
 });
 
-app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients) =>
+app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients, AgentActivityReporter activity) =>
 {
     if (HttpMethods.IsOptions(context.Request.Method))
     {
@@ -265,6 +286,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
                 snapshot.LastDisconnectedAt,
                 snapshot.ReconnectUntil,
                 retryAfterSeconds);
+            activity.Record(deviceId, "request", "warning", "MCP request", "Agent is reconnecting.", requestId: context.TraceIdentifier);
             return Results.Json(new
             {
                 error = "agent_reconnecting",
@@ -282,6 +304,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
             snapshot.State?.ToString() ?? "none",
             snapshot.CurrentConnectionId ?? "none",
             snapshot.SocketState?.ToString() ?? "none");
+        activity.Record(deviceId, "request", "failure", "MCP request", "Agent is offline.", requestId: context.TraceIdentifier);
         return Results.NotFound(new { error = "device_offline" });
     }
 
@@ -306,7 +329,10 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
     using var ms = new MemoryStream();
     await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
     if (ms.Length > options.MaxBodyBytes) return Results.StatusCode(413);
-    if (!ScopeAllowsPayload(principal, ms.ToArray())) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var requestBody = ms.ToArray();
+    if (!ScopeAllowsPayload(principal, requestBody)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var activityOperation = McpActivityOperation.Describe(context.Request.Method, requestBody);
+    var activityStarted = Stopwatch.GetTimestamp();
 
     var headers = context.Request.Headers
         .Where(h => !string.Equals(h.Key, "Authorization", StringComparison.OrdinalIgnoreCase)
@@ -320,7 +346,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
         context.Request.Method,
         "/mcp" + context.Request.QueryString,
         headers,
-        ms.Length == 0 ? null : Convert.ToBase64String(ms.ToArray()),
+        requestBody.Length == 0 ? null : Convert.ToBase64String(requestBody),
         operationId);
 
     RelayResponse response;
@@ -345,6 +371,7 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
             deviceId,
             operationId,
             relayInstance.InstanceId);
+        activity.Record(deviceId, "request", "failure", activityOperation, "Agent request timed out.", Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
         return Results.StatusCode(504);
     }
     catch (AgentTransportLostException ex)
@@ -355,8 +382,13 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
             deviceId,
             operationId,
             relayInstance.InstanceId);
+        activity.Record(deviceId, "request", "failure", activityOperation, "Agent connection was lost before the request completed.", Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
         return Results.Json(new { error = "agent_connection_lost", operationId }, statusCode: StatusCodes.Status502BadGateway);
     }
+
+    activity.Record(deviceId, "request", response.StatusCode >= 400 ? "failure" : "success", activityOperation,
+        response.StatusCode >= 400 ? $"Agent returned HTTP {response.StatusCode}." : "Completed successfully.",
+        Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
 
     context.Response.StatusCode = response.StatusCode;
     foreach (var h in response.Headers)

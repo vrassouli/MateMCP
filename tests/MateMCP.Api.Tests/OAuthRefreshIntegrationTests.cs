@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using MateMCP.Api;
 using MateMCP.Api.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Identity;
@@ -463,6 +464,150 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.DoesNotContain("CredentialHash", html, StringComparison.Ordinal);
     }
     [Fact]
+    public async Task Agent_activity_internal_endpoint_requires_the_internal_key()
+    {
+        using var response = await _client!.PostAsJsonAsync("/internal/agents/activity", new
+        {
+            agentId = AgentId,
+            type = "connected",
+            status = "success",
+            operation = "Relay connection",
+            message = "Agent connected."
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Device_activity_is_owner_scoped_filterable_and_redacts_sensitive_values()
+    {
+        using (var connected = await PostInternalActivityAsync(new
+        {
+            agentId = AgentId,
+            type = "connected",
+            status = "success",
+            operation = "Relay connection",
+            message = "Agent connected."
+        }))
+            Assert.Equal(HttpStatusCode.OK, connected.StatusCode);
+
+        using (var failed = await PostInternalActivityAsync(new
+        {
+            agentId = AgentId,
+            type = "request",
+            status = "failure",
+            operation = "tools/call · shell_exec",
+            message = "token=TOP-SECRET; Bearer abc.def.ghi failed upstream",
+            durationMs = 123.4,
+            requestId = "req_activity_test"
+        }))
+            Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
+
+        await using (var verifyActivityScope = _factory!.Services.CreateAsyncScope())
+        {
+            var verifyActivityDb = verifyActivityScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var audit = await verifyActivityDb.AuditEvents.AsNoTracking()
+                .Where(x => x.EventType == "runtime.request")
+                .OrderByDescending(x => x.Id)
+                .FirstAsync();
+            Assert.Contains("shell_exec", audit.Detail, StringComparison.Ordinal);
+            var entry = AgentActivityEndpoints.ToEntry(audit);
+            Assert.NotNull(entry);
+            Assert.Contains("shell_exec", entry.Operation, StringComparison.Ordinal);
+            Assert.Equal("failure", entry.Status);
+        }
+
+        using var response = await _client!.GetAsync($"/devices/{AgentId}?activityType=request&activityStatus=failure&q=shell_exec");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+        var decodedHtml = WebUtility.HtmlDecode(html);
+
+        Assert.Contains("Recent activity", html, StringComparison.Ordinal);
+        Assert.Contains("Last activity", html, StringComparison.Ordinal);
+        Assert.Contains("tools/call · shell_exec", decodedHtml, StringComparison.Ordinal);
+        Assert.Contains("failure", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("123 ms", html, StringComparison.Ordinal);
+        Assert.Contains("[redacted]", decodedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("TOP-SECRET", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("abc.def.ghi", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Agent connected.", html, StringComparison.Ordinal);
+        Assert.Contains("Command arguments and secret values are not stored here.", html, StringComparison.Ordinal);
+
+        using var foreign = await _client.GetAsync("/devices/agt_not_owned_activity");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
+    [Fact]
+    public async Task Agent_runtime_activity_retains_only_the_latest_500_events()
+    {
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var agent = await db.Agents.SingleAsync(x => x.PublicId == AgentId);
+            var detail = JsonSerializer.Serialize(new
+            {
+                Version = 1,
+                Status = "success",
+                Level = "info",
+                Operation = "tools/call · test",
+                Message = "Completed successfully.",
+                DurationMs = 1.0,
+                RequestId = "seed"
+            });
+
+            for (var i = 0; i < 505; i++)
+            {
+                db.AuditEvents.Add(new AuditEvent
+                {
+                    UserId = _ownerId,
+                    AgentDeviceId = agent.Id,
+                    EventType = "runtime.request",
+                    Detail = detail,
+                    CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-505 + i)
+                });
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        using (var trigger = await PostInternalActivityAsync(new
+        {
+            agentId = AgentId,
+            type = "request",
+            status = "success",
+            operation = "tools/call · final",
+            message = "Completed successfully."
+        }))
+            Assert.Equal(HttpStatusCode.OK, trigger.StatusCode);
+
+        await using var verifyScope = _factory!.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var agentId = await verifyDb.Agents.Where(x => x.PublicId == AgentId).Select(x => x.Id).SingleAsync();
+        var count = await verifyDb.AuditEvents.CountAsync(x => x.AgentDeviceId == agentId && x.EventType.StartsWith("runtime."));
+        Assert.Equal(500, count);
+    }
+
+    [Fact]
+    public async Task Device_activity_styles_include_responsive_filter_and_log_layouts()
+    {
+        using var client = _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri(ApiUrl),
+            AllowAutoRedirect = false,
+            HandleCookies = false
+        });
+
+        using var response = await client.GetAsync("/portal/portal.css");
+        response.EnsureSuccessStatusCode();
+        var css = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains(".activity-filters", css, StringComparison.Ordinal);
+        Assert.Contains(".activity-row", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 820px)", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 520px)", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Approvals_page_separates_pending_history_and_expires_stale_requests()
     {
         var pendingId = Guid.NewGuid();
@@ -910,6 +1055,16 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         });
         Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
         return client;
+    }
+
+    private async Task<HttpResponseMessage> PostInternalActivityAsync(object payload)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/activity")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Add("X-MateMCP-Internal-Key", InternalKey);
+        return await _client!.SendAsync(request);
     }
 
     private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes)

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using MateMCP.Api;
 using MateMCP.Api.Data;
 using MateMCP.Api.ExternalAuth;
 using MateMCP.Api.Portal;
@@ -163,6 +164,7 @@ await EnsureDatabaseAsync(app.Services, configuration);
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Api", status = "ok", database = provider }));
 app.MapGet("/", (ClaimsPrincipal user) => user.Identity?.IsAuthenticated == true ? Results.Redirect("/dashboard") : Results.Redirect("/login"));
 DeviceManagementEndpoints.Map(app, relayUrl);
+AgentActivityEndpoints.Map(app, internalKey);
 PortalDeviceEndpoints.Map(app, relayUrl);
 PortalApprovalEndpoints.Map(app);
 PortalAdminEndpoints.Map(app);

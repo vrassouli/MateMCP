@@ -152,7 +152,7 @@ public static class PortalUi
                 <div class="portal-shell">{body}</div>
               </main>
             </div>
-            <script src="/portal/portal.js?v=301-2" defer></script>
+            <script src="/portal/portal.js?v=336-1" defer></script>
             """;
 
         return Html(context, title, shell, statusCode, "portal-page");
@@ -175,9 +175,9 @@ public static class PortalUi
         var normalized = status.ToLowerInvariant();
         var css = normalized switch
         {
-            "online" or "allowed" or "active" or "enabled" => "status-positive",
-            "pending" => "status-warning",
-            "revoked" or "denied" or "disabled" => "status-negative",
+            "online" or "allowed" or "active" or "enabled" or "success" => "status-positive",
+            "pending" or "warning" => "status-warning",
+            "revoked" or "denied" or "disabled" or "failure" or "error" => "status-negative",
             _ => "status-neutral"
         };
 
@@ -238,7 +238,7 @@ public static class PortalUi
               <meta name="theme-color" content="#07111f">
               <meta name="robots" content="noindex,nofollow">
               <link rel="icon" href="/portal/mark.svg?v=1" type="image/svg+xml">
-              <link rel="stylesheet" href="/portal/portal.css?v=301-2">
+              <link rel="stylesheet" href="/portal/portal.css?v=336-1">
               <script src="/portal/analytics.js?v=1" defer></script>
               <title>{H(title)} · MateMCP</title>
             </head>
