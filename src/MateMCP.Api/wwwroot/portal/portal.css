@@ -1465,7 +1465,7 @@ img, svg { display: block; max-width: 100%; }
 .activity-header p { max-width: 760px; }
 .activity-filters {
   display: grid;
-  grid-template-columns: 150px 150px minmax(220px, 1fr) auto auto;
+  grid-template-columns: 135px 135px minmax(150px, 190px) minmax(220px, 1fr) auto auto;
   align-items: end;
   gap: 10px;
   padding: 14px 18px;
@@ -1509,6 +1509,14 @@ img, svg { display: block; max-width: 100%; }
   max-width: 170px; overflow: hidden; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   text-overflow: ellipsis; white-space: nowrap;
 }
+.activity-project-meta { color: var(--cyan); }
+.activity-pagination {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 18px; border-top: 1px solid rgba(155, 184, 219, .08);
+  background: rgba(5, 13, 24, .18);
+}
+.activity-page-summary { color: var(--muted-2); font-size: 9px; }
+.activity-page-actions { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 820px) {
   .activity-filters { grid-template-columns: 1fr 1fr; }
   .activity-search { grid-column: 1 / -1; }
@@ -1520,4 +1528,6 @@ img, svg { display: block; max-width: 100%; }
   .activity-row { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding: 13px 14px; }
   .activity-icon { width: 28px; height: 28px; }
   .activity-title { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .activity-pagination { align-items: stretch; flex-direction: column; padding: 12px 14px; }
+  .activity-page-actions { justify-content: flex-end; }
 }

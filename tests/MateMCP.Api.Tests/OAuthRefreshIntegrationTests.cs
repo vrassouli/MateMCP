@@ -499,7 +499,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
             operation = "tools/call · shell_exec",
             message = "token=TOP-SECRET; Bearer abc.def.ghi failed upstream",
             durationMs = 123.4,
-            requestId = "req_activity_test"
+            requestId = "req_activity_test",
+            project = "MateMCP"
         }))
             Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
 
@@ -515,9 +516,10 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
             Assert.NotNull(entry);
             Assert.Contains("shell_exec", entry.Operation, StringComparison.Ordinal);
             Assert.Equal("failure", entry.Status);
+            Assert.Equal("MateMCP", entry.Project);
         }
 
-        using var response = await _client!.GetAsync($"/devices/{AgentId}?activityType=request&activityStatus=failure&q=shell_exec");
+        using var response = await _client!.GetAsync($"/devices/{AgentId}?activityType=request&activityStatus=failure&activityProject=MateMCP&q=shell_exec");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();
         var decodedHtml = WebUtility.HtmlDecode(html);
@@ -527,6 +529,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Contains("tools/call · shell_exec", decodedHtml, StringComparison.Ordinal);
         Assert.Contains("failure", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("123 ms", html, StringComparison.Ordinal);
+        Assert.Contains("Project MateMCP", decodedHtml, StringComparison.Ordinal);
+        Assert.Contains("50 per page", decodedHtml, StringComparison.Ordinal);
         Assert.Contains("[redacted]", decodedHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("TOP-SECRET", html, StringComparison.Ordinal);
         Assert.DoesNotContain("abc.def.ghi", html, StringComparison.Ordinal);
@@ -535,6 +539,79 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
 
         using var foreign = await _client.GetAsync("/devices/agt_not_owned_activity");
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
+    [Fact]
+    public async Task Device_activity_project_filter_is_paginated_after_filtering()
+    {
+        const string project = "Paging Project";
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var agent = await db.Agents.SingleAsync(x => x.PublicId == AgentId);
+
+            for (var i = 0; i < 55; i++)
+            {
+                db.AuditEvents.Add(new AuditEvent
+                {
+                    UserId = _ownerId,
+                    AgentDeviceId = agent.Id,
+                    EventType = "runtime.request",
+                    Detail = JsonSerializer.Serialize(new
+                    {
+                        Version = 1,
+                        Status = "success",
+                        Level = "info",
+                        Operation = $"paging-item-{i:D2}",
+                        Message = "Completed successfully.",
+                        DurationMs = 1.0,
+                        RequestId = $"paging-{i:D2}",
+                        Project = project
+                    }),
+                    CreatedAt = DateTimeOffset.UtcNow.AddSeconds(i)
+                });
+            }
+
+            db.AuditEvents.Add(new AuditEvent
+            {
+                UserId = _ownerId,
+                AgentDeviceId = agent.Id,
+                EventType = "runtime.request",
+                Detail = JsonSerializer.Serialize(new
+                {
+                    Version = 1,
+                    Status = "success",
+                    Level = "info",
+                    Operation = "other-project-item",
+                    Message = "Completed successfully.",
+                    DurationMs = 1.0,
+                    RequestId = "other-project",
+                    Project = "Other Project"
+                }),
+                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(2)
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        using var firstResponse = await _client!.GetAsync($"/devices/{AgentId}?activityProject=Paging%20Project&page=1");
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        var first = WebUtility.HtmlDecode(await firstResponse.Content.ReadAsStringAsync());
+        Assert.Contains("Showing 1–50 of 55 · Page 1 of 2", first, StringComparison.Ordinal);
+        Assert.Contains("paging-item-54", first, StringComparison.Ordinal);
+        Assert.Contains("paging-item-05", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("paging-item-04", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("other-project-item", first, StringComparison.Ordinal);
+        Assert.Contains("activityProject=Paging%20Project", first, StringComparison.Ordinal);
+        Assert.Contains("page=2", first, StringComparison.Ordinal);
+
+        using var secondResponse = await _client.GetAsync($"/devices/{AgentId}?activityProject=Paging%20Project&page=2");
+        Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+        var second = WebUtility.HtmlDecode(await secondResponse.Content.ReadAsStringAsync());
+        Assert.Contains("Showing 51–55 of 55 · Page 2 of 2", second, StringComparison.Ordinal);
+        Assert.Contains("paging-item-04", second, StringComparison.Ordinal);
+        Assert.Contains("paging-item-00", second, StringComparison.Ordinal);
+        Assert.DoesNotContain("paging-item-54", second, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -603,6 +680,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
 
         Assert.Contains(".activity-filters", css, StringComparison.Ordinal);
         Assert.Contains(".activity-row", css, StringComparison.Ordinal);
+        Assert.Contains(".activity-pagination", css, StringComparison.Ordinal);
+        Assert.Contains(".activity-project-meta", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 820px)", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 520px)", css, StringComparison.Ordinal);
     }

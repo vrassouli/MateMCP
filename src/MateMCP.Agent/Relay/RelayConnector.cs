@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using MateMCP.Agent.Projects;
 using MateMCP.Agent.Security;
 
 namespace MateMCP.Agent.Relay;
@@ -10,9 +11,11 @@ public sealed class RelayConnector(
     IOptionsMonitor<Configuration.MateOptions> options,
     AgentCredentialStore credentials,
     LocalAccessCredential localAccess,
+    ProjectRegistry projects,
     ILogger<RelayConnector> logger,
     ILoggerFactory loggerFactory) : BackgroundService
 {
+    internal const string ActivityProjectHeader = "X-MateMCP-Activity-Project";
     private readonly HttpClient _http = new();
     private readonly RelayOperationRegistry _operations = new(loggerFactory.CreateLogger<RelayOperationRegistry>());
 
@@ -297,6 +300,10 @@ public sealed class RelayConnector(
             using var upstream = await _http.SendAsync(message, HttpCompletionOption.ResponseContentRead, ct);
             var body = await upstream.Content.ReadAsByteArrayAsync(ct);
             var headers = upstream.Headers.Concat(upstream.Content.Headers).ToDictionary(h => h.Key, h => h.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
+            headers.Remove(ActivityProjectHeader);
+            var activityProject = ResolveActivityProject(request.BodyBase64, projects);
+            if (!string.IsNullOrWhiteSpace(activityProject))
+                headers[ActivityProjectHeader] = [activityProject];
             return new RelayResponse(request.Id, (int)upstream.StatusCode, headers, body.Length == 0 ? null : Convert.ToBase64String(body), null);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -306,6 +313,36 @@ public sealed class RelayConnector(
         catch (Exception ex)
         {
             return new RelayResponse(request.Id, 502, new(), null, ex.Message);
+        }
+    }
+
+    internal static string? ResolveActivityProject(string? bodyBase64, ProjectRegistry projects)
+    {
+        if (string.IsNullOrWhiteSpace(bodyBase64)) return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(Convert.FromBase64String(bodyBase64));
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("method", out var method) ||
+                method.ValueKind != JsonValueKind.String ||
+                !string.Equals(method.GetString(), "tools/call", StringComparison.Ordinal) ||
+                !root.TryGetProperty("params", out var parameters) ||
+                parameters.ValueKind != JsonValueKind.Object ||
+                !parameters.TryGetProperty("arguments", out var arguments) ||
+                arguments.ValueKind != JsonValueKind.Object ||
+                !arguments.TryGetProperty("project", out var projectProperty) ||
+                projectProperty.ValueKind != JsonValueKind.String)
+                return null;
+
+            var requested = projectProperty.GetString()?.Trim();
+            if (string.IsNullOrWhiteSpace(requested)) return null;
+            return projects.Get(requested).Name;
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException or InvalidOperationException)
+        {
+            return null;
         }
     }
 
