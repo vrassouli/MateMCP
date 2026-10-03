@@ -26,7 +26,8 @@ public sealed class AgentActivityReporter(
         string operation,
         string message,
         double? durationMs = null,
-        string? requestId = null)
+        string? requestId = null,
+        string? project = null)
     {
         var level = status switch
         {
@@ -43,7 +44,8 @@ public sealed class AgentActivityReporter(
             operation,
             message,
             durationMs,
-            requestId));
+            requestId,
+            project));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -97,7 +99,8 @@ public sealed class AgentActivityReporter(
         string Operation,
         string Message,
         double? DurationMs,
-        string? RequestId);
+        string? RequestId,
+        string? Project);
 }
 
 internal static class McpActivityOperation

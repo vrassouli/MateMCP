@@ -47,7 +47,8 @@ public static partial class AgentActivityEndpoints
                 Operation: SanitizeText(report.Operation, 120),
                 Message: SanitizeText(report.Message, 220),
                 DurationMs: NormalizeDuration(report.DurationMs),
-                RequestId: SanitizeIdentifier(report.RequestId, 96));
+                RequestId: SanitizeIdentifier(report.RequestId, 96),
+                Project: SanitizeProject(report.Project));
 
             db.AuditEvents.Add(new AuditEvent
             {
@@ -88,7 +89,8 @@ public static partial class AgentActivityEndpoints
                     Message: SanitizeText(stored.Message, 220),
                     DurationMs: NormalizeDuration(stored.DurationMs),
                     RequestId: SanitizeIdentifier(stored.RequestId, 96),
-                    CreatedAt: auditEvent.CreatedAt);
+                    CreatedAt: auditEvent.CreatedAt,
+                    Project: SanitizeProject(stored.Project));
             }
             catch (JsonException)
             {
@@ -170,6 +172,12 @@ public static partial class AgentActivityEndpoints
         return text.Length <= maxLength ? text : text[..maxLength] + "…";
     }
 
+    private static string? SanitizeProject(string? value)
+    {
+        var project = SanitizeText(value, 80);
+        return string.IsNullOrWhiteSpace(project) ? null : project;
+    }
+
     private static string? SanitizeIdentifier(string? value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -206,7 +214,8 @@ public sealed record AgentActivityReport(
     string? Operation = null,
     string? Message = null,
     double? DurationMs = null,
-    string? RequestId = null);
+    string? RequestId = null,
+    string? Project = null);
 
 public sealed record AgentActivityEntry(
     string Category,
@@ -217,7 +226,8 @@ public sealed record AgentActivityEntry(
     string Message,
     double? DurationMs,
     string? RequestId,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? Project = null);
 
 internal sealed record StoredAgentActivity(
     int Version,
@@ -226,4 +236,5 @@ internal sealed record StoredAgentActivity(
     string Operation,
     string Message,
     double? DurationMs,
-    string? RequestId);
+    string? RequestId,
+    string? Project = null);
