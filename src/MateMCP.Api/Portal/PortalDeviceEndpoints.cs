@@ -6,6 +6,8 @@ namespace MateMCP.Api.Portal;
 
 public static class PortalDeviceEndpoints
 {
+    private const int ActivityPageSize = 50;
+
     public static void Map(WebApplication app, string relayUrl)
     {
         var group = app.MapGroup("/devices").RequireAuthorization();
@@ -101,7 +103,9 @@ public static class PortalDeviceEndpoints
             ControlPlaneDbContext db,
             string? activityType = null,
             string? activityStatus = null,
-            string? q = null) =>
+            string? activityProject = null,
+            string? q = null,
+            int page = 1) =>
         {
             var ownerId = UserId(principal);
             var agent = await db.Agents
@@ -126,12 +130,32 @@ public static class PortalDeviceEndpoints
             var entries = recentAudit.Select(AgentActivityEndpoints.ToEntry).Where(x => x is not null).Cast<AgentActivityEntry>().ToList();
             var normalizedType = NormalizeActivityType(activityType);
             var normalizedStatus = NormalizeActivityStatus(activityStatus);
+            var availableProjects = entries
+                .Select(x => x.Project)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var requestedProject = string.IsNullOrWhiteSpace(activityProject) ? null : activityProject.Trim();
+            if (requestedProject?.Length > 80) requestedProject = requestedProject[..80];
+            var normalizedProject = requestedProject is null
+                ? null
+                : availableProjects.FirstOrDefault(x => string.Equals(x, requestedProject, StringComparison.OrdinalIgnoreCase));
             var search = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
             if (search?.Length > 120) search = search[..120];
             var filteredEntries = entries.Where(x =>
                 (normalizedType is null || x.Category == normalizedType) &&
                 (normalizedStatus is null || x.Status == normalizedStatus) &&
+                (normalizedProject is null || string.Equals(x.Project, normalizedProject, StringComparison.OrdinalIgnoreCase)) &&
                 (search is null || x.Operation.Contains(search, StringComparison.OrdinalIgnoreCase) || x.Message.Contains(search, StringComparison.OrdinalIgnoreCase) || x.Type.Contains(search, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            var totalFiltered = filteredEntries.Count;
+            var totalPages = Math.Max(1, (totalFiltered + ActivityPageSize - 1) / ActivityPageSize);
+            var currentPage = Math.Clamp(page, 1, totalPages);
+            var pagedEntries = filteredEntries
+                .Skip((currentPage - 1) * ActivityPageSize)
+                .Take(ActivityPageSize)
                 .ToList();
 
             var status = agent.IsRevoked ? "revoked" : IsOnline(agent) ? "online" : "offline";
@@ -173,17 +197,19 @@ public static class PortalDeviceEndpoints
                 </section>
                 <section class="portal-section activity-panel" id="activity">
                   <div class="portal-section-header activity-header">
-                    <div><h2>Recent activity</h2><p>Newest first · up to 500 recent Agent events. Command arguments and secret values are not stored here.</p></div>
+                    <div><h2>Recent activity</h2><p>Newest first · up to 500 recent Agent events · 50 per page. Command arguments and secret values are not stored here.</p></div>
                     <span class="section-count">{filteredEntries.Count}</span>
                   </div>
                   <form class="activity-filters" method="get" action="/devices/{PortalUi.H(agent.PublicId)}#activity">
                     <label><span>Type</span><select name="activityType">{ActivityOption("all", "All activity", normalizedType)}{ActivityOption("connection", "Connection", normalizedType)}{ActivityOption("request", "MCP requests", normalizedType)}{ActivityOption("security", "Security", normalizedType)}{ActivityOption("approval", "Approvals", normalizedType)}</select></label>
                     <label><span>Status</span><select name="activityStatus">{ActivityOption("all", "All statuses", normalizedStatus)}{ActivityOption("success", "Success", normalizedStatus)}{ActivityOption("warning", "Warning", normalizedStatus)}{ActivityOption("failure", "Failure", normalizedStatus)}</select></label>
+                    <label class="activity-project-filter"><span>Project</span><select name="activityProject">{ActivityProjectOptions(availableProjects, normalizedProject)}</select></label>
                     <label class="activity-search"><span>Search</span><input name="q" value="{PortalUi.H(search ?? string.Empty)}" placeholder="Tool, event, or message" autocomplete="off"></label>
                     <button class="button button-secondary button-compact" type="submit">Filter</button>
-                    {(normalizedType is not null || normalizedStatus is not null || search is not null ? $"""<a class="button button-ghost button-compact" href="/devices/{PortalUi.H(agent.PublicId)}#activity">Clear</a>""" : "")}
+                    {(normalizedType is not null || normalizedStatus is not null || normalizedProject is not null || search is not null ? $"""<a class="button button-ghost button-compact" href="/devices/{PortalUi.H(agent.PublicId)}#activity">Clear</a>""" : "")}
                   </form>
-                  {(filteredEntries.Count == 0 ? PortalUi.EmptyState("No matching activity", entries.Count == 0 ? "No activity has been recorded for this Agent yet." : "Try changing or clearing the activity filters.") : $"""<div class="activity-list">{string.Join("", filteredEntries.Select(ActivityRow))}</div>""")}
+                  {(filteredEntries.Count == 0 ? PortalUi.EmptyState("No matching activity", entries.Count == 0 ? "No activity has been recorded for this Agent yet." : "Try changing or clearing the activity filters.") : $"""<div class="activity-list">{string.Join("", pagedEntries.Select(ActivityRow))}</div>""")}
+                  {ActivityPagination(agent.PublicId, currentPage, totalPages, totalFiltered, normalizedType, normalizedStatus, normalizedProject, search)}
                 </section>
                 """;
 
@@ -325,19 +351,76 @@ public static class PortalDeviceEndpoints
         return $"""<option value="{PortalUi.H(value)}"{(isSelected ? " selected" : "")}>{PortalUi.H(label)}</option>""";
     }
 
+    private static string ActivityProjectOptions(IEnumerable<string> projects, string? selected)
+    {
+        var options = new List<string>
+        {
+            $"""<option value="all"{(selected is null ? " selected" : "")}>All projects</option>"""
+        };
+        options.AddRange(projects.Select(project =>
+            $"""<option value="{PortalUi.H(project)}"{(string.Equals(project, selected, StringComparison.OrdinalIgnoreCase) ? " selected" : "")}>{PortalUi.H(project)}</option>"""));
+        return string.Join("", options);
+    }
+
+    private static string ActivityPagination(
+        string agentId,
+        int currentPage,
+        int totalPages,
+        int totalItems,
+        string? activityType,
+        string? activityStatus,
+        string? activityProject,
+        string? search)
+    {
+        if (totalItems == 0) return string.Empty;
+
+        var firstItem = ((currentPage - 1) * ActivityPageSize) + 1;
+        var lastItem = Math.Min(currentPage * ActivityPageSize, totalItems);
+        var previous = currentPage > 1
+            ? $"""<a class="button button-ghost button-compact" href="{PortalUi.H(ActivityPageUrl(agentId, currentPage - 1, activityType, activityStatus, activityProject, search))}">Previous</a>"""
+            : "";
+        var next = currentPage < totalPages
+            ? $"""<a class="button button-ghost button-compact" href="{PortalUi.H(ActivityPageUrl(agentId, currentPage + 1, activityType, activityStatus, activityProject, search))}">Next</a>"""
+            : "";
+
+        return $"""
+            <nav class="activity-pagination" aria-label="Activity pages">
+              <span class="activity-page-summary">Showing {firstItem}–{lastItem} of {totalItems} · Page {currentPage} of {totalPages}</span>
+              <span class="activity-page-actions">{previous}{next}</span>
+            </nav>
+            """;
+    }
+
+    private static string ActivityPageUrl(
+        string agentId,
+        int page,
+        string? activityType,
+        string? activityStatus,
+        string? activityProject,
+        string? search)
+    {
+        var query = new List<string> { $"page={Math.Max(1, page)}" };
+        if (activityType is not null) query.Add($"activityType={Uri.EscapeDataString(activityType)}");
+        if (activityStatus is not null) query.Add($"activityStatus={Uri.EscapeDataString(activityStatus)}");
+        if (activityProject is not null) query.Add($"activityProject={Uri.EscapeDataString(activityProject)}");
+        if (search is not null) query.Add($"q={Uri.EscapeDataString(search)}");
+        return $"/devices/{Uri.EscapeDataString(agentId)}?{string.Join("&", query)}#activity";
+    }
+
     private static string ActivityRow(AgentActivityEntry entry)
     {
         var icon = entry.Category switch { "connection" => "↔", "request" => "›_", "security" => "◇", "approval" => "✓", _ => "·" };
         var details = string.IsNullOrWhiteSpace(entry.Message) ? "" : $"""<p>{PortalUi.H(entry.Message)}</p>""";
         var duration = entry.DurationMs is null ? "" : $"""<span>{PortalUi.H(FormatDuration(entry.DurationMs.Value))}</span>""";
         var requestId = string.IsNullOrWhiteSpace(entry.RequestId) ? "" : $"""<span class="activity-request-id" title="{PortalUi.H(entry.RequestId)}">req {PortalUi.H(ShortId(entry.RequestId))}</span>""";
+        var project = string.IsNullOrWhiteSpace(entry.Project) ? "" : $"""<span class="activity-project-meta">Project {PortalUi.H(entry.Project)}</span>""";
         return $"""
             <article class="activity-row activity-{PortalUi.H(entry.Level)}">
               <div class="activity-icon" aria-hidden="true">{PortalUi.H(icon)}</div>
               <div class="activity-body">
                 <div class="activity-title"><strong>{PortalUi.H(entry.Operation)}</strong>{PortalUi.StatusBadge(entry.Status)}</div>
                 {details}
-                <div class="activity-meta"><time datetime="{entry.CreatedAt:O}" title="{PortalUi.H(entry.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'"))}">{PortalUi.H(FormatLastSeen(entry.CreatedAt))}</time><span>{PortalUi.H(entry.Category)}</span>{duration}{requestId}</div>
+                <div class="activity-meta"><time datetime="{entry.CreatedAt:O}" title="{PortalUi.H(entry.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'"))}">{PortalUi.H(FormatLastSeen(entry.CreatedAt))}</time><span>{PortalUi.H(entry.Category)}</span>{project}{duration}{requestId}</div>
               </div>
             </article>
             """;

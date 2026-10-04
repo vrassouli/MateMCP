@@ -16,6 +16,7 @@ Use this skill when changing Agent online/activity visibility, Relay runtime tel
 ## Privacy boundary
 
 - Relay telemetry may record the JSON-RPC method and, for `tools/call`, the tool name.
+- Project metadata may be persisted only when the Agent resolves a supplied project reference against its local `ProjectRegistry` and returns the canonical configured project name as dedicated internal response metadata. The Relay must never derive project telemetry directly from arbitrary MCP arguments, and the internal metadata header must be stripped before the client response is sent.
 - Never persist MCP arguments, command text, request bodies, response bodies, credentials, tokens, approval secrets, environment values, file contents, or raw exception payloads as runtime activity.
 - Record generic outcome messages, status, duration, and a bounded request/correlation identifier instead.
 - The API must sanitize and bound text again before persistence even when the Relay already emits safe fields. Treat this as defense in depth.

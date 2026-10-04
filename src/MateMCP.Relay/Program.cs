@@ -386,13 +386,18 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
         return Results.Json(new { error = "agent_connection_lost", operationId }, statusCode: StatusCodes.Status502BadGateway);
     }
 
+    var activityProject = response.Headers.TryGetValue("X-MateMCP-Activity-Project", out var activityProjectValues)
+        ? activityProjectValues.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))
+        : null;
     activity.Record(deviceId, "request", response.StatusCode >= 400 ? "failure" : "success", activityOperation,
         response.StatusCode >= 400 ? $"Agent returned HTTP {response.StatusCode}." : "Completed successfully.",
-        Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
+        Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier, activityProject);
 
     context.Response.StatusCode = response.StatusCode;
     foreach (var h in response.Headers)
-        if (!string.Equals(h.Key, "Transfer-Encoding", StringComparison.OrdinalIgnoreCase) && !string.Equals(h.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(h.Key, "Transfer-Encoding", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(h.Key, "Content-Length", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(h.Key, "X-MateMCP-Activity-Project", StringComparison.OrdinalIgnoreCase))
             context.Response.Headers[h.Key] = h.Value;
     if (response.BodyBase64 is not null && !HttpMethods.IsHead(context.Request.Method))
         await context.Response.Body.WriteAsync(Convert.FromBase64String(response.BodyBase64), context.RequestAborted);
