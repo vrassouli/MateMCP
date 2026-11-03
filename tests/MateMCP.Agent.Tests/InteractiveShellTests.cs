@@ -117,7 +117,7 @@ public sealed class InteractiveShellTests
 
         await Assert.ThrowsAsync<McpException>(() => tools.SendSecret(started.SessionId, "ssh-prod", true, CancellationToken.None));
         Assert.Equal(1, approvals.Calls);
-        Assert.True(approvals.LastTarget.StartsWith("ssh-prod@cmd:", StringComparison.Ordinal));
+        Assert.StartsWith("ssh-prod@cmd:", approvals.LastTarget, StringComparison.Ordinal);
         Assert.False(manager.Read(started.SessionId, 0).Exited);
     }
 

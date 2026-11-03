@@ -17,7 +17,7 @@ on:
 
 jobs:
   validate:
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Validate signing helper syntax

@@ -1,0 +1,7 @@
+root = true
+
+[*.cs]
+# xUnit v3 recommends flowing the current test cancellation token through async calls.
+# Keep this as an IDE suggestion during the initial migration rather than flooding builds
+# with diagnostics in existing tests; new and touched tests should use the token.
+dotnet_diagnostic.xUnit1051.severity = suggestion

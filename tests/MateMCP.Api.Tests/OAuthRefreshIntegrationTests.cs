@@ -34,7 +34,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
     private WebApplicationFactory<Program>? _factory;
     private HttpClient? _client;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_tempRoot);
         SetEnvironment("MateMCP__PublicUrl", ApiUrl);
@@ -1185,7 +1185,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Environment.SetEnvironmentVariable(key, value);
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _client?.Dispose();
         if (_factory is not null) await _factory.DisposeAsync();
