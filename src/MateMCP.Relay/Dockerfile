@@ -3,6 +3,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0.403 AS build
 WORKDIR /src
 
+# Restore requires the repository-level SDK, NuGet, and central package configuration.
+COPY ["global.json", "Directory.Packages.props", "NuGet.Config", "./"]
 COPY ["src/MateMCP.Relay/MateMCP.Relay.csproj", "src/MateMCP.Relay/"]
 RUN dotnet restore "src/MateMCP.Relay/MateMCP.Relay.csproj"
 
