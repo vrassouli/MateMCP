@@ -6,6 +6,7 @@ MateMCP targets .NET 10. Keep the SDK and NuGet dependency graph reproducible an
 
 - SDK baseline: .NET SDK 10.0.403 (see global.json).
 - MAUI Companion targets .NET 10; Companion CI pins workload set 10.0.403 explicitly in each platform job. Windows installs only maui-windows; macOS selects Xcode 27.1 on the xcode-27 runner before installing the MAUI workload for Mac Catalyst.
+- The .NET Mac Catalyst 27 SDK requires a minimum deployment target of 17.0 (macOS 14 Sonoma); the Companion Mac Catalyst minimum is 17.0. The Windows minimum remains 10.0.17763.0.
 - CI and Docker SDK images use the same pinned SDK servicing release. The workload-set pin is deliberately scoped to the Companion MAUI jobs so non-MAUI restore/build jobs don't require platform workload manifests. When advancing the SDK feature band, validate the MAUI workload against both the Windows runner and the pinned macOS/Xcode image before changing the pin.
 
 ## NuGet package management
