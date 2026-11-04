@@ -78,6 +78,15 @@ jobs:
         run: |
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
+      - name: Verify Mac Catalyst scene lifecycle configuration
+        run: |
+          PLIST=src/MateMCP.Agent.Companion/Platforms/MacCatalyst/Info.plist
+          DELEGATE=src/MateMCP.Agent.Companion/Platforms/MacCatalyst/SceneDelegate.cs
+          plutil -lint "$PLIST"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :UIApplicationSceneManifest:UIApplicationSupportsMultipleScenes' "$PLIST")" = "false"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneConfigurationName' "$PLIST")" = "__MAUI_DEFAULT_SCENE_CONFIGURATION__"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneDelegateClassName' "$PLIST")" = "SceneDelegate"
+          grep -Fq 'public class SceneDelegate : MauiUISceneDelegate' "$DELEGATE"
       - name: Build ScreenCaptureKit preview helper
         run: scripts/build-screen-capture-kit-macos.sh /tmp/MateMCP.ScreenCaptureKitHelper osx-arm64
       - name: Install .NET MAUI workload
