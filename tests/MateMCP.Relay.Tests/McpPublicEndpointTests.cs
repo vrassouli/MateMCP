@@ -52,6 +52,43 @@ public sealed class McpPublicEndpointTests
         Assert.Equal("email", tool.GetProperty("outputSchema").GetProperty("properties").GetProperty("email").GetProperty("format").GetString());
     }
 
+    [Fact]
+    public void EventStreamToolsListResponse_AddsProfileToolAndPreservesOtherFrames()
+    {
+        const string toolsListFrame = "id: tools-list-17\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":17,\ndata: \"result\":{\"tools\":[{\"name\":\"existing_tool\",\"inputSchema\":{\"type\":\"object\"}}]}}";
+        const string progressFrame = "id: progress-1\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}";
+        var response = CreateEventStreamResponse(": heartbeat\r\n\r\n" + toolsListFrame.Replace("\n", "\r\n") + "\r\n\r\n" + progressFrame.Replace("\n", "\r\n") + "\r\n\r\n");
+
+        var enriched = McpPublicEndpoint.AddProfileTool(response);
+        var enrichedBody = Encoding.UTF8.GetString(Convert.FromBase64String(enriched.BodyBase64!));
+
+        Assert.NotSame(response, enriched);
+        Assert.Equal("text/event-stream; charset=utf-8", enriched.Headers["Content-Type"][0]);
+        Assert.Contains(": heartbeat\r\n\r\n", enrichedBody);
+        Assert.Contains("id: tools-list-17\r\nevent: message\r\ndata: ", enrichedBody);
+        Assert.Contains("id: progress-1\r\nevent: message\r\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}", enrichedBody);
+        var toolsListFrameBody = enrichedBody.Split("\r\n\r\n", StringSplitOptions.RemoveEmptyEntries).Single(frame => frame.Contains("id: tools-list-17", StringComparison.Ordinal));
+        Assert.Equal(1, toolsListFrameBody.Split("\r\n").Count(line => line.StartsWith("data:", StringComparison.Ordinal)));
+        Assert.Equal(1, CountProfileToolsInEventStream(enrichedBody));
+        Assert.Same(enriched, McpPublicEndpoint.AddProfileTool(enriched));
+    }
+
+    [Fact]
+    public void EventStreamToolsListResponse_DoesNotRewriteNotificationsMalformedFramesOrExistingProfileTool()
+    {
+        const string notifications = ": keepalive\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}\n\n";
+        var notificationResponse = CreateEventStreamResponse(notifications);
+        Assert.Same(notificationResponse, McpPublicEndpoint.AddProfileTool(notificationResponse));
+
+        const string malformed = "event: message\ndata: {not-json}\n\n";
+        var malformedResponse = CreateEventStreamResponse(malformed);
+        Assert.Same(malformedResponse, McpPublicEndpoint.AddProfileTool(malformedResponse));
+
+        const string alreadyEnriched = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"tools\":[{\"name\":\"get_profile\"}]}}\n\n";
+        var existingResponse = CreateEventStreamResponse(alreadyEnriched);
+        Assert.Same(existingResponse, McpPublicEndpoint.AddProfileTool(existingResponse));
+    }
+
     [Theory]
     [InlineData(503, "application/json")]
     [InlineData(200, "text/plain")]
@@ -87,6 +124,37 @@ public sealed class McpPublicEndpointTests
             json.RootElement.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
     }
 
+    private static RelayResponse CreateEventStreamResponse(string body)
+        => new(
+            "response-sse-1",
+            200,
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["Content-Type"] = ["text/event-stream; charset=utf-8"] },
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(body)),
+            null);
+
+    private static int CountProfileToolsInEventStream(string body)
+    {
+        var count = 0;
+        var normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (var frame in normalized.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+        {
+            var data = string.Join("\n", frame.Split('\n')
+                .Where(line => line.StartsWith("data:", StringComparison.Ordinal))
+                .Select(line => line[5..].TrimStart(' ')));
+            if (string.IsNullOrWhiteSpace(data))
+                continue;
+
+            using var json = JsonDocument.Parse(data);
+            if (json.RootElement.TryGetProperty("result", out var result) &&
+                result.TryGetProperty("tools", out var tools) && tools.ValueKind == JsonValueKind.Array)
+            {
+                count += tools.EnumerateArray().Count(tool =>
+                    tool.TryGetProperty("name", out var name) && name.GetString() == "get_profile");
+            }
+        }
+
+        return count;
+    }
     private static RelayResponse CreateToolsListResponse(string body)
         => new(
             "response-1",
