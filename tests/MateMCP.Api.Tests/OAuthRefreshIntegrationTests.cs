@@ -309,6 +309,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var accessTokenPayload = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(tokenSegments[1]));
         var authorizationId = accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(authorizationId));
+        var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(refreshToken));
 
         using var authorizedGrant = await PostInternalAuthorizeAsync(
             ["mcp:read", "mcp:write"], selectedAgentId, _ownerId.ToString(), authorizationId);
@@ -418,6 +420,78 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var revokedGrant = await PostInternalAuthorizeAsync(
             ["mcp:read"], selectedAgentId, _ownerId.ToString(), authorizationId);
         Assert.Equal(HttpStatusCode.Forbidden, revokedGrant.StatusCode);
+
+        using var revokedRefresh = await _client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = clientId,
+            ["refresh_token"] = refreshToken!,
+            ["resource"] = resource
+        }));
+        Assert.Equal(HttpStatusCode.BadRequest, revokedRefresh.StatusCode);
+        using var revokedRefreshJson = JsonDocument.Parse(await revokedRefresh.Content.ReadAsStreamAsync());
+        Assert.Equal("invalid_grant", revokedRefreshJson.RootElement.GetProperty("error").GetString());
+
+        // Reauthorize the same OAuth client and deliberately select a different owned Agent.
+        var reconnectVerifier = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+        var reconnectChallenge = Base64UrlEncoder.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(reconnectVerifier)));
+        var reconnectUrl = QueryHelpers.AddQueryString("/connect/authorize", new Dictionary<string, string?>
+        {
+            ["client_id"] = clientId,
+            ["redirect_uri"] = inspectorRedirectUri,
+            ["response_type"] = "code",
+            ["scope"] = "mcp:read offline_access",
+            ["prompt"] = "consent",
+            ["resource"] = resource,
+            ["code_challenge"] = reconnectChallenge,
+            ["code_challenge_method"] = "S256",
+            ["state"] = "reconnected-with-new-agent"
+        });
+        using var reconnectPage = await _client.GetAsync(reconnectUrl);
+        Assert.Equal(HttpStatusCode.OK, reconnectPage.StatusCode);
+        var reconnectHtml = await reconnectPage.Content.ReadAsStringAsync();
+        var reconnectAntiforgeryMatch = Regex.Match(
+            reconnectHtml,
+            "name=\\\"__RequestVerificationToken\\\" value=\\\"([^\\\"]+)\\\"",
+            RegexOptions.CultureInvariant);
+        Assert.True(reconnectAntiforgeryMatch.Success);
+        var reconnectAntiforgeryToken = WebUtility.HtmlDecode(reconnectAntiforgeryMatch.Groups[1].Value);
+        var reconnectParameters = QueryHelpers.ParseQuery(new Uri(new Uri(ApiUrl), reconnectUrl).Query);
+        var reconnectFields = new List<KeyValuePair<string, string>>();
+        foreach (var pair in reconnectParameters)
+            foreach (var value in pair.Value)
+                reconnectFields.Add(new KeyValuePair<string, string>(pair.Key, value ?? string.Empty));
+        reconnectFields.Add(new("agent_selection", "true"));
+        reconnectFields.Add(new("agent_id", AgentId));
+        reconnectFields.Add(new("__RequestVerificationToken", reconnectAntiforgeryToken));
+        using var reconnectAuthorization = await _client.PostAsync(
+            "/connect/authorize", new FormUrlEncodedContent(reconnectFields));
+        Assert.Equal(HttpStatusCode.Redirect, reconnectAuthorization.StatusCode);
+        var reconnectAuthorizationQuery = QueryHelpers.ParseQuery(reconnectAuthorization.Headers.Location!.Query);
+        Assert.Equal("reconnected-with-new-agent", reconnectAuthorizationQuery["state"].ToString());
+        var reconnectCode = reconnectAuthorizationQuery["code"].ToString();
+        Assert.False(string.IsNullOrWhiteSpace(reconnectCode));
+        using var reconnectToken = await _client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = clientId,
+            ["code"] = reconnectCode,
+            ["redirect_uri"] = inspectorRedirectUri,
+            ["code_verifier"] = reconnectVerifier,
+            ["resource"] = resource
+        }));
+        reconnectToken.EnsureSuccessStatusCode();
+        using var reconnectTokenJson = JsonDocument.Parse(await reconnectToken.Content.ReadAsStreamAsync());
+        var reconnectAccessToken = reconnectTokenJson.RootElement.GetProperty("access_token").GetString()!;
+        AssertAccessTokenBinding(reconnectAccessToken, resource, AgentId);
+        var reconnectAuthorizationId = JsonDocument.Parse(
+            Base64UrlEncoder.DecodeBytes(reconnectAccessToken.Split('.')[1]))
+            .RootElement.GetProperty("oi_au_id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(reconnectAuthorizationId));
+        Assert.NotEqual(authorizationId, reconnectAuthorizationId);
+        using var reconnectedGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read"], AgentId, _ownerId.ToString(), reconnectAuthorizationId);
+        Assert.Equal(HttpStatusCode.OK, reconnectedGrant.StatusCode);
 
         using var secondGrantAfterRevoke = await PostInternalAuthorizeAsync(
             ["mcp:read"], AgentId, _ownerId.ToString(), secondAuthorizationId);
