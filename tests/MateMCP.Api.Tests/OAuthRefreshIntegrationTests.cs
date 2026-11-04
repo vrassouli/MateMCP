@@ -145,6 +145,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         const string foreignAgentId = "agt_foreign_connection";
         const string revokedAgentId = "agt_revoked_connection";
         const string disabledOwnerAgentId = "agt_disabled_owner_connection";
+        const string inspectorRedirectUri = "http://127.0.0.1:6274/oauth/callback";
         var foreignOwnerId = Guid.NewGuid();
         var disabledOwnerId = Guid.NewGuid();
 
@@ -208,7 +209,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var registration = await _client!.PostAsJsonAsync("/connect/register", new
         {
             client_name = "Stable MCP multi-Agent test",
-            redirect_uris = new[] { RedirectUri }
+            redirect_uris = new[] { inspectorRedirectUri }
         });
         registration.EnsureSuccessStatusCode();
         using var registrationJson = JsonDocument.Parse(await registration.Content.ReadAsStreamAsync());
@@ -220,9 +221,10 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var authorizeUrl = QueryHelpers.AddQueryString("/connect/authorize", new Dictionary<string, string?>
         {
             ["client_id"] = clientId,
-            ["redirect_uri"] = RedirectUri,
+            ["redirect_uri"] = inspectorRedirectUri,
             ["response_type"] = "code",
-            ["scope"] = "mcp:read",
+            ["scope"] = "mcp:read mcp:write mcp:shell offline_access",
+            ["prompt"] = "consent",
             ["resource"] = resource,
             ["code_challenge"] = challenge,
             ["code_challenge_method"] = "S256",
@@ -232,7 +234,14 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var selectionPage = await _client!.GetAsync(authorizeUrl);
         Assert.Equal(HttpStatusCode.OK, selectionPage.StatusCode);
         Assert.True(selectionPage.Headers.CacheControl?.NoStore);
+        Assert.True(selectionPage.Headers.TryGetValues("Content-Security-Policy", out var selectionCsp));
+        Assert.Contains(selectionCsp, value => value.Contains("form-action 'self' http://127.0.0.1:6274", StringComparison.Ordinal));
+        Assert.DoesNotContain(selectionCsp, value => value.Contains("http://127.0.0.1:6274/oauth/callback", StringComparison.Ordinal));
         var html = await selectionPage.Content.ReadAsStringAsync();
+        Assert.Contains("portal-page", html, StringComparison.Ordinal);
+        Assert.Contains("/portal/portal.css", html, StringComparison.Ordinal);
+        Assert.Contains("oauth-agent-selection", html, StringComparison.Ordinal);
+        Assert.Contains("oauth-agent-select", html, StringComparison.Ordinal);
         Assert.Contains(selectedAgentId, html, StringComparison.Ordinal);
         Assert.Contains(AgentId, html, StringComparison.Ordinal);
         Assert.DoesNotContain(foreignAgentId, html, StringComparison.Ordinal);
@@ -285,7 +294,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
             ["grant_type"] = "authorization_code",
             ["client_id"] = clientId,
             ["code"] = code,
-            ["redirect_uri"] = RedirectUri,
+            ["redirect_uri"] = inspectorRedirectUri,
             ["code_verifier"] = verifier,
             ["resource"] = resource
         }));
@@ -416,6 +425,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.True(login.Headers.CacheControl?.NoStore);
         Assert.True(login.Headers.TryGetValues("Content-Security-Policy", out var csp));
         Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("form-action 'self'", StringComparison.Ordinal));
+        Assert.DoesNotContain(csp, value => value.Contains("127.0.0.1:6274", StringComparison.Ordinal));
         Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com", StringComparison.Ordinal));
         Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com", StringComparison.Ordinal));
 

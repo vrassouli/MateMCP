@@ -111,6 +111,7 @@ app.UseStaticFiles(new StaticFileOptions
         }
     }
 });
+const string OAuthFormActionSourceItemKey = "MateMCP.OAuthFormActionSource";
 app.Use(async (context, next) =>
 {
     context.Response.OnStarting(() =>
@@ -121,9 +122,13 @@ app.Use(async (context, next) =>
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
+        var formActionSource = context.Items.TryGetValue(OAuthFormActionSourceItemKey, out var configuredFormActionSource) &&
+            configuredFormActionSource is string source
+                ? $"'self' {source}"
+                : "'self'";
         context.Response.Headers["Content-Security-Policy"] =
             "default-src 'self'; img-src 'self' https://*.google-analytics.com https://*.googletagmanager.com; style-src 'self'; script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com; connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; " +
-            "base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+            $"base-uri 'self'; frame-ancestors 'none'; form-action {formActionSource}";
         return Task.CompletedTask;
     });
     await next();
@@ -437,6 +442,8 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext context
                 .ThenBy(x => x.PublicId)
                 .Take(100)
                 .ToListAsync(context.RequestAborted);
+            if (GetCspFormActionSource(request.RedirectUri) is { } formActionSource)
+                context.Items[OAuthFormActionSourceItemKey] = formActionSource;
             return RenderAgentSelectionPage(context, availableAgents);
         }
 
@@ -583,77 +590,115 @@ static IResult RenderAgentSelectionPage(HttpContext context, IReadOnlyList<Agent
     context.Response.Headers.CacheControl = "no-store";
     context.Response.Headers.Pragma = "no-cache";
 
-    var antiforgery = context.RequestServices.GetRequiredService<Microsoft.AspNetCore.Antiforgery.IAntiforgery>();
-    var tokens = antiforgery.GetAndStoreTokens(context);
-    var html = new StringBuilder();
-    html.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Choose a MateMCP Agent</title></head><body>");
-    html.Append("<main><h1>Choose an Agent</h1><p>This connection will be authorized for one Agent only. You can add another connection later for a different Agent.</p>");
+    var hiddenParameters = new StringBuilder();
 
+    void AppendHiddenParameters(string key, IEnumerable<string?> values)
+    {
+        if (string.Equals(key, "agent_id", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "agent_selection", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        foreach (var value in values)
+        {
+            hiddenParameters.Append("<input type=\"hidden\" name=\"")
+                .Append(PortalUi.H(key))
+                .Append("\" value=\"")
+                .Append(PortalUi.H(value ?? string.Empty))
+                .Append("\">");
+        }
+    }
+
+    foreach (var parameter in context.Request.Query)
+        AppendHiddenParameters(parameter.Key, parameter.Value);
+
+    if (context.Request.HasFormContentType)
+    {
+        foreach (var parameter in context.Request.Form)
+        {
+            if (!context.Request.Query.ContainsKey(parameter.Key))
+                AppendHiddenParameters(parameter.Key, parameter.Value);
+        }
+    }
+
+    string content;
     if (agents.Count == 0)
     {
-        html.Append("<p>No active Agents are available in this account. Enroll an Agent first, then retry the connection.</p>");
+        content = PortalUi.EmptyState(
+            "No active Agents are available",
+            "Enroll a device in MateMCP Control before connecting this MCP client.",
+            "<a class=\"button button-primary\" href=\"/device\">Enroll a device <span aria-hidden=\"true\">→</span></a>");
     }
     else
     {
-        html.Append("<form method=\"post\" action=\"/connect/authorize\"><input type=\"hidden\" name=\"agent_selection\" value=\"true\">");
-        html.Append("<input type=\"hidden\" name=\"__RequestVerificationToken\" value=\"")
-            .Append(System.Net.WebUtility.HtmlEncode(tokens.RequestToken ?? string.Empty)).Append("\">");
-        foreach (var parameter in context.Request.Query)
+        var options = string.Join("", agents.Select(agent =>
         {
-            if (string.Equals(parameter.Key, "agent_id", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(parameter.Key, "agent_selection", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(parameter.Key, "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
-                continue;
+            var label = string.IsNullOrWhiteSpace(agent.Platform)
+                ? agent.Name
+                : $"{agent.Name} — {agent.Platform}";
+            return $"<option value=\"{PortalUi.H(agent.PublicId)}\">{PortalUi.H(label)}</option>";
+        }));
 
-            foreach (var value in parameter.Value)
-            {
-                html.Append("<input type=\"hidden\" name=\"")
-                    .Append(System.Net.WebUtility.HtmlEncode(parameter.Key))
-                    .Append("\" value=\"")
-                    .Append(System.Net.WebUtility.HtmlEncode(value ?? string.Empty))
-                    .Append("\">");
-            }
-        }
-
-        if (context.Request.HasFormContentType)
-        {
-            foreach (var parameter in context.Request.Form)
-            {
-                if (context.Request.Query.ContainsKey(parameter.Key) ||
-                    string.Equals(parameter.Key, "agent_id", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(parameter.Key, "agent_selection", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(parameter.Key, "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                foreach (var value in parameter.Value)
-                {
-                    html.Append("<input type=\"hidden\" name=\"")
-                        .Append(System.Net.WebUtility.HtmlEncode(parameter.Key))
-                        .Append("\" value=\"")
-                        .Append(System.Net.WebUtility.HtmlEncode(value ?? string.Empty))
-                        .Append("\">");
-                }
-            }
-        }
-
-        html.Append("<label for=\"agent_id\">Agent</label><select id=\"agent_id\" name=\"agent_id\" required>");
-        foreach (var agent in agents)
-        {
-            var label = string.IsNullOrWhiteSpace(agent.Platform) ? agent.Name : $"{agent.Name} — {agent.Platform}";
-            html.Append("<option value=\"")
-                .Append(System.Net.WebUtility.HtmlEncode(agent.PublicId))
-                .Append("\">")
-                .Append(System.Net.WebUtility.HtmlEncode(label))
-                .Append("</option>");
-        }
-
-        html.Append("</select><button type=\"submit\">Continue</button></form>");
+        content = $"""
+            <form class="oauth-agent-form" method="post" action="/connect/authorize">
+              {hiddenParameters}
+              <input type="hidden" name="agent_selection" value="true">
+              <div class="form-field">
+                <label for="agent_id">Agent for this connection</label>
+                <select id="agent_id" name="agent_id" class="oauth-agent-select" required>
+                  {options}
+                </select>
+                <p class="field-hint">This connection will be bound to the selected Agent. Other MCP connections can choose a different Agent.</p>
+              </div>
+              <div class="oauth-agent-actions">
+                <a class="button button-ghost" href="/dashboard">Cancel</a>
+                <button class="button button-primary" type="submit">
+                  <span>Continue</span><span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </form>
+            """;
     }
 
-    html.Append("</main></body></html>");
-    return Results.Content(html.ToString(), "text/html; charset=utf-8");
-}
+    var body = $"""
+        <div class="oauth-agent-selection">
+          {PortalUi.PageHeading(
+              "MCP CONNECTION",
+              "Choose an Agent",
+              "Select which of your enrolled devices this MCP connection can access.")}
+          <section class="portal-section oauth-agent-card" aria-labelledby="oauth-agent-card-title">
+            <div class="portal-section-header">
+              <div>
+                <h2 id="oauth-agent-card-title">Connection access</h2>
+                <p>One connection, one Agent identity</p>
+              </div>
+              <span class="section-count">{agents.Count} available</span>
+            </div>
+            <div class="oauth-agent-card-body">
+              {content}
+            </div>
+          </section>
+          <p class="oauth-agent-footnote">You can create another connection later and select a different Agent.</p>
+        </div>
+        """;
 
+    return PortalUi.AppPage(
+        context,
+        "Choose an Agent",
+        context.User.Identity?.Name ?? "MateMCP user",
+        body,
+        active: "devices");
+}
+static string? GetCspFormActionSource(string? redirectUri)
+{
+    if (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var uri) ||
+        (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+        string.IsNullOrWhiteSpace(uri.Host) ||
+        !string.IsNullOrEmpty(uri.UserInfo))
+        return null;
+
+    return uri.GetLeftPart(UriPartial.Authority);
+}
 static bool RequiresAntiforgery(PathString path) =>
     path == "/login" ||
     path == "/register" ||

@@ -1531,3 +1531,71 @@ img, svg { display: block; max-width: 100%; }
   .activity-pagination { align-items: stretch; flex-direction: column; padding: 12px 14px; }
   .activity-page-actions { justify-content: flex-end; }
 }
+/* OAuth Agent selection */
+.oauth-agent-selection {
+  width: min(760px, 100%);
+  margin-inline: auto;
+}
+.oauth-agent-selection .page-heading {
+  margin-bottom: 24px;
+}
+.oauth-agent-card-body {
+  padding: 24px;
+}
+.oauth-agent-form {
+  display: grid;
+  gap: 24px;
+  max-width: 620px;
+}
+.oauth-agent-form .form-field {
+  gap: 9px;
+}
+.oauth-agent-form .form-field label {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 720;
+}
+.oauth-agent-select {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  outline: none;
+  background: #081421;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+}
+.oauth-agent-select:hover {
+  border-color: rgba(155, 184, 219, .36);
+}
+.oauth-agent-select:focus-visible {
+  border-color: rgba(83, 215, 255, .7);
+  box-shadow: 0 0 0 3px rgba(83, 215, 255, .12);
+}
+.oauth-agent-select option {
+  background: #0b1728;
+  color: var(--text);
+}
+.oauth-agent-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.oauth-agent-footnote {
+  margin: 16px 0 0;
+  color: var(--muted-2);
+  font-size: 10px;
+  text-align: center;
+}
+@media (max-width: 560px) {
+  .oauth-agent-card-body { padding: 18px; }
+  .oauth-agent-actions { flex-direction: column-reverse; align-items: stretch; }
+  .oauth-agent-actions .button { width: 100%; }
+}
