@@ -173,5 +173,3 @@ public sealed class FileSystemToolsTests : IDisposable
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }
-
-
