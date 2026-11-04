@@ -152,14 +152,16 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         await using (var scope = _factory!.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            var foreignOwner = new UserAccount
+            {
+                Id = foreignOwnerId,
+                Email = "foreign@example.test",
+                NormalizedEmail = "FOREIGN@EXAMPLE.TEST",
+                PasswordHash = "pending"
+            };
+            foreignOwner.PasswordHash = scope.ServiceProvider.GetRequiredService<IPasswordHasher<UserAccount>>().HashPassword(foreignOwner, "foreign-password");
             db.Users.AddRange(
-                new UserAccount
-                {
-                    Id = foreignOwnerId,
-                    Email = "foreign@example.test",
-                    NormalizedEmail = "FOREIGN@EXAMPLE.TEST",
-                    PasswordHash = "not-used"
-                },
+                foreignOwner,
                 new UserAccount
                 {
                     Id = disabledOwnerId,
@@ -303,6 +305,135 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var accessToken = tokenJson.RootElement.GetProperty("access_token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(accessToken));
         AssertAccessTokenBinding(accessToken!, resource, selectedAgentId);
+        var tokenSegments = accessToken!.Split('.');
+        using var accessTokenPayload = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(tokenSegments[1]));
+        var authorizationId = accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(authorizationId));
+
+        using var authorizedGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read", "mcp:write"], selectedAgentId, _ownerId.ToString(), authorizationId);
+        Assert.Equal(HttpStatusCode.OK, authorizedGrant.StatusCode);
+        using var wrongOwnerGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read"], selectedAgentId, foreignOwnerId.ToString(), authorizationId);
+        Assert.Equal(HttpStatusCode.Forbidden, wrongOwnerGrant.StatusCode);
+        using var wrongAgentGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read"], foreignAgentId, _ownerId.ToString(), authorizationId);
+        Assert.Equal(HttpStatusCode.Forbidden, wrongAgentGrant.StatusCode);
+
+        // Create a second client bound to a different Agent, like the independent MacBook Inspector session.
+        using var secondRegistration = await _client!.PostAsJsonAsync("/connect/register", new
+        {
+            client_name = "MacBook MCP Inspector test",
+            redirect_uris = new[] { inspectorRedirectUri }
+        });
+        secondRegistration.EnsureSuccessStatusCode();
+        using var secondRegistrationJson = JsonDocument.Parse(await secondRegistration.Content.ReadAsStreamAsync());
+        var secondClientId = secondRegistrationJson.RootElement.GetProperty("client_id").GetString()!;
+        var secondVerifier = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+        var secondChallenge = Base64UrlEncoder.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(secondVerifier)));
+        var secondAuthorizeUrl = QueryHelpers.AddQueryString("/connect/authorize", new Dictionary<string, string?>
+        {
+            ["client_id"] = secondClientId,
+            ["redirect_uri"] = inspectorRedirectUri,
+            ["response_type"] = "code",
+            ["scope"] = "mcp:read offline_access",
+            ["prompt"] = "consent",
+            ["resource"] = resource,
+            ["code_challenge"] = secondChallenge,
+            ["code_challenge_method"] = "S256",
+            ["state"] = "second-client-state"
+        });
+        using var secondSelectionPage = await _client.GetAsync(secondAuthorizeUrl);
+        Assert.Equal(HttpStatusCode.OK, secondSelectionPage.StatusCode);
+        var secondParameters = QueryHelpers.ParseQuery(new Uri(new Uri(ApiUrl), secondAuthorizeUrl).Query);
+        var secondFields = new List<KeyValuePair<string, string>>();
+        foreach (var pair in secondParameters)
+            foreach (var value in pair.Value)
+                secondFields.Add(new KeyValuePair<string, string>(pair.Key, value ?? string.Empty));
+        secondFields.Add(new("agent_selection", "true"));
+        secondFields.Add(new("agent_id", AgentId));
+        secondFields.Add(new("__RequestVerificationToken", antiforgeryToken));
+        using var secondAuthorization = await _client.PostAsync("/connect/authorize", new FormUrlEncodedContent(secondFields));
+        Assert.Equal(HttpStatusCode.Redirect, secondAuthorization.StatusCode);
+        var secondAuthorizationQuery = QueryHelpers.ParseQuery(secondAuthorization.Headers.Location!.Query);
+        var secondCode = secondAuthorizationQuery["code"].ToString();
+        Assert.False(string.IsNullOrWhiteSpace(secondCode));
+        Assert.Equal("second-client-state", secondAuthorizationQuery["state"].ToString());
+        using var secondToken = await _client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = secondClientId,
+            ["code"] = secondCode,
+            ["redirect_uri"] = inspectorRedirectUri,
+            ["code_verifier"] = secondVerifier,
+            ["resource"] = resource
+        }));
+        secondToken.EnsureSuccessStatusCode();
+        using var secondTokenJson = JsonDocument.Parse(await secondToken.Content.ReadAsStreamAsync());
+        var secondAccessToken = secondTokenJson.RootElement.GetProperty("access_token").GetString()!;
+        AssertAccessTokenBinding(secondAccessToken, resource, AgentId);
+        var secondAuthorizationId = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(secondAccessToken.Split('.')[1]))
+            .RootElement.GetProperty("oi_au_id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(secondAuthorizationId));
+        Assert.NotEqual(authorizationId, secondAuthorizationId);
+        using var secondGrantBeforeRevoke = await PostInternalAuthorizeAsync(
+            ["mcp:read"], AgentId, _ownerId.ToString(), secondAuthorizationId);
+        Assert.Equal(HttpStatusCode.OK, secondGrantBeforeRevoke.StatusCode);
+        using var connectedApps = await _client!.GetAsync("/connected-apps");
+        Assert.Equal(HttpStatusCode.OK, connectedApps.StatusCode);
+        var connectedAppsHtml = await connectedApps.Content.ReadAsStringAsync();
+        Assert.Contains("Connected apps", connectedAppsHtml, StringComparison.Ordinal);
+        Assert.Contains("Stable MCP multi-Agent test", connectedAppsHtml, StringComparison.Ordinal);
+        Assert.Contains("MacBook MCP Inspector test", connectedAppsHtml, StringComparison.Ordinal);
+        Assert.Contains("Second owned Agent", connectedAppsHtml, StringComparison.Ordinal);
+        Assert.Contains("127.0.0.1:6274", connectedAppsHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("access_token", connectedAppsHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("refresh_token", connectedAppsHtml, StringComparison.OrdinalIgnoreCase);
+
+        var revokePath = $"/connected-apps/{Uri.EscapeDataString(authorizationId!)}/revoke";
+        using var revokeConfirmation = await _client.GetAsync(revokePath);
+        Assert.Equal(HttpStatusCode.OK, revokeConfirmation.StatusCode);
+        var revokeConfirmationHtml = await revokeConfirmation.Content.ReadAsStringAsync();
+        Assert.Contains("Disconnect MCP client", revokeConfirmationHtml, StringComparison.Ordinal);
+        Assert.Contains("name=\"__RequestVerificationToken\"", revokeConfirmationHtml, StringComparison.Ordinal);
+
+        using var missingRevokeAntiforgery = await _client.PostAsync(revokePath, new FormUrlEncodedContent([]));
+        Assert.Equal(HttpStatusCode.BadRequest, missingRevokeAntiforgery.StatusCode);
+        using var stillAuthorized = await PostInternalAuthorizeAsync(
+            ["mcp:read"], selectedAgentId, _ownerId.ToString(), authorizationId);
+        Assert.Equal(HttpStatusCode.OK, stillAuthorized.StatusCode);
+
+        using var foreignClient = await CreateLoggedInClientAsync("foreign@example.test", "foreign-password");
+        using var foreignApps = await foreignClient.GetAsync("/connected-apps");
+        Assert.Equal(HttpStatusCode.OK, foreignApps.StatusCode);
+        Assert.DoesNotContain("Stable MCP multi-Agent test", await foreignApps.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        using var foreignConfirmation = await foreignClient.GetAsync(revokePath);
+        Assert.Equal(HttpStatusCode.NotFound, foreignConfirmation.StatusCode);
+        using var foreignRevoke = await PostPortalFormAsync(foreignClient, revokePath, "/connected-apps");
+        Assert.Equal(HttpStatusCode.NotFound, foreignRevoke.StatusCode);
+
+        using var revoke = await PostPortalFormAsync(_client, revokePath, revokePath);
+        Assert.Equal(HttpStatusCode.Redirect, revoke.StatusCode);
+        Assert.Equal("/connected-apps?notice=revoked", revoke.Headers.Location?.OriginalString);
+        using var revokedGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read"], selectedAgentId, _ownerId.ToString(), authorizationId);
+        Assert.Equal(HttpStatusCode.Forbidden, revokedGrant.StatusCode);
+
+        using var secondGrantAfterRevoke = await PostInternalAuthorizeAsync(
+            ["mcp:read"], AgentId, _ownerId.ToString(), secondAuthorizationId);
+        Assert.Equal(HttpStatusCode.OK, secondGrantAfterRevoke.StatusCode);
+
+        // Tokens issued before grant tracking remain compatible and are not bound to a newly-created authorization.
+        using var legacyAuthorization = await PostInternalAuthorizeAsync(
+            ["mcp:read"], selectedAgentId, _ownerId.ToString());
+        Assert.Equal(HttpStatusCode.OK, legacyAuthorization.StatusCode);
+
+        await using (var auditScope = _factory!.Services.CreateAsyncScope())
+        {
+            var auditDb = auditScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            Assert.True(await auditDb.AuditEvents.AnyAsync(x =>
+                x.UserId == _ownerId && x.EventType == "oauth.authorization.revoked"));
+        }
 
         using var profile = await PostInternalProfileAsync(selectedAgentId, _ownerId.ToString());
         Assert.Equal(HttpStatusCode.OK, profile.StatusCode);
@@ -1336,11 +1467,11 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         return await _client!.SendAsync(request);
     }
 
-    private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes)
+    private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes, string agentId = AgentId, string? userId = null, string? authorizationId = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/authorize")
         {
-            Content = JsonContent.Create(new { agentId = AgentId, userId = _ownerId.ToString(), scopes })
+            Content = JsonContent.Create(new { agentId, userId = userId ?? _ownerId.ToString(), scopes, authorizationId })
         };
         request.Headers.Add("X-MateMCP-Internal-Key", InternalKey);
         return await _client!.SendAsync(request);

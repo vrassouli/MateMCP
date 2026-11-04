@@ -173,6 +173,7 @@ app.MapGet("/", (ClaimsPrincipal user) => user.Identity?.IsAuthenticated == true
 DeviceManagementEndpoints.Map(app, relayUrl);
 AgentActivityEndpoints.Map(app, internalKey);
 PortalDeviceEndpoints.Map(app, relayUrl);
+PortalConnectedAppEndpoints.Map(app);
 PortalApprovalEndpoints.Map(app);
 PortalAdminEndpoints.Map(app);
 ExternalAuthEndpoints.Map(app);
@@ -473,6 +474,36 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext context
     identity.SetScopes(scopes);
     identity.SetResources(resources[0], relayUrl);
     identity.SetDestinations(_ => [OpenIddictConstants.Destinations.AccessToken]);
+    if (string.Equals(resources[0], relayUrl + "/mcp", StringComparison.Ordinal))
+    {
+        var applications = context.RequestServices.GetRequiredService<IOpenIddictApplicationManager>();
+        var authorizations = context.RequestServices.GetRequiredService<IOpenIddictAuthorizationManager>();
+        var application = await applications.FindByClientIdAsync(request.ClientId!, context.RequestAborted);
+        if (application is null) return Results.BadRequest(new { error = OpenIddictConstants.Errors.InvalidClient });
+        var applicationId = await applications.GetIdAsync(application, context.RequestAborted);
+        if (string.IsNullOrWhiteSpace(applicationId)) return Results.BadRequest(new { error = OpenIddictConstants.Errors.InvalidClient });
+
+        var redirectHost = Uri.TryCreate(request.RedirectUri, UriKind.Absolute, out var callbackUri)
+            ? callbackUri.Authority
+            : string.Empty;
+        var descriptor = new OpenIddictAuthorizationDescriptor
+        {
+            ApplicationId = applicationId,
+            CreationDate = DateTimeOffset.UtcNow,
+            Principal = new ClaimsPrincipal(identity),
+            Subject = userId.ToString(),
+            Status = OpenIddictConstants.Statuses.Valid,
+            Type = OpenIddictConstants.AuthorizationTypes.Permanent
+        };
+        descriptor.Scopes.UnionWith(scopes);
+        descriptor.Properties["agent_id"] = System.Text.Json.JsonSerializer.SerializeToElement(agent.PublicId);
+        descriptor.Properties["redirect_host"] = System.Text.Json.JsonSerializer.SerializeToElement(redirectHost);
+        var authorization = await authorizations.CreateAsync(descriptor, context.RequestAborted);
+        var authorizationId = await authorizations.GetIdAsync(authorization, context.RequestAborted);
+        if (string.IsNullOrWhiteSpace(authorizationId))
+            throw new InvalidOperationException("OpenIddict did not return an authorization identifier.");
+        identity.SetAuthorizationId(authorizationId);
+    }
     return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
 app.MapPost("/connect/register", async (HttpContext context, IOpenIddictApplicationManager manager) =>
@@ -501,9 +532,31 @@ app.MapPost("/internal/agents/offline", async (HttpContext c, AgentOffline r, Co
     }
     return Results.Ok();
 });
-app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db) =>
+app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db, IOpenIddictAuthorizationManager authorizations) =>
 {
-    if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.Include(x => x.Owner).SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled); if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid(); return MateMCP.Api.OAuthScopePolicy.AreGrantedAgentScopesAllowed(r.Scopes, agent.AllowedScopes) ? Results.Ok() : Results.Forbid();
+    if (!Internal(c, internalKey)) return Results.Unauthorized();
+    if (!string.IsNullOrWhiteSpace(r.AuthorizationId))
+    {
+        var grant = await authorizations.FindByIdAsync(r.AuthorizationId, c.RequestAborted);
+        if (grant is null ||
+            await authorizations.GetStatusAsync(grant, c.RequestAborted) != OpenIddictConstants.Statuses.Valid ||
+            !string.Equals(await authorizations.GetSubjectAsync(grant, c.RequestAborted), r.UserId, StringComparison.Ordinal))
+            return Results.Forbid();
+
+        var properties = await authorizations.GetPropertiesAsync(grant, c.RequestAborted);
+        if (!properties.TryGetValue("agent_id", out var storedAgentId) ||
+            storedAgentId.ValueKind != System.Text.Json.JsonValueKind.String ||
+            !string.Equals(storedAgentId.GetString(), r.AgentId, StringComparison.Ordinal))
+            return Results.Forbid();
+    }
+
+    var agent = await db.Agents.Include(x => x.Owner).SingleOrDefaultAsync(
+        x => x.PublicId == r.AgentId && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled,
+        c.RequestAborted);
+    if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid();
+    return MateMCP.Api.OAuthScopePolicy.AreGrantedAgentScopesAllowed(r.Scopes, agent.AllowedScopes)
+        ? Results.Ok()
+        : Results.Forbid();
 });
 app.MapPost("/internal/agents/profile", async (HttpContext c, AgentProfileRequest r, ControlPlaneDbContext db) =>
 {
@@ -706,6 +759,7 @@ static bool RequiresAntiforgery(PathString path) =>
     path == "/device/approve" ||
     path.StartsWithSegments("/devices") ||
     path.StartsWithSegments("/approvals") ||
+    path.StartsWithSegments("/connected-apps") ||
     path.StartsWithSegments("/admin");
 static bool IsLocal(string s) => !string.IsNullOrEmpty(s) && s[0] == '/' && (s.Length == 1 || s[1] != '/' && s[1] != '\\');
 static string SafeReturnUrl(string? value) => !string.IsNullOrWhiteSpace(value) && IsLocal(value) ? value : "/dashboard";
@@ -715,7 +769,7 @@ sealed record EnrollmentStart(string Name, string Platform, string? RecoverAgent
 sealed record EnrollmentToken(string DeviceCode);
 sealed record AgentAuthentication(string AgentId, string Credential);
 sealed record AgentOffline(string AgentId, DateTimeOffset LastSeenAt);
-sealed record AgentAuthorization(string AgentId, string UserId, string[] Scopes);
+sealed record AgentAuthorization(string AgentId, string UserId, string[] Scopes, string? AuthorizationId = null);
 sealed record AgentProfileRequest(string AgentId, string UserId);
 sealed record NewApproval(string Capability, string Target, string Summary, int ExpiresIn = 120);
 sealed record ClientRegistration([property: System.Text.Json.Serialization.JsonPropertyName("client_name")] string? ClientName, [property: System.Text.Json.Serialization.JsonPropertyName("redirect_uris")] string[]? RedirectUris);

@@ -134,6 +134,7 @@ public static class PortalUi
                   <nav class="portal-nav" id="portal-nav" aria-label="Account navigation" data-portal-nav>
                     {Nav("overview", "/dashboard", "⌂", "Overview")}
                     {Nav("devices", "/devices", "◇", "Devices")}
+                    {Nav("connected-apps", "/connected-apps", "↗", "Connected apps")}
                     {Nav("approvals", "/approvals", "!", "Approvals")}
                     {Nav("account", "/account", "◎", "Account")}
                     {(context.User.IsInRole("admin") ? Nav("admin", "/admin", "A", "Admin") : "")}
