@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.403'
+      - name: Validate OpenAI plugin package
+        run: node scripts/validate-openai-plugin.mjs
       - name: Validate server installer scripts
         run: bash -n deploy/install.sh deploy/api/install.sh deploy/relay/install.sh
       - name: Test API image acquisition fallback

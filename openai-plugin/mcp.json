@@ -3,7 +3,17 @@
   "mcpServers": {
     "matemcp": {
       "type": "streamable-http",
-      "url": "https://relay.matemcp.com/mcp"
+      "url": "https://relay.matemcp.com/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "dcr"
+            }
+          }
+        }
+      }
     }
   }
 }

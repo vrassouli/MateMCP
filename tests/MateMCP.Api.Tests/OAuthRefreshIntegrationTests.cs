@@ -278,6 +278,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var code = authorizationQuery["code"].ToString();
         Assert.False(string.IsNullOrWhiteSpace(code));
         Assert.Equal("stable-mcp-state", authorizationQuery["state"].ToString());
+        Assert.Equal(ApiUrl + "/", authorizationQuery["iss"].ToString());
 
         using var token = await _client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {

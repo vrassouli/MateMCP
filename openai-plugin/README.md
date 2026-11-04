@@ -5,7 +5,7 @@ This folder contains the portable Agent Plugins package for the MateMCP public O
 ## Package contents
 
 - `plugin.json`: listing metadata, onboarding skill reference and exactly five positive / three negative MCP review scenarios.
-- `mcp.json`: remote Streamable HTTP MCP endpoint. OAuth is discovered through the Relay protected-resource metadata, authorization-server metadata and Dynamic Client Registration (DCR) endpoints.
+- `mcp.json`: remote Streamable HTTP MCP endpoint. OAuth is explicitly configured as Dynamic Client Registration (DCR) in the OpenAI MCP server extension. The API authorization-server discovery document supplies the registration endpoint; no client ID, client secret, or other credential is embedded in the package.
 - `skills/get-started/SKILL.md`: instructions for validating the selected Agent, handling multiple connections and staying within local permissions.
 - `assets/`: the existing square MateMCP brand mark, used for the listing logo and composer icon.
 
@@ -24,4 +24,4 @@ The package contains no client secret, API key, Agent credential, test account o
 
 ## Local validation
 
-Validate both JSON files with a JSON parser and validate them against the current Agent Plugins schemas before upload. The package intentionally omits `demo_recording_url` and reviewer credentials until real external review resources are available.
+Run node scripts/validate-openai-plugin.mjs to check package metadata, assets, onboarding references, review cases, and OAuth/DCR configuration. The portable MCP fields follow Agent Plugins 1.0.0; the server-level extensions.com.openai.auth block is the documented OpenAI-specific addition.
