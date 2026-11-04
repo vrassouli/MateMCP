@@ -307,8 +307,9 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         AssertAccessTokenBinding(accessToken!, resource, selectedAgentId);
         var tokenSegments = accessToken!.Split('.');
         using var accessTokenPayload = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(tokenSegments[1]));
-        var authorizationId = accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString();
+        var authorizationId = accessTokenPayload.RootElement.GetProperty("matemcp_authorization_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(authorizationId));
+        Assert.Equal(accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString(), authorizationId);
         var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(refreshToken));
 
@@ -375,7 +376,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var secondAccessToken = secondTokenJson.RootElement.GetProperty("access_token").GetString()!;
         AssertAccessTokenBinding(secondAccessToken, resource, AgentId);
         var secondAuthorizationId = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(secondAccessToken.Split('.')[1]))
-            .RootElement.GetProperty("oi_au_id").GetString();
+            .RootElement.GetProperty("matemcp_authorization_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(secondAuthorizationId));
         Assert.NotEqual(authorizationId, secondAuthorizationId);
         using var secondGrantBeforeRevoke = await PostInternalAuthorizeAsync(
@@ -486,7 +487,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         AssertAccessTokenBinding(reconnectAccessToken, resource, AgentId);
         var reconnectAuthorizationId = JsonDocument.Parse(
             Base64UrlEncoder.DecodeBytes(reconnectAccessToken.Split('.')[1]))
-            .RootElement.GetProperty("oi_au_id").GetString();
+            .RootElement.GetProperty("matemcp_authorization_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(reconnectAuthorizationId));
         Assert.NotEqual(authorizationId, reconnectAuthorizationId);
         using var reconnectedGrant = await PostInternalAuthorizeAsync(
@@ -577,6 +578,10 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(refreshToken));
         AssertScopes(tokenJson.RootElement, required: ["mcp:read", "offline_access"], forbidden: ["mcp:shell"]);
         AssertAccessTokenBinding(accessToken!, resource);
+        var legacyTokenPayload = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(accessToken!.Split('.')[1]));
+        Assert.False(legacyTokenPayload.RootElement.TryGetProperty("matemcp_authorization_id", out _),
+            "Legacy per-Agent tokens must not be tagged as MateMCP-managed stable-endpoint grants.");
+        legacyTokenPayload.Dispose();
 
         using var refresh = await client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {

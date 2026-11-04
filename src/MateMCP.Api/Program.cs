@@ -503,6 +503,10 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext context
         if (string.IsNullOrWhiteSpace(authorizationId))
             throw new InvalidOperationException("OpenIddict did not return an authorization identifier.");
         identity.SetAuthorizationId(authorizationId);
+        // Distinguish MateMCP-managed stable-endpoint grants from OpenIddict's
+        // generic authorization IDs, which may also exist on legacy per-Agent tokens.
+        identity.AddClaim("matemcp_authorization_id", authorizationId);
+        identity.SetDestinations(_ => [OpenIddictConstants.Destinations.AccessToken]);
     }
     return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
