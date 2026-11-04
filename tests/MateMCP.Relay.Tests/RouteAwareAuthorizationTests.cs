@@ -10,7 +10,7 @@ public sealed class RouteAwareAuthorizationTests
     public void LegacyPerAgentRoute_DoesNotForwardGenericOpenIddictAuthorizationId()
     {
         var identity = new ClaimsIdentity("Bearer");
-        identity.SetAuthorizationId("generic-openiddict-authorization");
+        identity.AddClaim(new Claim("oi_au_id", "generic-openiddict-authorization"));
         identity.AddClaim(new Claim("matemcp_authorization_id", "explicit-matemcp-grant"));
         var principal = new ClaimsPrincipal(identity);
 
@@ -21,7 +21,7 @@ public sealed class RouteAwareAuthorizationTests
     public void StableEndpoint_PreMarkerToken_UsesGenericOpenIddictAuthorizationId()
     {
         var identity = new ClaimsIdentity("Bearer");
-        identity.SetAuthorizationId("pre-marker-stable-grant");
+        identity.AddClaim(new Claim("oi_au_id", "pre-marker-stable-grant"));
         var principal = new ClaimsPrincipal(identity);
 
         Assert.Equal(
@@ -33,7 +33,7 @@ public sealed class RouteAwareAuthorizationTests
     public void StableEndpoint_CurrentToken_PrefersExplicitMateMcpGrantClaim()
     {
         var identity = new ClaimsIdentity("Bearer");
-        identity.SetAuthorizationId("generic-openiddict-authorization");
+        identity.AddClaim(new Claim("oi_au_id", "generic-openiddict-authorization"));
         identity.AddClaim(new Claim("matemcp_authorization_id", "explicit-matemcp-grant"));
         var principal = new ClaimsPrincipal(identity);
 
