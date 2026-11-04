@@ -261,7 +261,7 @@ app.MapMethods("/mcp/{deviceId?}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PAT
     if (principal is null || string.IsNullOrWhiteSpace(resolvedDeviceId) ||
         (!stableEndpoint && tokenAgentId != deviceId) ||
         !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
-        !await AuthorizeAsync(clients, options, resolvedDeviceId, principal, GetStableEndpointGrantAuthorizationId(principal, stableEndpoint), context.RequestAborted))
+        !await AuthorizeAsync(clients, options, resolvedDeviceId, principal, RouteAwareAuthorization.GetGrantAuthorizationId(principal, stableEndpoint), context.RequestAborted))
     {
         var reason = principal is null
             ? "missing_or_invalid_access_token"
@@ -570,17 +570,6 @@ static async Task RunAgentHeartbeatAsync(IHttpClientFactory factory, RelayOption
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
     }
-}
-
-static string? GetStableEndpointGrantAuthorizationId(ClaimsPrincipal principal, bool stableEndpoint)
-{
-    if (!stableEndpoint) return null;
-
-    // New stable-endpoint tokens carry the explicit MateMCP marker. Tokens
-    // issued between grant management and the marker rollout only carry the
-    // standard OpenIddict authorization ID, which remains a valid grant ID
-    // for this route. Legacy per-Agent routes must never forward it.
-    return principal.FindFirstValue("matemcp_authorization_id") ?? principal.GetAuthorizationId();
 }
 
 static async Task<bool> AuthorizeAsync(
