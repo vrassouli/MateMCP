@@ -431,6 +431,9 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var revokedGrant = await PostInternalAuthorizeAsync(
             ["mcp:read"], selectedAgentId, _ownerId.ToString(), authorizationId);
         Assert.Equal(HttpStatusCode.Forbidden, revokedGrant.StatusCode);
+        using var revokedPreMarkerGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read"], selectedAgentId, _ownerId.ToString(), preMarkerStableAuthorizationId);
+        Assert.Equal(HttpStatusCode.Forbidden, revokedPreMarkerGrant.StatusCode);
 
         using var revokedRefresh = await _client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
