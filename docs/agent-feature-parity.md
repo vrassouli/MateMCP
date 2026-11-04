@@ -22,6 +22,7 @@ MateMCP ships one Agent application for macOS and Windows. Supported Agent capab
 | Headless opt-in Desktop auto-update | Agent-owned polling while Companion is closed; SHA-256 verification; active-work deferral; preserves a running Companion across update handoff without enabling autostart | Agent-owned polling while Companion is closed; SHA-256 verification; active-work deferral; preserves a running Companion across update handoff without enabling autostart | Agent tests plus cross-platform Companion package jobs |
 | Start after install | Per-user LaunchAgent | User process | Delivery parity regression test |
 | Start on sign-in | Per-user LaunchAgent | Per-user startup shortcut | Delivery parity regression test |
+| Project-scoped native image content delivery (filesystem_read_image) | Shared Agent implementation | Shared Agent implementation | ProjectImageToolsTests plus macOS/Windows Agent build/package CI |
 
 ## Interactive terminal design rule
 
