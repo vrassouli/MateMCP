@@ -7,6 +7,9 @@ MateMCP is a macOS-first local Agent connected through a Relay and OAuth Control
 - Project roots are configured by the user and enforced by MateMCP's own path resolver.
 - MCP Roots are not treated as an authorization mechanism.
 - Every remote `/mcp/{agentId}` URL requires an OAuth token issued to the Agent owner for that exact Agent resource.
+- The public `/mcp` endpoint is additive: OAuth selects one active Agent owned by the authenticated account, then binds the token to that Agent and the stable `/mcp` audience. Relay routing uses only the token's `agent_id` claim; request arguments cannot choose an Agent.
+- Legacy `/mcp/{agentId}` URLs remain supported with their original per-Agent audience and token/path equality checks.
+- The public connection profile is read-only and identifies the token-bound Agent; profile lookup is owner-scoped and does not expose Agent credentials or secret material.
 - Public deployments must use HTTPS; insecure HTTP exists only as an explicit development override.
 - File operations are project-relative and canonicalized before access.
 - Shell execution uses a configured project as its working directory.

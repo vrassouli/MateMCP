@@ -8,7 +8,8 @@ public static class McpRequestDiagnostics
     {
         if (path.StartsWith("/.well-known/oauth-protected-resource", StringComparison.OrdinalIgnoreCase))
             return "protected-resource-discovery";
-        if (path.StartsWith("/mcp/", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(path, "/mcp", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/mcp/", StringComparison.OrdinalIgnoreCase))
             return "mcp-transport";
         return "other";
     }

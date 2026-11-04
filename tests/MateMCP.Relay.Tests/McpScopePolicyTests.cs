@@ -49,6 +49,7 @@ public sealed class McpScopePolicyTests
     [InlineData("filesystem_read_image")]
     [InlineData("filesystem_read")]
     [InlineData("secret_list")]
+    [InlineData("get_profile")]
     [InlineData("agent_file_upload_status")]
     [InlineData("project_list")]
     [InlineData("project_get")]

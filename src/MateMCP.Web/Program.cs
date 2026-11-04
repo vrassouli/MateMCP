@@ -46,6 +46,12 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.MapGet("/health", () => Results.Ok(new { service = "MateMCP.Web", status = "ok" }));
+app.MapGet("/privacy", (IWebHostEnvironment environment) =>
+    Results.File(Path.Combine(environment.WebRootPath, "privacy.html"), "text/html; charset=utf-8"));
+app.MapGet("/terms", (IWebHostEnvironment environment) =>
+    Results.File(Path.Combine(environment.WebRootPath, "terms.html"), "text/html; charset=utf-8"));
+app.MapGet("/support", (IWebHostEnvironment environment) =>
+    Results.File(Path.Combine(environment.WebRootPath, "support.html"), "text/html; charset=utf-8"));
 app.MapFallbackToFile("index.html");
 
 app.Run();

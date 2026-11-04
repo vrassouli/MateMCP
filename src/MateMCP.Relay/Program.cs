@@ -99,6 +99,15 @@ app.MapGet("/.well-known/oauth-protected-resource", () => Results.Ok(new
     resource_documentation = "https://github.com/vrassouli/MateMCP"
 }));
 
+app.MapGet("/.well-known/oauth-protected-resource/mcp", () => Results.Ok(new
+{
+    resource = $"{publicBaseUrl}/mcp",
+    authorization_servers = new[] { authorizationServerIssuer },
+    scopes_supported = options.OAuthScopes,
+    bearer_methods_supported = new[] { "header" },
+    resource_documentation = "https://github.com/vrassouli/MateMCP"
+}));
+
 app.MapGet("/.well-known/oauth-protected-resource/mcp/{deviceId}", (string deviceId) => Results.Ok(new
 {
     resource = $"{publicBaseUrl}/mcp/{deviceId}",
@@ -236,7 +245,7 @@ app.Map("/relay/agent/{deviceId}", async (HttpContext context, string deviceId, 
     }
 });
 
-app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"], async (HttpContext context, string deviceId, AgentRegistry registry, IHttpClientFactory clients, AgentActivityReporter activity) =>
+app.MapMethods("/mcp/{deviceId?}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"], async (HttpContext context, string? deviceId, AgentRegistry registry, IHttpClientFactory clients, AgentActivityReporter activity) =>
 {
     if (HttpMethods.IsOptions(context.Request.Method))
     {
@@ -245,33 +254,80 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
     }
 
     var principal = await AuthenticateOAuthAsync(context);
-    var requiredResource = $"{publicBaseUrl}/mcp/{deviceId}";
-    if (principal is null || principal.FindFirstValue("agent_id") != deviceId || !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
-        !await AuthorizeAsync(clients, options, deviceId, principal, context.RequestAborted))
+    var stableEndpoint = string.IsNullOrEmpty(deviceId);
+    var tokenAgentId = principal?.FindFirstValue("agent_id");
+    var resolvedDeviceId = stableEndpoint ? tokenAgentId : deviceId;
+    var requiredResource = stableEndpoint ? $"{publicBaseUrl}/mcp" : $"{publicBaseUrl}/mcp/{deviceId}";
+    if (principal is null || string.IsNullOrWhiteSpace(resolvedDeviceId) ||
+        (!stableEndpoint && tokenAgentId != deviceId) ||
+        !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
+        !await AuthorizeAsync(clients, options, resolvedDeviceId, principal, context.RequestAborted))
     {
         var reason = principal is null
             ? "missing_or_invalid_access_token"
-            : principal.FindFirstValue("agent_id") != deviceId
-                ? "token_agent_mismatch"
-                : !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal)
-                    ? "token_resource_mismatch"
-                    : "control_plane_authorization_failed";
+            : string.IsNullOrWhiteSpace(resolvedDeviceId)
+                ? "token_agent_missing"
+                : (!stableEndpoint && tokenAgentId != deviceId)
+                    ? "token_agent_mismatch"
+                    : !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal)
+                        ? "token_resource_mismatch"
+                        : "control_plane_authorization_failed";
         logger.LogWarning(
-            "Remote MCP authentication failed {RequestId}: {Method} {Path}; reason={Reason}; device={DeviceId}; relayInstance={RelayInstanceId}",
+            "Remote MCP authentication failed {RequestId}: {Method} {Path}; reason={Reason}; device={DeviceId}; stableEndpoint={StableEndpoint}; relayInstance={RelayInstanceId}",
             context.TraceIdentifier,
             context.Request.Method,
             context.Request.Path,
             reason,
-            deviceId,
+            resolvedDeviceId ?? "none",
+            stableEndpoint,
             relayInstance.InstanceId);
-        context.Response.Headers.WWWAuthenticate = OAuthDiscovery.BearerChallenge(publicBaseUrl, deviceId, options.OAuthScopes);
+        context.Response.Headers.WWWAuthenticate = stableEndpoint
+            ? OAuthDiscovery.BearerChallenge(publicBaseUrl, options.OAuthScopes)
+            : OAuthDiscovery.BearerChallenge(publicBaseUrl, deviceId!, options.OAuthScopes);
         return Results.Unauthorized();
     }
 
-    if (!registry.TryGet(deviceId, out var agent))
+    var targetAgentId = resolvedDeviceId!;
+    if (context.Request.ContentLength > options.MaxBodyBytes) return Results.StatusCode(413);
+
+    using var requestStream = new MemoryStream();
+    await context.Request.Body.CopyToAsync(requestStream, context.RequestAborted);
+    if (requestStream.Length > options.MaxBodyBytes) return Results.StatusCode(413);
+    var requestBody = requestStream.ToArray();
+    if (!ScopeAllowsPayload(principal!, requestBody)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+    if (stableEndpoint && McpPublicEndpoint.TryGetProfileCallId(requestBody, out var profileCallId))
+    {
+        var userId = principal.FindFirstValue(OpenIddictConstants.Claims.Subject);
+        if (string.IsNullOrWhiteSpace(userId)) return Results.Unauthorized();
+
+        var profileClient = clients.CreateClient("control-plane");
+        using var profileRequest = new HttpRequestMessage(HttpMethod.Post, "internal/agents/profile")
+        {
+            Content = JsonContent.Create(new { agentId = targetAgentId, userId })
+        };
+        profileRequest.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
+        using var profileResponse = await profileClient.SendAsync(profileRequest, context.RequestAborted);
+        if (!profileResponse.IsSuccessStatusCode)
+        {
+            logger.LogWarning(
+                "Remote MCP profile lookup failed {RequestId}: device={DeviceId}; status={StatusCode}; relayInstance={RelayInstanceId}",
+                context.TraceIdentifier, targetAgentId, (int)profileResponse.StatusCode, relayInstance.InstanceId);
+            return Results.StatusCode(profileResponse.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound
+                ? StatusCodes.Status403Forbidden
+                : StatusCodes.Status503ServiceUnavailable);
+        }
+
+        using var profileJson = await JsonDocument.ParseAsync(await profileResponse.Content.ReadAsStreamAsync(context.RequestAborted), cancellationToken: context.RequestAborted);
+        context.Response.ContentType = "application/json";
+        await context.Response.Body.WriteAsync(McpPublicEndpoint.CreateProfileCallResponse(profileCallId, profileJson.RootElement), context.RequestAborted);
+        return Results.Empty;
+    }
+
+    if (!registry.TryGet(targetAgentId, out var agent))
     {
         var now = DateTimeOffset.UtcNow;
-        var snapshot = registry.Snapshot(deviceId);
+        var snapshot = registry.Snapshot(targetAgentId);
         if (snapshot.IsReconnectGraceActive(now))
         {
             var remaining = snapshot.ReconnectUntil!.Value - now;
@@ -280,13 +336,13 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
             logger.LogWarning(
                 "Remote MCP agent_reconnecting {RequestId}: device={DeviceId}; relayInstance={RelayInstanceId}; registryCount={RegistryCount}; lastDisconnectedAt={LastDisconnectedAt:O}; reconnectUntil={ReconnectUntil:O}; retryAfterSeconds={RetryAfterSeconds}",
                 context.TraceIdentifier,
-                deviceId,
+                targetAgentId,
                 relayInstance.InstanceId,
                 snapshot.RegistryCount,
                 snapshot.LastDisconnectedAt,
                 snapshot.ReconnectUntil,
                 retryAfterSeconds);
-            activity.Record(deviceId, "request", "warning", "MCP request", "Agent is reconnecting.", requestId: context.TraceIdentifier);
+            activity.Record(targetAgentId, "request", "warning", "MCP request", "Agent is reconnecting.", requestId: context.TraceIdentifier);
             return Results.Json(new
             {
                 error = "agent_reconnecting",
@@ -298,13 +354,13 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
         logger.LogWarning(
             "Remote MCP device_offline {RequestId}: device={DeviceId}; relayInstance={RelayInstanceId}; registryCount={RegistryCount}; presenceState={PresenceState}; currentConnection={CurrentConnectionId}; currentSocketState={CurrentSocketState}",
             context.TraceIdentifier,
-            deviceId,
+            targetAgentId,
             relayInstance.InstanceId,
             snapshot.RegistryCount,
             snapshot.State?.ToString() ?? "none",
             snapshot.CurrentConnectionId ?? "none",
             snapshot.SocketState?.ToString() ?? "none");
-        activity.Record(deviceId, "request", "failure", "MCP request", "Agent is offline.", requestId: context.TraceIdentifier);
+        activity.Record(targetAgentId, "request", "failure", "MCP request", "Agent is offline.", requestId: context.TraceIdentifier);
         return Results.NotFound(new { error = "device_offline" });
     }
 
@@ -324,13 +380,6 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
     }
     context.Response.Headers["X-MateMCP-Operation-Id"] = operationId;
 
-    if (context.Request.ContentLength > options.MaxBodyBytes) return Results.StatusCode(413);
-
-    using var ms = new MemoryStream();
-    await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
-    if (ms.Length > options.MaxBodyBytes) return Results.StatusCode(413);
-    var requestBody = ms.ToArray();
-    if (!ScopeAllowsPayload(principal, requestBody)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var activityOperation = McpActivityOperation.Describe(context.Request.Method, requestBody);
     var activityStarted = Stopwatch.GetTimestamp();
 
@@ -359,19 +408,21 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
             options,
             logger,
             context.TraceIdentifier,
-            deviceId,
+            targetAgentId,
             relayInstance.InstanceId,
             context.RequestAborted);
+        if (stableEndpoint && McpPublicEndpoint.IsToolsListRequest(requestBody))
+            response = McpPublicEndpoint.AddProfileTool(response);
     }
     catch (TimeoutException)
     {
         logger.LogWarning(
             "Remote MCP upstream timeout {RequestId}: device={DeviceId}; operation={OperationId}; relayInstance={RelayInstanceId}",
             context.TraceIdentifier,
-            deviceId,
+            targetAgentId,
             operationId,
             relayInstance.InstanceId);
-        activity.Record(deviceId, "request", "failure", activityOperation, "Agent request timed out.", Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
+        activity.Record(targetAgentId, "request", "failure", activityOperation, "Agent request timed out.", Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
         return Results.StatusCode(504);
     }
     catch (AgentTransportLostException ex)
@@ -379,17 +430,17 @@ app.MapMethods("/mcp/{deviceId}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PATC
         logger.LogWarning(ex,
             "Remote MCP Agent recovery exhausted {RequestId}: device={DeviceId}; operation={OperationId}; relayInstance={RelayInstanceId}",
             context.TraceIdentifier,
-            deviceId,
+            targetAgentId,
             operationId,
             relayInstance.InstanceId);
-        activity.Record(deviceId, "request", "failure", activityOperation, "Agent connection was lost before the request completed.", Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
+        activity.Record(targetAgentId, "request", "failure", activityOperation, "Agent connection was lost before the request completed.", Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier);
         return Results.Json(new { error = "agent_connection_lost", operationId }, statusCode: StatusCodes.Status502BadGateway);
     }
 
     var activityProject = response.Headers.TryGetValue("X-MateMCP-Activity-Project", out var activityProjectValues)
         ? activityProjectValues.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))
         : null;
-    activity.Record(deviceId, "request", response.StatusCode >= 400 ? "failure" : "success", activityOperation,
+    activity.Record(targetAgentId, "request", response.StatusCode >= 400 ? "failure" : "success", activityOperation,
         response.StatusCode >= 400 ? $"Agent returned HTTP {response.StatusCode}." : "Completed successfully.",
         Stopwatch.GetElapsedTime(activityStarted).TotalMilliseconds, context.TraceIdentifier, activityProject);
 

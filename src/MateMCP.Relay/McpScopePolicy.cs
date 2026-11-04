@@ -13,6 +13,7 @@ public static class McpScopePolicy
         "filesystem_stat" or
         "filesystem_read_image" or
         "filesystem_read" or
+        "get_profile" or
         "secret_list" or
         "agent_file_upload_status" or
         "project_list" or
