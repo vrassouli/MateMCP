@@ -506,6 +506,7 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext context
         // Distinguish MateMCP-managed stable-endpoint grants from OpenIddict's
         // generic authorization IDs, which may also exist on legacy per-Agent tokens.
         identity.AddClaim("matemcp_authorization_id", authorizationId);
+        identity.SetDestinations(_ => [OpenIddictConstants.Destinations.AccessToken]);
     }
     return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
