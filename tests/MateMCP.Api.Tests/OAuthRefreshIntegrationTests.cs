@@ -310,6 +310,12 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var authorizationId = accessTokenPayload.RootElement.GetProperty("matemcp_authorization_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(authorizationId));
         Assert.Equal(accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString(), authorizationId);
+
+        // A pre-#360 stable-endpoint token has OpenIddict's authorization ID
+        // but lacks the explicit MateMCP marker. Its underlying grant must
+        // nevertheless remain revocable.
+        var preMarkerStableAuthorizationId = accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(preMarkerStableAuthorizationId));
         var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(refreshToken));
 
