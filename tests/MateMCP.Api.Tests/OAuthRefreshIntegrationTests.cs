@@ -311,12 +311,15 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(authorizationId));
         Assert.Equal(accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString(), authorizationId);
 
-        // Simulate a token issued after #359 but before #360: the generic
-        // OpenIddict authorization ID exists, while the dedicated MateMCP
-        // marker claim is absent. Relay's stable route must use this ID.
-        var preMarkerStableAuthorizationId = accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(preMarkerStableAuthorizationId));
-        Assert.Equal(preMarkerStableAuthorizationId, authorizationId);
+        // Model a token from the #359-to-#360 window: it has the OpenIddict
+        // authorization ID but no MateMCP-specific marker claim.
+        var preMarkerTokenIdentity = new System.Security.Claims.ClaimsIdentity("Bearer");
+        preMarkerTokenIdentity.AddClaim(new System.Security.Claims.Claim(
+            OpenIddict.Abstractions.OpenIddictConstants.Claims.Private.AuthorizationId,
+            accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString()!));
+        var preMarkerStableAuthorizationId = MateMCP.Relay.RouteAwareAuthorization
+            .GetGrantAuthorizationId(new System.Security.Claims.ClaimsPrincipal(preMarkerTokenIdentity), stableEndpoint: true);
+        Assert.Equal(accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString(), preMarkerStableAuthorizationId);
         var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(refreshToken));
 
