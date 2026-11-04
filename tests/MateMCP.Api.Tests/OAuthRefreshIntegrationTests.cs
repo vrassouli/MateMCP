@@ -234,6 +234,9 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var selectionPage = await _client!.GetAsync(authorizeUrl);
         Assert.Equal(HttpStatusCode.OK, selectionPage.StatusCode);
         Assert.True(selectionPage.Headers.CacheControl?.NoStore);
+        Assert.True(selectionPage.Headers.TryGetValues("Content-Security-Policy", out var selectionCsp));
+        Assert.Contains(selectionCsp, value => value.Contains("form-action 'self' http://127.0.0.1:6274", StringComparison.Ordinal));
+        Assert.DoesNotContain(selectionCsp, value => value.Contains("http://127.0.0.1:6274/oauth/callback", StringComparison.Ordinal));
         var html = await selectionPage.Content.ReadAsStringAsync();
         Assert.Contains("portal-page", html, StringComparison.Ordinal);
         Assert.Contains("/portal/portal.css", html, StringComparison.Ordinal);
@@ -422,6 +425,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.True(login.Headers.CacheControl?.NoStore);
         Assert.True(login.Headers.TryGetValues("Content-Security-Policy", out var csp));
         Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
+        Assert.Contains(csp, value => value.Contains("form-action 'self'", StringComparison.Ordinal));
+        Assert.DoesNotContain(csp, value => value.Contains("127.0.0.1:6274", StringComparison.Ordinal));
         Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com", StringComparison.Ordinal));
         Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com", StringComparison.Ordinal));
 

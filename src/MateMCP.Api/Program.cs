@@ -111,6 +111,7 @@ app.UseStaticFiles(new StaticFileOptions
         }
     }
 });
+const string OAuthFormActionSourceItemKey = "MateMCP.OAuthFormActionSource";
 app.Use(async (context, next) =>
 {
     context.Response.OnStarting(() =>
@@ -121,9 +122,13 @@ app.Use(async (context, next) =>
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
+        var formActionSource = context.Items.TryGetValue(OAuthFormActionSourceItemKey, out var configuredFormActionSource) &&
+            configuredFormActionSource is string source
+                ? $"'self' {source}"
+                : "'self'";
         context.Response.Headers["Content-Security-Policy"] =
             "default-src 'self'; img-src 'self' https://*.google-analytics.com https://*.googletagmanager.com; style-src 'self'; script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com; connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; " +
-            "base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+            $"base-uri 'self'; frame-ancestors 'none'; form-action {formActionSource}";
         return Task.CompletedTask;
     });
     await next();
@@ -437,6 +442,8 @@ app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext context
                 .ThenBy(x => x.PublicId)
                 .Take(100)
                 .ToListAsync(context.RequestAborted);
+            if (GetCspFormActionSource(request.RedirectUri) is { } formActionSource)
+                context.Items[OAuthFormActionSourceItemKey] = formActionSource;
             return RenderAgentSelectionPage(context, availableAgents);
         }
 
@@ -681,6 +688,16 @@ static IResult RenderAgentSelectionPage(HttpContext context, IReadOnlyList<Agent
         context.User.Identity?.Name ?? "MateMCP user",
         body,
         active: "devices");
+}
+static string? GetCspFormActionSource(string? redirectUri)
+{
+    if (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var uri) ||
+        (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+        string.IsNullOrWhiteSpace(uri.Host) ||
+        !string.IsNullOrEmpty(uri.UserInfo))
+        return null;
+
+    return uri.GetLeftPart(UriPartial.Authority);
 }
 static bool RequiresAntiforgery(PathString path) =>
     path == "/login" ||
