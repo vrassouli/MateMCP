@@ -45,11 +45,8 @@ public sealed class McpScopePolicyTests
     [Theory]
     [InlineData("filesystem_projects")]
     [InlineData("filesystem_list")]
-<<<<<<< HEAD
     [InlineData("filesystem_stat")]
-=======
     [InlineData("filesystem_read_image")]
->>>>>>> 0855ef2 (fix: classify project image reads as read scope)
     [InlineData("filesystem_read")]
     [InlineData("secret_list")]
     [InlineData("agent_file_upload_status")]
