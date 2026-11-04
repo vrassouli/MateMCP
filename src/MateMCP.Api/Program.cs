@@ -584,20 +584,33 @@ static IResult RenderAgentSelectionPage(HttpContext context, IReadOnlyList<Agent
     context.Response.Headers.Pragma = "no-cache";
 
     var hiddenParameters = new StringBuilder();
-    foreach (var parameter in context.Request.Query)
-    {
-        if (string.Equals(parameter.Key, "agent_id", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(parameter.Key, "agent_selection", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(parameter.Key, "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
-            continue;
 
-        foreach (var value in parameter.Value)
+    void AppendHiddenParameters(string key, IEnumerable<string?> values)
+    {
+        if (string.Equals(key, "agent_id", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "agent_selection", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        foreach (var value in values)
         {
             hiddenParameters.Append("<input type=\"hidden\" name=\"")
-                .Append(PortalUi.H(parameter.Key))
+                .Append(PortalUi.H(key))
                 .Append("\" value=\"")
                 .Append(PortalUi.H(value ?? string.Empty))
                 .Append("\">");
+        }
+    }
+
+    foreach (var parameter in context.Request.Query)
+        AppendHiddenParameters(parameter.Key, parameter.Value);
+
+    if (context.Request.HasFormContentType)
+    {
+        foreach (var parameter in context.Request.Form)
+        {
+            if (!context.Request.Query.ContainsKey(parameter.Key))
+                AppendHiddenParameters(parameter.Key, parameter.Value);
         }
     }
 
