@@ -577,7 +577,7 @@ static async Task<bool> AuthorizeAsync(IHttpClientFactory factory, RelayOptions 
     var userId = principal.FindFirstValue(OpenIddict.Abstractions.OpenIddictConstants.Claims.Subject);
     if (string.IsNullOrWhiteSpace(userId)) return false;
     var client = factory.CreateClient("control-plane");
-    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authorize") { Content = JsonContent.Create(new { agentId, userId, scopes = principal.GetScopes(), authorizationId = principal.GetAuthorizationId() }) };
+    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authorize") { Content = JsonContent.Create(new { agentId, userId, scopes = principal.GetScopes(), authorizationId = principal.FindFirstValue("matemcp_authorization_id") }) };
     request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
     using var response = await client.SendAsync(request, ct);
     return response.IsSuccessStatusCode;
