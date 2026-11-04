@@ -139,6 +139,175 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StableMcpAuthorization_SelectsAnOwnedActiveAgent_AndBindsTheConnectionToIt()
+    {
+        const string selectedAgentId = "agt_second_connection";
+        const string foreignAgentId = "agt_foreign_connection";
+        const string revokedAgentId = "agt_revoked_connection";
+        const string disabledOwnerAgentId = "agt_disabled_owner_connection";
+        var foreignOwnerId = Guid.NewGuid();
+        var disabledOwnerId = Guid.NewGuid();
+
+        await using (var scope = _factory!.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+            db.Users.AddRange(
+                new UserAccount
+                {
+                    Id = foreignOwnerId,
+                    Email = "foreign@example.test",
+                    NormalizedEmail = "FOREIGN@EXAMPLE.TEST",
+                    PasswordHash = "not-used"
+                },
+                new UserAccount
+                {
+                    Id = disabledOwnerId,
+                    Email = "disabled@example.test",
+                    NormalizedEmail = "DISABLED@EXAMPLE.TEST",
+                    PasswordHash = "not-used",
+                    IsDisabled = true
+                });
+            db.Agents.AddRange(
+                new AgentDevice
+                {
+                    PublicId = selectedAgentId,
+                    OwnerId = _ownerId,
+                    Name = "Second owned Agent",
+                    Platform = "Windows",
+                    CredentialHash = "second-hash",
+                    AllowedScopes = "mcp:read mcp:write"
+                },
+                new AgentDevice
+                {
+                    PublicId = foreignAgentId,
+                    OwnerId = foreignOwnerId,
+                    Name = "Foreign Agent",
+                    Platform = "Linux",
+                    CredentialHash = "foreign-hash"
+                },
+                new AgentDevice
+                {
+                    PublicId = revokedAgentId,
+                    OwnerId = _ownerId,
+                    Name = "Revoked Agent",
+                    Platform = "macOS",
+                    CredentialHash = "revoked-hash",
+                    IsRevoked = true
+                },
+                new AgentDevice
+                {
+                    PublicId = disabledOwnerAgentId,
+                    OwnerId = disabledOwnerId,
+                    Name = "Disabled Owner Agent",
+                    Platform = "Windows",
+                    CredentialHash = "disabled-owner-hash"
+                });
+            await db.SaveChangesAsync();
+        }
+
+        using var registration = await _client!.PostAsJsonAsync("/connect/register", new
+        {
+            client_name = "Stable MCP multi-Agent test",
+            redirect_uris = new[] { RedirectUri }
+        });
+        registration.EnsureSuccessStatusCode();
+        using var registrationJson = JsonDocument.Parse(await registration.Content.ReadAsStreamAsync());
+        var clientId = registrationJson.RootElement.GetProperty("client_id").GetString()!;
+
+        var verifier = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+        var challenge = Base64UrlEncoder.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+        var resource = $"{RelayUrl}/mcp";
+        var authorizeUrl = QueryHelpers.AddQueryString("/connect/authorize", new Dictionary<string, string?>
+        {
+            ["client_id"] = clientId,
+            ["redirect_uri"] = RedirectUri,
+            ["response_type"] = "code",
+            ["scope"] = "mcp:read",
+            ["resource"] = resource,
+            ["code_challenge"] = challenge,
+            ["code_challenge_method"] = "S256",
+            ["state"] = "stable-mcp-state"
+        });
+
+        using var selectionPage = await _client!.GetAsync(authorizeUrl);
+        Assert.Equal(HttpStatusCode.OK, selectionPage.StatusCode);
+        Assert.True(selectionPage.Headers.CacheControl?.NoStore);
+        var html = await selectionPage.Content.ReadAsStringAsync();
+        Assert.Contains(selectedAgentId, html, StringComparison.Ordinal);
+        Assert.Contains(AgentId, html, StringComparison.Ordinal);
+        Assert.DoesNotContain(foreignAgentId, html, StringComparison.Ordinal);
+        Assert.DoesNotContain(revokedAgentId, html, StringComparison.Ordinal);
+        Assert.DoesNotContain(disabledOwnerAgentId, html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Foreign Agent", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Revoked Agent", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Disabled Owner Agent", html, StringComparison.Ordinal);
+
+        var antiforgeryMatch = Regex.Match(
+            html,
+            "name=\\\"__RequestVerificationToken\\\" value=\\\"([^\\\"]+)\\\"",
+            RegexOptions.CultureInvariant);
+        Assert.True(antiforgeryMatch.Success, "Stable Agent selection must render an antiforgery token.");
+        var antiforgeryToken = WebUtility.HtmlDecode(antiforgeryMatch.Groups[1].Value);
+
+        var originalParameters = QueryHelpers.ParseQuery(new Uri(new Uri(ApiUrl), authorizeUrl).Query);
+        async Task<HttpResponseMessage> PostSelectionAsync(string agentId, bool includeAntiforgery)
+        {
+            var fields = new List<KeyValuePair<string, string>>();
+            foreach (var pair in originalParameters)
+                foreach (var value in pair.Value)
+                    fields.Add(new KeyValuePair<string, string>(pair.Key, value ?? string.Empty));
+            fields.Add(new("agent_selection", "true"));
+            fields.Add(new("agent_id", agentId));
+            if (includeAntiforgery)
+                fields.Add(new("__RequestVerificationToken", antiforgeryToken));
+            return await _client.PostAsync("/connect/authorize", new FormUrlEncodedContent(fields));
+        }
+
+        using (var missingAntiforgery = await PostSelectionAsync(selectedAgentId, includeAntiforgery: false))
+            Assert.Equal(HttpStatusCode.BadRequest, missingAntiforgery.StatusCode);
+
+        using (var foreignSelection = await PostSelectionAsync(foreignAgentId, includeAntiforgery: true))
+            Assert.Equal(HttpStatusCode.Forbidden, foreignSelection.StatusCode);
+        using (var disabledOwnerSelection = await PostSelectionAsync(disabledOwnerAgentId, includeAntiforgery: true))
+            Assert.Equal(HttpStatusCode.Forbidden, disabledOwnerSelection.StatusCode);
+
+        using var authorization = await PostSelectionAsync(selectedAgentId, includeAntiforgery: true);
+        Assert.Equal(HttpStatusCode.Redirect, authorization.StatusCode);
+        Assert.NotNull(authorization.Headers.Location);
+        var authorizationQuery = QueryHelpers.ParseQuery(authorization.Headers.Location!.Query);
+        var code = authorizationQuery["code"].ToString();
+        Assert.False(string.IsNullOrWhiteSpace(code));
+        Assert.Equal("stable-mcp-state", authorizationQuery["state"].ToString());
+        Assert.Equal(ApiUrl + "/", authorizationQuery["iss"].ToString());
+
+        using var token = await _client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = clientId,
+            ["code"] = code,
+            ["redirect_uri"] = RedirectUri,
+            ["code_verifier"] = verifier,
+            ["resource"] = resource
+        }));
+        token.EnsureSuccessStatusCode();
+        using var tokenJson = JsonDocument.Parse(await token.Content.ReadAsStreamAsync());
+        var accessToken = tokenJson.RootElement.GetProperty("access_token").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(accessToken));
+        AssertAccessTokenBinding(accessToken!, resource, selectedAgentId);
+
+        using var profile = await PostInternalProfileAsync(selectedAgentId, _ownerId.ToString());
+        Assert.Equal(HttpStatusCode.OK, profile.StatusCode);
+        using var profileJson = JsonDocument.Parse(await profile.Content.ReadAsStreamAsync());
+        Assert.Equal(selectedAgentId, profileJson.RootElement.GetProperty("id").GetString());
+        Assert.Equal("Second owned Agent", profileJson.RootElement.GetProperty("name").GetString());
+        Assert.Equal("oauth-refresh@example.test", profileJson.RootElement.GetProperty("email").GetString());
+        Assert.Equal("Windows", profileJson.RootElement.GetProperty("nickname").GetString());
+
+        using var wrongOwnerProfile = await PostInternalProfileAsync(selectedAgentId, foreignOwnerId.ToString());
+        Assert.Equal(HttpStatusCode.Forbidden, wrongOwnerProfile.StatusCode);
+    }
+
+    [Fact]
     public async Task AuthorizationCode_WithOfflineAccess_IssuesRefreshToken_AndRefreshPreservesBinding()
     {
         var client = _client!;
@@ -1146,6 +1315,16 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         return await _client!.SendAsync(request);
     }
 
+    private async Task<HttpResponseMessage> PostInternalProfileAsync(string agentId, string userId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/profile")
+        {
+            Content = JsonContent.Create(new { agentId, userId })
+        };
+        request.Headers.Add("X-MateMCP-Internal-Key", InternalKey);
+        return await _client!.SendAsync(request);
+    }
+
     private async Task<HttpResponseMessage> PostInternalAuthorizeAsync(string[] scopes)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/agents/authorize")
@@ -1164,14 +1343,14 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         foreach (var item in forbidden) Assert.DoesNotContain(item, scopes);
     }
 
-    private void AssertAccessTokenBinding(string token, string expectedResource)
+    private void AssertAccessTokenBinding(string token, string expectedResource, string expectedAgentId = AgentId)
     {
         var segments = token.Split('.');
         Assert.True(segments.Length >= 2);
         using var payload = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(segments[1]));
         var root = payload.RootElement;
         Assert.Equal(_ownerId.ToString(), root.GetProperty("sub").GetString());
-        Assert.Equal(AgentId, root.GetProperty("agent_id").GetString());
+        Assert.Equal(expectedAgentId, root.GetProperty("agent_id").GetString());
 
         var audiences = root.GetProperty("aud").ValueKind == JsonValueKind.Array
             ? root.GetProperty("aud").EnumerateArray().Select(x => x.GetString()).Where(x => x is not null).Cast<string>().ToArray()

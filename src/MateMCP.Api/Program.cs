@@ -143,7 +143,9 @@ app.Use(async (context, next) =>
 {
     if (HttpMethods.IsPost(context.Request.Method) &&
         context.Request.HasFormContentType &&
-        RequiresAntiforgery(context.Request.Path))
+        (RequiresAntiforgery(context.Request.Path) ||
+         (context.Request.Path == "/connect/authorize" &&
+          string.Equals(context.Request.Form["agent_selection"].ToString(), "true", StringComparison.Ordinal))))
     {
         try
         {
@@ -415,11 +417,55 @@ app.MapPost("/api/enrollment/token", async (EnrollmentToken request, ControlPlan
 
 app.MapMethods("/connect/authorize", ["GET", "POST"], async (HttpContext context, ControlPlaneDbContext db) =>
 {
-    var request = context.GetOpenIddictServerRequest() ?? throw new InvalidOperationException("OIDC request unavailable."); if (context.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login?returnUrl=" + Uri.EscapeDataString(context.Request.Path + context.Request.QueryString));
-    var resources = request.GetResources(); if (resources.Length != 1 || !TryAgentId(resources[0], relayUrl, out var publicId)) return Results.BadRequest(new { error = OpenIddictConstants.Errors.InvalidTarget });
-    var userId = UserId(context.User); var agent = await db.Agents.SingleOrDefaultAsync(x => x.PublicId == publicId && x.OwnerId == userId && !x.IsRevoked); if (agent is null) return Results.Forbid();
-    var scopes = MateMCP.Api.OAuthScopePolicy.FilterAuthorizedScopes(request.GetScopes(), agent.AllowedScopes); var identity = new ClaimsIdentity(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, OpenIddictConstants.Claims.Name, ClaimTypes.Role);
-    identity.AddClaim(OpenIddictConstants.Claims.Subject, userId.ToString()); identity.AddClaim(OpenIddictConstants.Claims.Name, context.User.Identity!.Name!); identity.AddClaim("agent_id", agent.PublicId); identity.SetScopes(scopes); identity.SetResources(resources[0], relayUrl); identity.SetDestinations(_ => [OpenIddictConstants.Destinations.AccessToken]);
+    var request = context.GetOpenIddictServerRequest() ?? throw new InvalidOperationException("OIDC request unavailable.");
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Redirect("/login?returnUrl=" + Uri.EscapeDataString(context.Request.Path + context.Request.QueryString));
+
+    var resources = request.GetResources();
+    if (resources.Length != 1)
+        return Results.BadRequest(new { error = OpenIddictConstants.Errors.InvalidTarget });
+
+    var userId = UserId(context.User);
+    string publicId;
+    if (string.Equals(resources[0], relayUrl.TrimEnd('/') + "/mcp", StringComparison.Ordinal))
+    {
+        if (HttpMethods.IsGet(context.Request.Method))
+        {
+            var availableAgents = await db.Agents.AsNoTracking()
+                .Where(x => x.OwnerId == userId && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled)
+                .OrderBy(x => x.Name)
+                .ThenBy(x => x.PublicId)
+                .Take(100)
+                .ToListAsync(context.RequestAborted);
+            return RenderAgentSelectionPage(context, availableAgents);
+        }
+
+        if (!HttpMethods.IsPost(context.Request.Method) || !context.Request.HasFormContentType ||
+            !string.Equals(context.Request.Form["agent_selection"].ToString(), "true", StringComparison.Ordinal))
+            return Results.BadRequest(new { error = "agent_selection_required" });
+
+        publicId = context.Request.Form["agent_id"].ToString();
+        if (!IsAgentId(publicId))
+            return Results.BadRequest(new { error = "invalid_agent_selection" });
+    }
+    else if (!TryAgentId(resources[0], relayUrl, out publicId))
+    {
+        return Results.BadRequest(new { error = OpenIddictConstants.Errors.InvalidTarget });
+    }
+
+    var agent = await db.Agents.SingleOrDefaultAsync(
+        x => x.PublicId == publicId && x.OwnerId == userId && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled,
+        context.RequestAborted);
+    if (agent is null) return Results.Forbid();
+
+    var scopes = MateMCP.Api.OAuthScopePolicy.FilterAuthorizedScopes(request.GetScopes(), agent.AllowedScopes);
+    var identity = new ClaimsIdentity(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, OpenIddictConstants.Claims.Name, ClaimTypes.Role);
+    identity.AddClaim(OpenIddictConstants.Claims.Subject, userId.ToString());
+    identity.AddClaim(OpenIddictConstants.Claims.Name, context.User.Identity!.Name!);
+    identity.AddClaim("agent_id", agent.PublicId);
+    identity.SetScopes(scopes);
+    identity.SetResources(resources[0], relayUrl);
+    identity.SetDestinations(_ => [OpenIddictConstants.Destinations.AccessToken]);
     return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
 app.MapPost("/connect/register", async (HttpContext context, IOpenIddictApplicationManager manager) =>
@@ -451,6 +497,16 @@ app.MapPost("/internal/agents/offline", async (HttpContext c, AgentOffline r, Co
 app.MapPost("/internal/agents/authorize", async (HttpContext c, AgentAuthorization r, ControlPlaneDbContext db) =>
 {
     if (!Internal(c, internalKey)) return Results.Unauthorized(); var agent = await db.Agents.Include(x => x.Owner).SingleOrDefaultAsync(x => x.PublicId == r.AgentId && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled); if (agent is null || agent.OwnerId.ToString() != r.UserId) return Results.Forbid(); return MateMCP.Api.OAuthScopePolicy.AreGrantedAgentScopesAllowed(r.Scopes, agent.AllowedScopes) ? Results.Ok() : Results.Forbid();
+});
+app.MapPost("/internal/agents/profile", async (HttpContext c, AgentProfileRequest r, ControlPlaneDbContext db) =>
+{
+    if (!Internal(c, internalKey)) return Results.Unauthorized();
+    if (!Guid.TryParse(r.UserId, out var ownerId)) return Results.Forbid();
+    var agent = await db.Agents.AsNoTracking().Include(x => x.Owner).SingleOrDefaultAsync(
+        x => x.PublicId == r.AgentId && x.OwnerId == ownerId && !x.IsRevoked && x.Owner != null && !x.Owner.IsDisabled,
+        c.RequestAborted);
+    if (agent?.Owner is null) return Results.Forbid();
+    return Results.Ok(new { id = agent.PublicId, name = agent.Name, email = agent.Owner.Email, nickname = agent.Platform });
 });
 app.MapPost("/api/agents/{agentId}/approvals", async (string agentId, HttpContext c, NewApproval r, ControlPlaneDbContext db) =>
 {
@@ -522,6 +578,82 @@ static bool IsAgentId(string id) => id.StartsWith("agt_", StringComparison.Ordin
 const string RecoveryMarker = "\nMATEMCP_RECOVER:";
 static string EncodeEnrollmentPlatform(string platform, string? recoverAgentId) => recoverAgentId is null ? platform : platform + RecoveryMarker + recoverAgentId;
 static (string Platform, string? RecoverAgentId) DecodeEnrollmentPlatform(string value) { var index = value.LastIndexOf(RecoveryMarker, StringComparison.Ordinal); if (index < 0) return (value, null); var agentId = value[(index + RecoveryMarker.Length)..]; return IsAgentId(agentId) ? (value[..index], agentId) : (value, null); }
+static IResult RenderAgentSelectionPage(HttpContext context, IReadOnlyList<AgentDevice> agents)
+{
+    context.Response.Headers.CacheControl = "no-store";
+    context.Response.Headers.Pragma = "no-cache";
+
+    var antiforgery = context.RequestServices.GetRequiredService<Microsoft.AspNetCore.Antiforgery.IAntiforgery>();
+    var tokens = antiforgery.GetAndStoreTokens(context);
+    var html = new StringBuilder();
+    html.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Choose a MateMCP Agent</title></head><body>");
+    html.Append("<main><h1>Choose an Agent</h1><p>This connection will be authorized for one Agent only. You can add another connection later for a different Agent.</p>");
+
+    if (agents.Count == 0)
+    {
+        html.Append("<p>No active Agents are available in this account. Enroll an Agent first, then retry the connection.</p>");
+    }
+    else
+    {
+        html.Append("<form method=\"post\" action=\"/connect/authorize\"><input type=\"hidden\" name=\"agent_selection\" value=\"true\">");
+        html.Append("<input type=\"hidden\" name=\"__RequestVerificationToken\" value=\"")
+            .Append(System.Net.WebUtility.HtmlEncode(tokens.RequestToken ?? string.Empty)).Append("\">");
+        foreach (var parameter in context.Request.Query)
+        {
+            if (string.Equals(parameter.Key, "agent_id", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(parameter.Key, "agent_selection", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(parameter.Key, "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var value in parameter.Value)
+            {
+                html.Append("<input type=\"hidden\" name=\"")
+                    .Append(System.Net.WebUtility.HtmlEncode(parameter.Key))
+                    .Append("\" value=\"")
+                    .Append(System.Net.WebUtility.HtmlEncode(value ?? string.Empty))
+                    .Append("\">");
+            }
+        }
+
+        if (context.Request.HasFormContentType)
+        {
+            foreach (var parameter in context.Request.Form)
+            {
+                if (context.Request.Query.ContainsKey(parameter.Key) ||
+                    string.Equals(parameter.Key, "agent_id", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(parameter.Key, "agent_selection", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(parameter.Key, "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                foreach (var value in parameter.Value)
+                {
+                    html.Append("<input type=\"hidden\" name=\"")
+                        .Append(System.Net.WebUtility.HtmlEncode(parameter.Key))
+                        .Append("\" value=\"")
+                        .Append(System.Net.WebUtility.HtmlEncode(value ?? string.Empty))
+                        .Append("\">");
+                }
+            }
+        }
+
+        html.Append("<label for=\"agent_id\">Agent</label><select id=\"agent_id\" name=\"agent_id\" required>");
+        foreach (var agent in agents)
+        {
+            var label = string.IsNullOrWhiteSpace(agent.Platform) ? agent.Name : $"{agent.Name} — {agent.Platform}";
+            html.Append("<option value=\"")
+                .Append(System.Net.WebUtility.HtmlEncode(agent.PublicId))
+                .Append("\">")
+                .Append(System.Net.WebUtility.HtmlEncode(label))
+                .Append("</option>");
+        }
+
+        html.Append("</select><button type=\"submit\">Continue</button></form>");
+    }
+
+    html.Append("</main></body></html>");
+    return Results.Content(html.ToString(), "text/html; charset=utf-8");
+}
+
 static bool RequiresAntiforgery(PathString path) =>
     path == "/login" ||
     path == "/register" ||
@@ -539,5 +671,6 @@ sealed record EnrollmentToken(string DeviceCode);
 sealed record AgentAuthentication(string AgentId, string Credential);
 sealed record AgentOffline(string AgentId, DateTimeOffset LastSeenAt);
 sealed record AgentAuthorization(string AgentId, string UserId, string[] Scopes);
+sealed record AgentProfileRequest(string AgentId, string UserId);
 sealed record NewApproval(string Capability, string Target, string Summary, int ExpiresIn = 120);
 sealed record ClientRegistration([property: System.Text.Json.Serialization.JsonPropertyName("client_name")] string? ClientName, [property: System.Text.Json.Serialization.JsonPropertyName("redirect_uris")] string[]? RedirectUris);

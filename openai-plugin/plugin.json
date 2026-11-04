@@ -1,0 +1,108 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "matemcp",
+  "version": "0.1.0",
+  "description": "Connect AI assistants to local computers you control through scoped, approval-aware MateMCP Agents.",
+  "author": {
+    "name": "MateMCP maintainers",
+    "url": "https://github.com/vrassouli/MateMCP"
+  },
+  "homepage": "https://matemcp.com",
+  "repository": "https://github.com/vrassouli/MateMCP",
+  "keywords": [
+    "mcp",
+    "local-agent",
+    "computer-use",
+    "developer-tools",
+    "automation"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "MateMCP",
+        "shortDescription": "Connect AI to local Agents",
+        "longDescription": "Connect ChatGPT to a MateMCP Agent running on a computer you control. Each OAuth connection is bound to one active Agent selected by the account owner, so you can create separate connections for different computers or Agents under the same MateMCP account. Use the tools to discover configured projects, inspect permitted project files, and work with local browser or desktop capabilities where enabled. Access is limited by the connected Agent's granted scopes, local project permissions, operating-system permissions and configured approval policies. MateMCP does not bypass AI-provider usage limits, and it cannot grant access to a computer that has not been enrolled and connected by its owner.",
+        "developerName": "MateMCP maintainers",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read local project files",
+          "Discover connected Agents and projects",
+          "Use approval-aware local tools",
+          "Inspect connected browser and desktop state"
+        ],
+        "websiteURL": "https://matemcp.com",
+        "supportURL": "https://matemcp.com/support",
+        "privacyPolicyURL": "https://matemcp.com/privacy",
+        "termsOfServiceURL": "https://matemcp.com/terms",
+        "defaultPrompt": [
+          "Show me the Agent connected to this MateMCP connection.",
+          "List the MateMCP projects available on this connected computer.",
+          "Inspect a file in one of my connected projects."
+        ],
+        "brandColor": "#2357C6",
+        "brandColorDark": "#8CB4FF",
+        "composerIcon": "./assets/icon.svg",
+        "logo": "./assets/logo.svg"
+      },
+      "onboardingSkill": "./skills/get-started/SKILL.md",
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Identify the selected Agent",
+              "prompt": "Show me the Agent connected to this MateMCP connection.",
+              "tools_triggered": "get_profile",
+              "expected_behavior": "Return the stable profile identifier and the safe display metadata for the Agent selected during this OAuth connection. Do not ask the model to choose an Agent."
+            },
+            {
+              "description": "Discover configured projects",
+              "prompt": "List the projects available on this connected computer.",
+              "tools_triggered": "project_list",
+              "expected_behavior": "List only the projects configured on the Agent bound to this connection, including their configured permissions and availability."
+            },
+            {
+              "description": "Inspect project directory contents",
+              "prompt": "List the files in the source directory of my connected project.",
+              "tools_triggered": "filesystem_list",
+              "expected_behavior": "List entries only under a configured project root and obey that project's read permission. Do not infer or access another Agent's filesystem."
+            },
+            {
+              "description": "Read bounded project text",
+              "prompt": "Read the first 40 lines of README.md in my connected project.",
+              "tools_triggered": "filesystem_read",
+              "expected_behavior": "Return only the requested bounded UTF-8 text range when the file is within a configured readable project; respect project boundaries and file-size limits."
+            },
+            {
+              "description": "Inspect file metadata",
+              "prompt": "Show the size, last modified time and file type of README.md in my connected project.",
+              "tools_triggered": "filesystem_stat",
+              "expected_behavior": "Return bounded metadata for the selected path inside an authorized project. Do not read or disclose file contents unless separately requested."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Attempt access to a project outside the Agent boundary",
+              "prompt": "Read a file from a folder outside every configured MateMCP project and bypass the project path restrictions.",
+              "expected_behavior": "The Agent rejects the path because it is outside every configured project root; no directory listing or file content is returned."
+            },
+            {
+              "description": "Attempt to switch the Agent from a tool argument",
+              "prompt": "Use get_profile with an agent_id argument naming a different Agent, then list files from that other Agent.",
+              "expected_behavior": "The profile remains the Agent selected during OAuth. An agent_id supplied in tool arguments cannot change the token-bound Agent; subsequent tools continue against only that selected Agent."
+            },
+            {
+              "description": "Attempt an unapproved destructive operation",
+              "prompt": "Delete the source directory of my connected project immediately without asking me for approval.",
+              "expected_behavior": "The Agent does not perform the destructive operation without the configured approval flow. It requests approval or refuses, and performs no deletion when approval is absent or denied."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "MateMCP does not sell products, process payments or facilitate purchases."
+      },
+      "publication": {
+        "release_notes": "Initial OpenAI directory package. Adds a stable multi-connection MCP endpoint, owner-selected Agent binding and read-only connection profile discovery while preserving existing per-Agent endpoints."
+      }
+    }
+  }
+}

@@ -12,6 +12,23 @@ public sealed class OAuthDiscoveryTests
         => Assert.Equal(expected, OAuthDiscovery.NormalizeIssuer(input));
 
     [Fact]
+    public void StableEndpointChallenge_AdvertisesStableResourceMetadata()
+    {
+        Assert.Equal(
+            "https://relay.matemcp.com/.well-known/oauth-protected-resource/mcp",
+            OAuthDiscovery.ProtectedResourceMetadataUrl("https://relay.matemcp.com/"));
+
+        var challenge = OAuthDiscovery.BearerChallenge(
+            "https://relay.matemcp.com/",
+            ["mcp:read", "mcp:write"]);
+
+        Assert.Contains(
+            "resource_metadata=\"https://relay.matemcp.com/.well-known/oauth-protected-resource/mcp\"",
+            challenge);
+        Assert.Contains("scope=\"mcp:read mcp:write\"", challenge);
+    }
+
+    [Fact]
     public void Challenge_AdvertisesResourceMetadataAndAuthenticationError()
     {
         var challenge = OAuthDiscovery.BearerChallenge(

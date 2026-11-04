@@ -21,6 +21,12 @@ public static class OAuthDiscovery
     public static string ProtectedResourceMetadataUrl(string publicBaseUrl, string deviceId)
         => $"{publicBaseUrl.TrimEnd('/')}/.well-known/oauth-protected-resource/mcp/{deviceId}";
 
+    public static string ProtectedResourceMetadataUrl(string publicBaseUrl)
+        => $"{publicBaseUrl.TrimEnd('/')}/.well-known/oauth-protected-resource/mcp";
+
     public static string BearerChallenge(string publicBaseUrl, string deviceId, IEnumerable<string> scopes)
         => $"Bearer error=\"invalid_token\", error_description=\"Authentication required\", resource_metadata=\"{ProtectedResourceMetadataUrl(publicBaseUrl, deviceId)}\", scope=\"{string.Join(' ', scopes)}\"";
+
+    public static string BearerChallenge(string publicBaseUrl, IEnumerable<string> scopes)
+        => $"Bearer error=\"invalid_token\", error_description=\"Authentication required\", resource_metadata=\"{ProtectedResourceMetadataUrl(publicBaseUrl)}\", scope=\"{string.Join(' ', scopes)}\"";
 }

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" href="/brand/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/site.css">
+  <script src="/analytics.js" defer></script>
+  <script src="/site.js" defer></script>
+  <meta name="description" content="Privacy information for the MateMCP website, account portal, OAuth control plane and Relay.">
+  <link rel="canonical" href="https://matemcp.com/privacy">
+  <title>Privacy Policy · MateMCP</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" data-header>
+    <div class="shell header-inner">
+      <a class="brand" href="/" aria-label="MateMCP home"><img src="/brand/mark.svg" width="34" height="34" alt=""><span>MateMCP</span></a>
+      <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="site-nav" data-nav-toggle><span></span><span></span><span></span></button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary navigation" data-nav>
+        <a href="/#product">Product</a><a href="/#security">Security</a><a href="/#how-it-works">How it works</a><a href="https://github.com/vrassouli/MateMCP">GitHub</a>
+        <div class="nav-actions"><a class="button button-ghost button-small" href="https://api.matemcp.com/login">Sign in</a><a class="button button-primary button-small" href="https://api.matemcp.com/register">Create account</a></div>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="legal-page section">
+    <div class="shell legal-shell">
+      <div class="legal-heading"><span class="eyebrow">Trust &amp; transparency</span><h1>Privacy <span class="text-gradient">Policy</span></h1><p>How MateMCP handles account, device, service and website information.</p><p class="legal-updated">Last updated: November 4, 2026</p></div>
+      <article class="legal-prose">
+        <p>MateMCP is a service and open-source software project maintained through the <a href="https://github.com/vrassouli/MateMCP">MateMCP GitHub repository</a>. This policy describes the information processed by the hosted website, account portal, OAuth control plane and Relay. The local MateMCP Agent also processes information on the computer where it runs.</p>
+        <h2>Information we process</h2>
+        <ul>
+          <li><strong>Account information:</strong> email address, account identifier, password hash, account status and administrator status. When you connect an external identity provider, we store its provider name, stable account identifier and the email supplied by that provider.</li>
+          <li><strong>Agent and connection information:</strong> Agent public identifier, display name, platform, credential hash, granted scopes, revocation status, last-seen information and OAuth client/authorization records needed to authenticate a connection.</li>
+          <li><strong>Security and approval records:</strong> events such as enrollment, credential rotation, revocation, approval decisions and administrative actions. These records support security, troubleshooting and account operations.</li>
+          <li><strong>Operational activity:</strong> bounded metadata such as the MCP method/tool name, status, duration, request correlation identifier and configured project name. Runtime activity history is limited to the newest 500 events per Agent. Runtime activity metadata is not the same as the separate security/audit history.</li>
+          <li><strong>Website and portal analytics:</strong> the website and account portal currently load Google Analytics. Google may receive browser, device, page and usage information and may use cookies or similar technologies according to its own documentation and settings.</li>
+          <li><strong>Service request metadata:</strong> our hosting, network, CDN and infrastructure providers may process connection metadata such as IP address, request time, user agent and diagnostic information as part of delivering and protecting the service.</li>
+        </ul>
+        <h2>Information handled by your Agent and AI client</h2>
+        <p>When an AI client calls an Agent tool, the request and its result travel between that AI client, the MateMCP Relay and the selected Agent so the requested operation can be performed. The Relay is not intended to persist tool arguments, command text, file contents, response bodies, credentials or secret values in runtime activity records. The Agent may read or change local files, run commands, operate a browser or interact with desktop applications within the permissions and approvals you configure. Your AI provider and AI client handle conversation content under their own policies.</p>
+        <p>MateMCP-managed secret values are resolved locally by the Agent from the operating system credential store. The Relay does not need those secret values to route an operation. Do not grant access to projects, applications or data that you do not want the connected AI client to use.</p>
+        <h2>Why information is used</h2>
+        <p>We use information to create and secure accounts, authenticate OAuth connections, bind each connection to the Agent selected by its owner, enforce scopes and revocation, coordinate approvals, provide the service, diagnose failures, maintain security records and understand aggregate website usage.</p>
+        <h2>Service providers and sharing</h2>
+        <p>We use infrastructure and analytics providers to host and operate the public website, account portal and Relay. Google Analytics is currently enabled on the website and portal. Information is also transmitted to the AI client/provider and to the Agent you connect when needed to execute your requested MCP operations. We do not describe this as a zero-data or no-third-party service. We do not sell personal information. We may disclose information where required by law or to protect the service and its users.</p>
+        <h2>Retention</h2>
+        <p>Account, Agent, OAuth and security records are retained while needed to operate the account, provide the service, investigate security events or meet legal obligations. Runtime activity records are pruned to the newest 500 events per Agent. We do not currently publish a fixed deletion schedule for all account and security records. Local audit and project data may also remain on your own computer and are subject to your local configuration and backups.</p>
+        <h2>Your choices and requests</h2>
+        <p>You can disconnect an OAuth client, revoke an Agent, stop using the service, and manage locally stored secrets and project permissions through the available MateMCP controls. For an account, access or privacy request, use the <a href="https://github.com/vrassouli/MateMCP/issues">project issue tracker</a> and avoid posting private information in a public issue. For a sensitive security report, use GitHub's <a href="https://github.com/vrassouli/MateMCP/security/advisories/new">private security advisory</a> flow when available. Account or record deletion may be subject to security, legal and operational retention requirements.</p>
+        <h2>Children</h2>
+        <p>MateMCP is a developer and productivity service and is not designed for children to create accounts independently.</p>
+        <h2>Changes</h2>
+        <p>We may update this policy as the service changes. The effective date at the top of this page indicates the latest revision.</p>
+        <p class="legal-note">This page describes current product behavior based on the published implementation. It is not a guarantee that every deployment or third-party provider processes information identically.</p>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <div class="shell footer-grid">
+      <div><a class="brand" href="/" aria-label="MateMCP home"><img src="/brand/mark.svg" width="32" height="32" alt=""><span>MateMCP</span></a><p>Keep capable AI assistants working on the computers you already own.</p></div>
+      <div class="footer-links">
+        <div><strong>Product</strong><a href="/#product">Capabilities</a><a href="/#security">Security</a><a href="/#how-it-works">How it works</a></div>
+        <div><strong>Resources</strong><a href="https://github.com/vrassouli/MateMCP">GitHub</a><a href="https://api.matemcp.com/login">Sign in</a><a href="https://api.matemcp.com/register">Create account</a></div>
+        <div><strong>Legal &amp; support</strong><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/support">Support</a></div>
+      </div>
+    </div>
+    <div class="shell footer-bottom"><span>© <span data-year>2026</span> MateMCP.</span><span>Built for controlled, auditable local execution.</span></div>
+  </footer>
+</body>
+</html>

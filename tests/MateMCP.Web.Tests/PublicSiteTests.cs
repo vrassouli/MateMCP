@@ -41,6 +41,38 @@ public sealed class PublicSiteTests : IClassFixture<WebApplicationFactory<Progra
     }
 
     [Theory]
+    [InlineData("/privacy", "Privacy Policy", "Google Analytics", "/terms")]
+    [InlineData("/terms", "Terms of Service", "Local execution and risk", "/privacy")]
+    [InlineData("/support", "Support", "Security reports", "https://github.com/vrassouli/MateMCP/issues")]
+    public async Task Legal_and_support_routes_serve_dedicated_indexable_pages(
+        string path, string title, string expectedContent, string expectedLink)
+    {
+        using var response = await _client.GetAsync(path);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.StartsWith("text/html", response.Content.Headers.ContentType?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"<title>{title} · MateMCP</title>", html, StringComparison.Ordinal);
+        Assert.Contains(expectedContent, html, StringComparison.Ordinal);
+        Assert.Contains(expectedLink, html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Your agent hit a limit?", html, StringComparison.Ordinal);
+        Assert.Contains("rel=\"canonical\"", html, StringComparison.Ordinal);
+        Assert.Contains("name=\"description\"", html, StringComparison.Ordinal);
+        Assert.Contains("/analytics.js", html, StringComparison.Ordinal);
+        Assert.Contains("/site.css", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Home_footer_links_to_dedicated_legal_and_support_pages()
+    {
+        var html = await _client.GetStringAsync("/");
+
+        Assert.Contains("href=\"/privacy\"", html, StringComparison.Ordinal);
+        Assert.Contains("href=\"/terms\"", html, StringComparison.Ordinal);
+        Assert.Contains("href=\"/support\"", html, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("/site.css", "text/css")]
     [InlineData("/site.js", "text/javascript")]
     [InlineData("/analytics.js", "text/javascript")]
