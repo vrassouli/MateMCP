@@ -82,26 +82,104 @@ public static class McpPublicEndpoint
         if (response.StatusCode is < 200 or >= 300 || string.IsNullOrWhiteSpace(response.BodyBase64))
             return response;
 
-        var contentType = response.Headers.FirstOrDefault(header =>
+        var contentTypes = response.Headers.FirstOrDefault(header =>
             string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase)).Value;
-        if (contentType is null ||
-            !contentType.Any(value => value.Contains("application/json", StringComparison.OrdinalIgnoreCase)))
+        if (contentTypes is null)
             return response;
 
+        if (contentTypes.Any(value => value.Contains("application/json", StringComparison.OrdinalIgnoreCase)))
+            return AddProfileToolToJsonResponse(response);
+
+        if (contentTypes.Any(value => value.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase)))
+            return AddProfileToolToEventStreamResponse(response);
+
+        return response;
+    }
+
+    private static RelayResponse AddProfileToolToJsonResponse(RelayResponse response)
+    {
         try
         {
-            var bytes = Convert.FromBase64String(response.BodyBase64);
-            var root = JsonNode.Parse(bytes) as JsonObject;
-            var tools = root?["result"]?["tools"] as JsonArray;
-            if (tools is null || tools.Any(tool => string.Equals(tool?["name"]?.GetValue<string>(), ProfileToolName, StringComparison.Ordinal)))
-                return response;
-
-            tools.Add(JsonNode.Parse(ProfileToolJson));
-            return response with { BodyBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(root!.ToJsonString())) };
+            var bytes = Convert.FromBase64String(response.BodyBase64!);
+            var enriched = TryAddProfileToolToJson(bytes);
+            return enriched is null
+                ? response
+                : response with { BodyBase64 = Convert.ToBase64String(enriched) };
         }
-        catch (Exception ex) when (ex is FormatException or JsonException or InvalidOperationException)
+        catch (FormatException)
         {
             return response;
+        }
+    }
+
+    private static RelayResponse AddProfileToolToEventStreamResponse(RelayResponse response)
+    {
+        try
+        {
+            var body = Encoding.UTF8.GetString(Convert.FromBase64String(response.BodyBase64!));
+            var lineEnding = body.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+            var frames = body.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split("\n\n");
+            var changed = false;
+
+            for (var frameIndex = 0; frameIndex < frames.Length; frameIndex++)
+            {
+                if (string.IsNullOrEmpty(frames[frameIndex]))
+                    continue;
+
+                var lines = frames[frameIndex].Split('\n').ToList();
+                var dataLineIndexes = lines
+                    .Select((line, index) => (line, index))
+                    .Where(item => item.line.StartsWith("data:", StringComparison.Ordinal))
+                    .Select(item => item.index)
+                    .ToArray();
+                if (dataLineIndexes.Length == 0)
+                    continue;
+
+                var payload = string.Join("\n", dataLineIndexes.Select(index =>
+                {
+                    var value = lines[index][5..];
+                    return value.StartsWith(' ') ? value[1..] : value;
+                }));
+
+                var enriched = TryAddProfileToolToJson(Encoding.UTF8.GetBytes(payload));
+                if (enriched is null)
+                    continue;
+
+                lines[dataLineIndexes[0]] = "data: " + Encoding.UTF8.GetString(enriched);
+                for (var index = dataLineIndexes.Length - 1; index > 0; index--)
+                    lines.RemoveAt(dataLineIndexes[index]);
+
+                frames[frameIndex] = string.Join("\n", lines);
+                changed = true;
+            }
+
+            if (!changed)
+                return response;
+
+            var enrichedBody = string.Join("\n\n", frames).Replace("\n", lineEnding, StringComparison.Ordinal);
+            return response with { BodyBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(enrichedBody)) };
+        }
+        catch (FormatException)
+        {
+            return response;
+        }
+    }
+
+    private static byte[]? TryAddProfileToolToJson(ReadOnlySpan<byte> body)
+    {
+        try
+        {
+            var root = JsonNode.Parse(body) as JsonObject;
+            var tools = root?["result"]?["tools"] as JsonArray;
+            if (tools is null || tools.Any(tool => string.Equals(tool?["name"]?.GetValue<string>(), ProfileToolName, StringComparison.Ordinal)))
+                return null;
+
+            tools.Add(JsonNode.Parse(ProfileToolJson));
+            return Encoding.UTF8.GetBytes(root!.ToJsonString());
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return null;
         }
     }
 
