@@ -311,17 +311,21 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(authorizationId));
         Assert.Equal(accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString(), authorizationId);
 
-        // A pre-#360 stable-endpoint token has OpenIddict's authorization ID
-        // but lacks the explicit MateMCP marker. Its underlying grant must
-        // nevertheless remain revocable.
+        // Simulate a token issued after #359 but before #360: the generic
+        // OpenIddict authorization ID exists, while the dedicated MateMCP
+        // marker claim is absent. Relay's stable route must use this ID.
         var preMarkerStableAuthorizationId = accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(preMarkerStableAuthorizationId));
+        Assert.Equal(preMarkerStableAuthorizationId, authorizationId);
         var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(refreshToken));
 
         using var authorizedGrant = await PostInternalAuthorizeAsync(
             ["mcp:read", "mcp:write"], selectedAgentId, _ownerId.ToString(), authorizationId);
         Assert.Equal(HttpStatusCode.OK, authorizedGrant.StatusCode);
+        using var preMarkerStableGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read", "mcp:write"], selectedAgentId, _ownerId.ToString(), preMarkerStableAuthorizationId);
+        Assert.Equal(HttpStatusCode.OK, preMarkerStableGrant.StatusCode);
         using var wrongOwnerGrant = await PostInternalAuthorizeAsync(
             ["mcp:read"], selectedAgentId, foreignOwnerId.ToString(), authorizationId);
         Assert.Equal(HttpStatusCode.Forbidden, wrongOwnerGrant.StatusCode);
