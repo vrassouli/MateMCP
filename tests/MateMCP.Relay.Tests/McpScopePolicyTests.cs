@@ -45,6 +45,7 @@ public sealed class McpScopePolicyTests
     [Theory]
     [InlineData("filesystem_projects")]
     [InlineData("filesystem_list")]
+    [InlineData("filesystem_stat")]
     [InlineData("filesystem_read")]
     [InlineData("secret_list")]
     [InlineData("agent_file_upload_status")]

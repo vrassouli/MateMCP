@@ -10,6 +10,7 @@ public static class McpScopePolicy
         // and visual/semantic inspection.
         "filesystem_projects" or
         "filesystem_list" or
+        "filesystem_stat" or
         "filesystem_read" or
         "secret_list" or
         "agent_file_upload_status" or
