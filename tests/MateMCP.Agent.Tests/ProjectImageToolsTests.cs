@@ -243,5 +243,3 @@ public sealed class ProjectImageToolsTests : IDisposable
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }
-
-
