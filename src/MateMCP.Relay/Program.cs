@@ -261,7 +261,7 @@ app.MapMethods("/mcp/{deviceId?}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PAT
     if (principal is null || string.IsNullOrWhiteSpace(resolvedDeviceId) ||
         (!stableEndpoint && tokenAgentId != deviceId) ||
         !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
-        !await AuthorizeAsync(clients, options, resolvedDeviceId, principal, context.RequestAborted))
+        !await AuthorizeAsync(clients, options, resolvedDeviceId, principal, stableEndpoint, context.RequestAborted))
     {
         var reason = principal is null
             ? "missing_or_invalid_access_token"
@@ -572,12 +572,37 @@ static async Task RunAgentHeartbeatAsync(IHttpClientFactory factory, RelayOption
     }
 }
 
-static async Task<bool> AuthorizeAsync(IHttpClientFactory factory, RelayOptions options, string agentId, ClaimsPrincipal principal, CancellationToken ct)
+static async Task<bool> AuthorizeAsync(
+    IHttpClientFactory factory,
+    RelayOptions options,
+    string agentId,
+    ClaimsPrincipal principal,
+    bool stableEndpoint,
+    CancellationToken ct)
 {
     var userId = principal.FindFirstValue(OpenIddict.Abstractions.OpenIddictConstants.Claims.Subject);
     if (string.IsNullOrWhiteSpace(userId)) return false;
+
+    // The route, not token-supplied request data, determines whether this is a
+    // MateMCP-managed stable-endpoint grant. Older stable tokens (issued after
+    // grant management shipped but before the explicit marker claim) still
+    // carry OpenIddict's authorization ID. Legacy per-Agent tokens must never
+    // send that generic ID to the MateMCP grant validator.
+    var authorizationId = stableEndpoint
+        ? principal.FindFirstValue("matemcp_authorization_id") ?? principal.GetAuthorizationId()
+        : null;
+
     var client = factory.CreateClient("control-plane");
-    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authorize") { Content = JsonContent.Create(new { agentId, userId, scopes = principal.GetScopes(), authorizationId = principal.FindFirstValue("matemcp_authorization_id") }) };
+    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authorize")
+    {
+        Content = JsonContent.Create(new
+        {
+            agentId,
+            userId,
+            scopes = principal.GetScopes(),
+            authorizationId
+        })
+    };
     request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
     using var response = await client.SendAsync(request, ct);
     return response.IsSuccessStatusCode;
