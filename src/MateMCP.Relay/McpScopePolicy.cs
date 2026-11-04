@@ -10,7 +10,11 @@ public static class McpScopePolicy
         // and visual/semantic inspection.
         "filesystem_projects" or
         "filesystem_list" or
+<<<<<<< HEAD
         "filesystem_stat" or
+=======
+        "filesystem_read_image" or
+>>>>>>> 0855ef2 (fix: classify project image reads as read scope)
         "filesystem_read" or
         "secret_list" or
         "agent_file_upload_status" or
