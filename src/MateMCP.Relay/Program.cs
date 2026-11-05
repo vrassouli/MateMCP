@@ -261,7 +261,7 @@ app.MapMethods("/mcp/{deviceId?}", ["GET", "HEAD", "POST", "DELETE", "PUT", "PAT
     if (principal is null || string.IsNullOrWhiteSpace(resolvedDeviceId) ||
         (!stableEndpoint && tokenAgentId != deviceId) ||
         !principal.GetAudiences().Contains(requiredResource, StringComparer.Ordinal) ||
-        !await AuthorizeAsync(clients, options, resolvedDeviceId, principal, context.RequestAborted))
+        !await AuthorizeAsync(clients, options, resolvedDeviceId, principal, RouteAwareAuthorization.GetGrantAuthorizationId(principal, stableEndpoint), context.RequestAborted))
     {
         var reason = principal is null
             ? "missing_or_invalid_access_token"
@@ -572,12 +572,28 @@ static async Task RunAgentHeartbeatAsync(IHttpClientFactory factory, RelayOption
     }
 }
 
-static async Task<bool> AuthorizeAsync(IHttpClientFactory factory, RelayOptions options, string agentId, ClaimsPrincipal principal, CancellationToken ct)
+static async Task<bool> AuthorizeAsync(
+    IHttpClientFactory factory,
+    RelayOptions options,
+    string agentId,
+    ClaimsPrincipal principal,
+    string? authorizationId,
+    CancellationToken ct)
 {
     var userId = principal.FindFirstValue(OpenIddict.Abstractions.OpenIddictConstants.Claims.Subject);
     if (string.IsNullOrWhiteSpace(userId)) return false;
+
     var client = factory.CreateClient("control-plane");
-    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authorize") { Content = JsonContent.Create(new { agentId, userId, scopes = principal.GetScopes(), authorizationId = principal.FindFirstValue("matemcp_authorization_id") }) };
+    using var request = new HttpRequestMessage(HttpMethod.Post, "internal/agents/authorize")
+    {
+        Content = JsonContent.Create(new
+        {
+            agentId,
+            userId,
+            scopes = principal.GetScopes(),
+            authorizationId
+        })
+    };
     request.Headers.Add("X-MateMCP-Internal-Key", options.InternalApiKey);
     using var response = await client.SendAsync(request, ct);
     return response.IsSuccessStatusCode;

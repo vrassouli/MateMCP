@@ -310,12 +310,21 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         var authorizationId = accessTokenPayload.RootElement.GetProperty("matemcp_authorization_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(authorizationId));
         Assert.Equal(accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString(), authorizationId);
+
+        // A pre-marker stable token uses OpenIddict's authorization ID.
+        // The Relay resolver's marker-absent behavior is covered separately
+        // by RouteAwareAuthorizationTests in the Relay test project.
+        var preMarkerStableAuthorizationId = accessTokenPayload.RootElement.GetProperty("oi_au_id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(preMarkerStableAuthorizationId));
         var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(refreshToken));
 
         using var authorizedGrant = await PostInternalAuthorizeAsync(
             ["mcp:read", "mcp:write"], selectedAgentId, _ownerId.ToString(), authorizationId);
         Assert.Equal(HttpStatusCode.OK, authorizedGrant.StatusCode);
+        using var preMarkerStableGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read", "mcp:write"], selectedAgentId, _ownerId.ToString(), preMarkerStableAuthorizationId);
+        Assert.Equal(HttpStatusCode.OK, preMarkerStableGrant.StatusCode);
         using var wrongOwnerGrant = await PostInternalAuthorizeAsync(
             ["mcp:read"], selectedAgentId, foreignOwnerId.ToString(), authorizationId);
         Assert.Equal(HttpStatusCode.Forbidden, wrongOwnerGrant.StatusCode);
@@ -421,6 +430,9 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         using var revokedGrant = await PostInternalAuthorizeAsync(
             ["mcp:read"], selectedAgentId, _ownerId.ToString(), authorizationId);
         Assert.Equal(HttpStatusCode.Forbidden, revokedGrant.StatusCode);
+        using var revokedPreMarkerGrant = await PostInternalAuthorizeAsync(
+            ["mcp:read"], selectedAgentId, _ownerId.ToString(), preMarkerStableAuthorizationId);
+        Assert.Equal(HttpStatusCode.Forbidden, revokedPreMarkerGrant.StatusCode);
 
         using var revokedRefresh = await _client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
