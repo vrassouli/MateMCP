@@ -189,10 +189,29 @@ app.MapPost("/register", async (HttpContext context, ControlPlaneDbContext db, I
     var form = await context.Request.ReadFormAsync();
     var email = form["email"].ToString().Trim();
     var password = form["password"].ToString();
+    var confirmation = form["confirmPassword"].ToString();
     var returnUrl = SafeReturnUrl(form["returnUrl"].ToString());
 
     if (password.Length < 10 || !email.Contains('@'))
         return PortalUi.AuthPage(context, registration: true, returnUrl, "Enter a valid email address and a password of at least 10 characters.", email, StatusCodes.Status400BadRequest);
+
+    if (confirmation.Length == 0)
+        return PortalUi.AuthPage(
+            context,
+            registration: true,
+            returnUrl,
+            email: email,
+            statusCode: StatusCodes.Status400BadRequest,
+            passwordConfirmationError: "Please confirm your password.");
+
+    if (!string.Equals(password, confirmation, StringComparison.Ordinal))
+        return PortalUi.AuthPage(
+            context,
+            registration: true,
+            returnUrl,
+            email: email,
+            statusCode: StatusCodes.Status400BadRequest,
+            passwordConfirmationError: "Passwords do not match.");
 
     var normalized = email.ToUpperInvariant();
     if (await db.Users.AnyAsync(x => x.NormalizedEmail == normalized))
