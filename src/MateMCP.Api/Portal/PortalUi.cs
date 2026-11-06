@@ -13,7 +13,8 @@ public static class PortalUi
         string returnUrl,
         string? error = null,
         string email = "",
-        int statusCode = StatusCodes.Status200OK)
+        int statusCode = StatusCodes.Status200OK,
+        string? passwordConfirmationError = null)
     {
         NoStore(context);
         if (string.IsNullOrWhiteSpace(error))
@@ -32,6 +33,21 @@ public static class PortalUi
         var passwordAutocomplete = registration ? "new-password" : "current-password";
         var passwordHint = registration
             ? "<p class=\"field-hint\" id=\"password-hint\">Use at least 10 characters.</p>"
+            : "";
+        var confirmationInvalid = string.IsNullOrWhiteSpace(passwordConfirmationError)
+            ? ""
+            : " aria-invalid=\"true\" data-server-error=\"true\"";
+        var confirmationHidden = string.IsNullOrWhiteSpace(passwordConfirmationError) ? " hidden" : "";
+        var confirmationMessage = H(passwordConfirmationError ?? "Passwords do not match.");
+        var confirmationMarkup = registration ? $"""
+                    <div class="form-field">
+                      <label for="confirm-password">Confirm password</label>
+                      <input id="confirm-password" name="confirmPassword" type="password" autocomplete="new-password" minlength="10" required aria-describedby="confirm-password-error"{confirmationInvalid}>
+                      <p class="field-error" id="confirm-password-error" role="alert" aria-live="polite"{confirmationHidden}>{confirmationMessage}</p>
+                    </div>
+                    """ : "";
+        var registrationValidationScript = registration
+            ? "<script src=\"/portal/registration-validation.js?v=1\" defer></script>"
             : "";
         var describedBy = registration ? " aria-describedby=\"password-hint\"" : "";
         var errorMarkup = string.IsNullOrWhiteSpace(error)
@@ -89,10 +105,12 @@ public static class PortalUi
                       <input id="password" name="password" type="password" autocomplete="{passwordAutocomplete}" minlength="{(registration ? "10" : "1")}" required{describedBy}>
                       {passwordHint}
                     </div>
+                    {confirmationMarkup}
                     <button class="button button-primary button-block" type="submit">
                       <span>{submit}</span><span aria-hidden="true">→</span>
                     </button>
                   </form>
+                  {registrationValidationScript}
                   <div class="auth-alternate">
                     <span>{alternateLabel}</span>
                     <a href="{alternatePath}?returnUrl={Uri.EscapeDataString(returnUrl)}">{alternateAction}</a>
@@ -239,7 +257,7 @@ public static class PortalUi
               <meta name="theme-color" content="#07111f">
               <meta name="robots" content="noindex,nofollow">
               <link rel="icon" href="/portal/mark.svg?v=1" type="image/svg+xml">
-              <link rel="stylesheet" href="/portal/portal.css?v=336-1">
+              <link rel="stylesheet" href="/portal/portal.css?v=336-2">
               <script src="/portal/analytics.js?v=1" defer></script>
               <title>{H(title)} · MateMCP</title>
             </head>

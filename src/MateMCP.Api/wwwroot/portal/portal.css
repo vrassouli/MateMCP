@@ -282,6 +282,18 @@ img, svg { display: block; max-width: 100%; }
 .field-meta,
 .field-hint { color: var(--muted-2); font-size: 9px; }
 .field-hint { margin: -1px 0 0; }
+.field-error {
+  margin: -1px 0 0;
+  color: var(--red);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.form-field input[aria-invalid="true"] {
+  border-color: rgba(255, 125, 137, .72);
+}
+.form-field input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px rgba(255, 125, 137, .12);
+}
 .form-field input {
   width: 100%;
   min-height: 46px;
@@ -301,6 +313,11 @@ img, svg { display: block; max-width: 100%; }
   background: #091827;
 }
 .form-field input::placeholder { color: #5e738c; }
+
+.button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
 
 .button {
   display: inline-flex;
