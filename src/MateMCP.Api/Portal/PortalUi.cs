@@ -55,7 +55,12 @@ public static class PortalUi
             : $"<div class=\"form-alert\" role=\"alert\"><span class=\"alert-icon\">!</span><span>{H(error)}</span></div>";
 
         var externalCatalog = context.RequestServices.GetService<ExternalAuthCatalog>();
-        var externalMode = registration ? "register" : "login";
+        var externalMode = "login";
+        var alternateMarkup = registration
+            ? $"<div class=\"auth-alternate\"><span>{alternateLabel}</span><a href=\"{alternatePath}?returnUrl={Uri.EscapeDataString(returnUrl)}\">{alternateAction}</a></div>"
+            : externalCatalog is null || externalCatalog.Providers.Count == 0
+                ? string.Empty
+                : $"<div class=\"auth-alternate\"><span>New to MateMCP? Continue with {H(string.Join(" or ", externalCatalog.Providers.Select(provider => provider.DisplayName)))} above to create your account.</span></div>";
         var externalMarkup = externalCatalog is null || externalCatalog.Providers.Count == 0
             ? ""
             : $"<div class=\"external-auth\"><div class=\"external-provider-grid\">{string.Join("", externalCatalog.Providers.Select(provider => $"<a class=\"external-provider-button\" href=\"/auth/external/{Uri.EscapeDataString(provider.Id)}?mode={externalMode}&amp;returnUrl={Uri.EscapeDataString(returnUrl)}\"><span class=\"provider-mark provider-{H(provider.Id)}\" aria-hidden=\"true\">{ProviderMark(provider.Id)}</span><span>Continue with {H(provider.DisplayName)}</span></a>"))}</div><div class=\"auth-divider\"><span>or continue with email</span></div></div>";
@@ -111,10 +116,7 @@ public static class PortalUi
                     </button>
                   </form>
                   {registrationValidationScript}
-                  <div class="auth-alternate">
-                    <span>{alternateLabel}</span>
-                    <a href="{alternatePath}?returnUrl={Uri.EscapeDataString(returnUrl)}">{alternateAction}</a>
-                  </div>
+                  {alternateMarkup}
                 </section>
                 <p class="auth-footnote">By continuing, you are accessing the MateMCP control plane for your own enrolled devices.</p>
               </main>

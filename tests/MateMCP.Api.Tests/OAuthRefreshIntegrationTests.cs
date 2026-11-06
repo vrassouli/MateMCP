@@ -633,7 +633,7 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         {
             BaseAddress = new Uri(ApiUrl),
             AllowAutoRedirect = false,
-            HandleCookies = false
+            HandleCookies = true
         });
 
         using var login = await client.GetAsync("/login?returnUrl=%2Fdashboard");
@@ -643,7 +643,8 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Contains("/portal/portal.css", loginHtml, StringComparison.Ordinal);
         Assert.Contains("/portal/analytics.js", loginHtml, StringComparison.Ordinal);
         Assert.Contains("autocomplete=\"current-password\"", loginHtml, StringComparison.Ordinal);
-        Assert.Contains("Create an account", loginHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Create an account", loginHtml, StringComparison.Ordinal);
+        Assert.Contains("Keep your AI working", loginHtml, StringComparison.Ordinal);
         Assert.True(login.Headers.CacheControl?.NoStore);
         Assert.True(login.Headers.TryGetValues("Content-Security-Policy", out var csp));
         Assert.Contains(csp, value => value.Contains("frame-ancestors 'none'", StringComparison.Ordinal));
@@ -652,13 +653,12 @@ public sealed class OAuthRefreshIntegrationTests : IAsyncLifetime
         Assert.Contains(csp, value => value.Contains("script-src 'self' https://static.cloudflareinsights.com https://*.googletagmanager.com", StringComparison.Ordinal));
         Assert.Contains(csp, value => value.Contains("connect-src 'self' https://cloudflareinsights.com https://*.google-analytics.com", StringComparison.Ordinal));
 
-        using var register = await client.GetAsync("/register");
-        Assert.Equal(HttpStatusCode.OK, register.StatusCode);
-        var registerHtml = await register.Content.ReadAsStringAsync();
-        Assert.Contains("Ready to keep working?", registerHtml, StringComparison.Ordinal);
-        Assert.Contains("Built-in agent hit a limit?", registerHtml, StringComparison.Ordinal);
-        Assert.Contains("autocomplete=\"new-password\"", registerHtml, StringComparison.Ordinal);
-        Assert.Contains("minlength=\"10\"", registerHtml, StringComparison.Ordinal);
+        using var register = await client.GetAsync("/register?returnUrl=%2Faccount");
+        Assert.Equal(HttpStatusCode.Redirect, register.StatusCode);
+        Assert.Equal("/login?returnUrl=%2Faccount", register.Headers.Location?.OriginalString);
+
+        using var blockedRegistration = await PostPortalFormAsync(client, "/register", "/login");
+        Assert.Equal(HttpStatusCode.Gone, blockedRegistration.StatusCode);
 
         using var styles = await client.GetAsync("/portal/portal.css");
         styles.EnsureSuccessStatusCode();

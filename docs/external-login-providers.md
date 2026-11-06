@@ -1,6 +1,6 @@
 # External login providers
 
-MateMCP can keep the existing email/password flow while enabling selected external identity providers on the account portal.
+MateMCP keeps email/password sign-in for existing accounts while new accounts are created through enabled external identity providers.
 
 Supported providers:
 
@@ -9,7 +9,7 @@ Supported providers:
 - GitHub
 - Apple
 
-Providers are opt-in. A provider is not rendered on the Login or Register page unless it is enabled and has both a client ID and client secret configured.
+Providers are opt-in. A provider is not rendered on the Login page unless it is enabled and has both a client ID and client secret configured.
 
 ## Production callback URLs
 
@@ -79,6 +79,7 @@ For a new external identity:
 1. MateMCP requires a usable verified/provider-trusted email.
 2. If no local account has that email, MateMCP creates the account and links the external identity.
 3. If a local MateMCP account already has that email, MateMCP does **not** silently link it. The user must sign in with the existing password and connect the provider from **Account > Sign-in methods**.
+4. Existing email/password sign-in remains available during the transition so current users are not locked out before linking a provider.
 
 This explicit-link rule prevents possession of a newly asserted external email from silently taking over an existing local account.
 
@@ -113,8 +114,8 @@ Before enabling a provider in production:
 
 1. Register the exact production callback URL at the provider.
 2. Store its client credentials in deployment secrets/environment.
-3. Restart the API and confirm the provider appears on both Login and Register.
-4. Test new-account registration with that provider.
+3. Restart the API and confirm the provider appears on Login.
+4. Test first-time account creation and subsequent sign-in with that provider.
 5. Test sign-in on the linked account.
 6. Test cancellation/denied consent and confirm the user returns to a friendly error state.
 7. Test an email that already belongs to a local account and confirm it is not auto-linked.

@@ -21,9 +21,7 @@ public static class ExternalAuthEndpoints
                 return Results.NotFound();
 
             var returnUrl = SafeReturnUrl(context.Request.Query["returnUrl"].ToString());
-            var mode = string.Equals(context.Request.Query["mode"], "register", StringComparison.Ordinal)
-                ? "register"
-                : "login";
+            var mode = "login";
             var intent = string.Equals(context.Request.Query["intent"], "link", StringComparison.Ordinal)
                 ? "link"
                 : "signin";
@@ -59,9 +57,7 @@ public static class ExternalAuthEndpoints
 
             var properties = external.Properties;
             var providerId = PropertyItem(properties, "provider");
-            var mode = string.Equals(PropertyItem(properties, "mode"), "register", StringComparison.Ordinal)
-                ? "register"
-                : "login";
+            var mode = "login";
             var returnUrl = SafeReturnUrl(PropertyItem(properties, "returnUrl"));
             var intent = PropertyItem(properties, "intent");
 

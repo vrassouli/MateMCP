@@ -64,7 +64,7 @@ Verify response headers for the public website and account portal, including HST
 Then verify in a real browser:
 
 1. `matemcp.com` renders the product website and has the expected canonical/OG metadata.
-2. Register and sign in through `api.matemcp.com`.
+2. Sign in through `api.matemcp.com`; new accounts are created with an enabled external identity provider.
 3. Enroll/manage a device and confirm revoked devices leave the active list.
 4. Exercise an approval Allow/Deny round trip.
 5. Confirm a regular user receives 403 on `/admin`.

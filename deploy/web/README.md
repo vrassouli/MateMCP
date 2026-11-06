@@ -48,7 +48,7 @@ curl -fsS https://relay.matemcp.com/health
 Also verify:
 
 - `https://matemcp.com/` serves the public MateMCP product page and its canonical/OG metadata references `matemcp.com`.
-- `https://api.matemcp.com/login` and `/register` render the account portal.
-- registration/login, Devices, Approvals, and Admin authorization work through the public hostname.
+- `https://api.matemcp.com/login` renders the account portal; `/register` redirects to `/login`.
+- OAuth account creation/login, Devices, Approvals, and Admin authorization work through the public hostname.
 - HSTS/CSP/nosniff/referrer/permissions headers are present where expected.
 - no container port is exposed directly to the public Internet; access should arrive through the reverse proxy/firewall path.
