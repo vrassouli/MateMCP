@@ -225,10 +225,8 @@ public sealed class ExternalAuthTests
             Assert.DoesNotContain("Continue with Google", html, StringComparison.Ordinal);
 
             using var register = await client.GetAsync("/register");
-            Assert.Equal(HttpStatusCode.OK, register.StatusCode);
-            var registerHtml = await register.Content.ReadAsStringAsync();
-            Assert.Contains("Continue with GitHub", registerHtml, StringComparison.Ordinal);
-            Assert.DoesNotContain("Continue with Google", registerHtml, StringComparison.Ordinal);
+            Assert.Equal(HttpStatusCode.Redirect, register.StatusCode);
+            Assert.StartsWith("/login", register.Headers.Location?.OriginalString, StringComparison.Ordinal);
 
             using var disabled = await client.GetAsync("/auth/external/google");
             Assert.Equal(HttpStatusCode.NotFound, disabled.StatusCode);

@@ -182,48 +182,9 @@ app.MapGet("/register", (HttpContext context) =>
 {
     if (context.User.Identity?.IsAuthenticated == true) return Results.Redirect("/dashboard");
     var returnUrl = SafeReturnUrl(context.Request.Query["returnUrl"].ToString());
-    return PortalUi.AuthPage(context, registration: true, returnUrl);
+    return Results.Redirect($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}");
 });
-app.MapPost("/register", async (HttpContext context, ControlPlaneDbContext db, IPasswordHasher<UserAccount> hasher) =>
-{
-    var form = await context.Request.ReadFormAsync();
-    var email = form["email"].ToString().Trim();
-    var password = form["password"].ToString();
-    var confirmation = form["confirmPassword"].ToString();
-    var returnUrl = SafeReturnUrl(form["returnUrl"].ToString());
-
-    if (password.Length < 10 || !email.Contains('@'))
-        return PortalUi.AuthPage(context, registration: true, returnUrl, "Enter a valid email address and a password of at least 10 characters.", email, StatusCodes.Status400BadRequest);
-
-    if (confirmation.Length == 0)
-        return PortalUi.AuthPage(
-            context,
-            registration: true,
-            returnUrl,
-            email: email,
-            statusCode: StatusCodes.Status400BadRequest,
-            passwordConfirmationError: "Please confirm your password.");
-
-    if (!string.Equals(password, confirmation, StringComparison.Ordinal))
-        return PortalUi.AuthPage(
-            context,
-            registration: true,
-            returnUrl,
-            email: email,
-            statusCode: StatusCodes.Status400BadRequest,
-            passwordConfirmationError: "Passwords do not match.");
-
-    var normalized = email.ToUpperInvariant();
-    if (await db.Users.AnyAsync(x => x.NormalizedEmail == normalized))
-        return PortalUi.AuthPage(context, registration: true, returnUrl, "An account with this email already exists.", email, StatusCodes.Status409Conflict);
-
-    var account = new UserAccount { Email = email, NormalizedEmail = normalized, PasswordHash = "pending" };
-    account.PasswordHash = hasher.HashPassword(account, password);
-    db.Users.Add(account);
-    await db.SaveChangesAsync();
-    await SignInAsync(context, account);
-    return Results.Redirect(returnUrl);
-});
+app.MapPost("/register", () => Results.StatusCode(StatusCodes.Status410Gone));
 app.MapGet("/login", (HttpContext context) =>
 {
     if (context.User.Identity?.IsAuthenticated == true) return Results.Redirect("/dashboard");

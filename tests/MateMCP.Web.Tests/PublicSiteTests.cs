@@ -23,7 +23,7 @@ public sealed class PublicSiteTests : IClassFixture<WebApplicationFactory<Progra
         Assert.Contains("id=\"product\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"security\"", html, StringComparison.Ordinal);
         Assert.Contains("id=\"how-it-works\"", html, StringComparison.Ordinal);
-        Assert.Contains("https://api.matemcp.com/register", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("https://api.matemcp.com/register", html, StringComparison.Ordinal);
         Assert.Contains("https://api.matemcp.com/login", html, StringComparison.Ordinal);
         Assert.Contains("https://github.com/vrassouli/MateMCP#install--upgrade-matemcp-desktop", html, StringComparison.Ordinal);
         Assert.Contains("rel=\"canonical\" href=\"https://matemcp.com/\"", html, StringComparison.Ordinal);
