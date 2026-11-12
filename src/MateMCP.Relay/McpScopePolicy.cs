@@ -8,6 +8,9 @@ public static class McpScopePolicy
     {
         // Read-only filesystem, configuration discovery, durable context, transfer status,
         // and visual/semantic inspection.
+        "web_search" or
+        "web_read" or
+        "web_read_many" or
         "filesystem_projects" or
         "filesystem_list" or
         "filesystem_stat" or

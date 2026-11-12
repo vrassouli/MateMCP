@@ -6,6 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="AngleSharp" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="Porta.Pty" />
   </ItemGroup>

@@ -43,6 +43,9 @@ public sealed class McpScopePolicyTests
     }
 
     [Theory]
+    [InlineData("web_search")]
+    [InlineData("web_read")]
+    [InlineData("web_read_many")]
     [InlineData("filesystem_projects")]
     [InlineData("filesystem_list")]
     [InlineData("filesystem_stat")]

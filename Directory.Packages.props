@@ -4,6 +4,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageVersion Include="AngleSharp" Version="1.10.2" />
     <PackageVersion Include="Bluent.UI" Version="2.1.2" />
     <PackageVersion Include="CommunityToolkit.Maui" Version="15.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.14" />

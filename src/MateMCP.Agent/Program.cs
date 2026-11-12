@@ -8,6 +8,7 @@ using MateMCP.Agent.Projects;
 using MateMCP.Agent.Relay;
 using MateMCP.Agent.Security;
 using MateMCP.Agent.Tools;
+using MateMCP.Agent.WebResearch;
 using Microsoft.AspNetCore.RateLimiting;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
@@ -69,6 +70,28 @@ builder.Services.AddSingleton<AgentPowerInhibitionService>();
 builder.Services.AddSingleton<DesktopUpdateSettingsStore>();
 builder.Services.AddSingleton<BackgroundDesktopUpdateService>();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient(WebSearchService.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MateMCP-WebResearch/1.0");
+    client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
+    client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.8,fa;q=0.7");
+});
+builder.Services.AddSingleton<WebSearchService>();
+builder.Services.AddHttpClient(WebPageReader.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MateMCP-WebReader/1.0");
+    client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5");
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false,
+    UseCookies = false,
+    AutomaticDecompression = DecompressionMethods.All,
+    PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+    ConnectCallback = WebPageReader.ConnectToPublicAddressAsync
+});
+builder.Services.AddSingleton<WebPageReader>();
 builder.Services.AddHostedService<AgentPowerInhibitionService>(sp => sp.GetRequiredService<AgentPowerInhibitionService>());
 builder.Services.AddHostedService<BackgroundDesktopUpdateService>(sp => sp.GetRequiredService<BackgroundDesktopUpdateService>());
 builder.Services.AddHostedService<EnrollmentService>();
