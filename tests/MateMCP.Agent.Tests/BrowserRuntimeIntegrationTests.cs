@@ -9,6 +9,37 @@ namespace MateMCP.Agent.Tests;
 public sealed class BrowserRuntimeIntegrationTests
 {
     [Fact]
+    public async Task Dedicated_browser_open_snapshot_close_releases_profile()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("MATEMCP_BROWSER_INTEGRATION"), "1", StringComparison.Ordinal))
+            return;
+
+        var channel = Environment.GetEnvironmentVariable("MATEMCP_BROWSER_CHANNEL") ??
+            (OperatingSystem.IsWindows() ? "msedge" : "chrome");
+        var profileRoot = Path.Combine(Path.GetTempPath(), "MateMCP", "browser");
+        Directory.CreateDirectory(profileRoot);
+        var profilesBefore = Directory.GetDirectories(profileRoot)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        await using var server = new LoopbackPageServer();
+        await using var browser = new BrowserAutomationService();
+
+        var opened = await browser.OpenAsync(server.Url, channel);
+        Assert.True(opened.Active);
+
+        var snapshot = await browser.SnapshotAsync();
+        Assert.Equal(server.Url, snapshot.Url);
+
+        await browser.CloseAsync();
+        Assert.False((await browser.GetStatusAsync()).Active);
+
+        var leftoverProfiles = Directory.GetDirectories(profileRoot)
+            .Where(path => !profilesBefore.Contains(path))
+            .ToArray();
+        Assert.Empty(leftoverProfiles);
+    }
+
+    [Fact]
     public async Task Dedicated_browser_executes_real_semantic_flow()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("MATEMCP_BROWSER_INTEGRATION"), "1", StringComparison.Ordinal))
@@ -18,6 +49,10 @@ public sealed class BrowserRuntimeIntegrationTests
             (OperatingSystem.IsWindows() ? "msedge" : "chrome");
 
         await using var server = new LoopbackPageServer();
+        var profileRoot = Path.Combine(Path.GetTempPath(), "MateMCP", "browser");
+        Directory.CreateDirectory(profileRoot);
+        var profilesBefore = Directory.GetDirectories(profileRoot)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var lastStep = "starting";
         var flow = RunFlowAsync();
         var completed = await Task.WhenAny(flow, Task.Delay(TimeSpan.FromSeconds(60)));
@@ -145,6 +180,11 @@ public sealed class BrowserRuntimeIntegrationTests
             Mark("status after close");
             var closed = await browser.GetStatusAsync();
             Assert.False(closed.Active);
+
+            var leftoverProfiles = Directory.GetDirectories(profileRoot)
+                .Where(path => !profilesBefore.Contains(path))
+                .ToArray();
+            Assert.Empty(leftoverProfiles);
             Mark("complete");
         }
 
