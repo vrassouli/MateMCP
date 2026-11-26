@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MateMCP.Agent.Browser;
 using MateMCP.Agent.Tools;
 
@@ -18,6 +19,51 @@ public sealed class BrowserAutomationTests
     [Fact]
     public void Unsupported_browser_channel_is_rejected()
         => Assert.Throws<ArgumentException>(() => BrowserAutomationService.NormalizeChannel("firefox"));
+
+    [Fact]
+    public async Task DevTools_port_is_accepted_after_launcher_process_exits()
+    {
+        var profile = Path.Combine(Path.GetTempPath(), "MateMCP", "browser-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(profile);
+
+        var launcherStartInfo = new ProcessStartInfo(
+            OperatingSystem.IsWindows() ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe" : "/bin/sh")
+        {
+            UseShellExecute = false
+        };
+        if (OperatingSystem.IsWindows())
+        {
+            launcherStartInfo.ArgumentList.Add("/c");
+            launcherStartInfo.ArgumentList.Add("exit 0");
+        }
+        else
+        {
+            launcherStartInfo.ArgumentList.Add("-c");
+            launcherStartInfo.ArgumentList.Add("exit 0");
+        }
+
+        using var launcher = Process.Start(launcherStartInfo)
+            ?? throw new InvalidOperationException("Could not start the launcher test process.");
+
+        try
+        {
+            await launcher.WaitForExitAsync();
+            Assert.Equal(0, launcher.ExitCode);
+
+            await File.WriteAllTextAsync(
+                Path.Combine(profile, "DevToolsActivePort"),
+                "9222" + Environment.NewLine + "/devtools/browser/test");
+
+            var port = await BrowserAutomationService.WaitForDevToolsPortAsync(
+                profile, launcher, CancellationToken.None);
+
+            Assert.Equal(9222, port);
+        }
+        finally
+        {
+            try { Directory.Delete(profile, recursive: true); } catch { }
+        }
+    }
 
     [Theory]
     [InlineData("http://localhost:5000/")]

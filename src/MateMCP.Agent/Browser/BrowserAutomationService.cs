@@ -85,6 +85,7 @@ public sealed class BrowserAutomationService : IAsyncDisposable
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Process? _process;
+    private CdpClient? _browserCdp;
     private CdpClient? _cdp;
     private string? _profileDirectory;
     private string? _channel;
@@ -478,6 +479,7 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         psi.ArgumentList.Add("about:blank");
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException($"Could not start {channel}.");
+        CdpClient? browserCdp = null;
         try
         {
             var port = await WaitForDevToolsPortAsync(profile, process, cancellationToken);
@@ -486,6 +488,16 @@ public sealed class BrowserAutomationService : IAsyncDisposable
                 BaseAddress = new Uri($"http://127.0.0.1:{port}/"),
                 Timeout = TimeSpan.FromSeconds(5)
             };
+
+            // On Windows, Chromium may hand startup off to its browser process and exit the
+            // launcher process with code 0. The DevTools endpoint belongs to the browser, not
+            // necessarily to the Process instance returned by Process.Start(). Keep a browser-
+            // level CDP connection so CloseAsync can shut down the actual browser instance.
+            var version = await http.GetFromJsonAsync<DevToolsVersion>("json/version", Json, cancellationToken);
+            if (version is null || string.IsNullOrWhiteSpace(version.WebSocketDebuggerUrl))
+                throw new InvalidOperationException("Browser started but did not expose its browser-level DevTools endpoint.");
+            browserCdp = await CdpClient.ConnectAsync(new Uri(version.WebSocketDebuggerUrl), cancellationToken);
+
             var targets = await http.GetFromJsonAsync<List<DevToolsTarget>>("json/list", Json, cancellationToken) ?? [];
             var page = targets.FirstOrDefault(target => string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase));
             if (page is null)
@@ -504,6 +516,7 @@ public sealed class BrowserAutomationService : IAsyncDisposable
             await cdp.SendAsync("Log.enable", new { }, cancellationToken);
 
             _process = process;
+            _browserCdp = browserCdp;
             _profileDirectory = profile;
             _channel = channel;
             _cdp = cdp;
@@ -511,8 +524,10 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         }
         catch
         {
+            await TryCloseBrowserAsync(browserCdp);
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-            TryDeleteDirectory(profile);
+            process.Dispose();
+            await TryDeleteDirectoryAsync(profile);
             throw;
         }
     }
@@ -854,7 +869,7 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         }
     }
 
-    private static async Task<int> WaitForDevToolsPortAsync(
+    internal static async Task<int> WaitForDevToolsPortAsync(
         string profileDirectory,
         Process process,
         CancellationToken cancellationToken)
@@ -863,8 +878,10 @@ public sealed class BrowserAutomationService : IAsyncDisposable
         for (var attempt = 0; attempt < 100; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (process.HasExited)
-                throw new InvalidOperationException($"Browser exited before DevTools became available (exit {process.ExitCode}).");
+
+            // Check the profile hand-off file before inspecting the launcher process. On
+            // Windows, chrome.exe/msedge.exe can exit successfully after delegating startup
+            // while the actual browser continues and publishes DevToolsActivePort.
             if (File.Exists(path))
             {
                 try
@@ -876,8 +893,18 @@ public sealed class BrowserAutomationService : IAsyncDisposable
                 }
                 catch (IOException) { }
             }
-            await Task.Delay(100, cancellationToken);
+
+            if (process.HasExited && process.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Browser launcher exited with code {process.ExitCode} before publishing a DevTools port.");
+
+            if (attempt < 99)
+                await Task.Delay(100, cancellationToken);
         }
+
+        if (process.HasExited)
+            throw new InvalidOperationException(
+                $"Browser launcher exited (exit {process.ExitCode}) without publishing a DevTools port within 10 seconds.");
         throw new TimeoutException("Browser did not expose a DevTools port within 10 seconds.");
     }
 
@@ -1091,18 +1118,54 @@ JSON.stringify((() => {
         var cdp = _cdp;
         _cdp = null;
         if (cdp is not null) await cdp.DisposeAsync();
+
+        var browserCdp = _browserCdp;
+        _browserCdp = null;
+        await TryCloseBrowserAsync(browserCdp);
+
+        // Retain the launcher handle as a best-effort fallback. The browser-level
+        // Browser.close command above is the authoritative shutdown for Windows hand-off.
         try { if (_process is { HasExited: false }) _process.Kill(entireProcessTree: true); } catch { }
         _process?.Dispose();
         _process = null;
-        if (_profileDirectory is { } profile) TryDeleteDirectory(profile);
+        if (_profileDirectory is { } profile) await TryDeleteDirectoryAsync(profile);
         _profileDirectory = null;
         _channel = null;
         _viewport = null;
     }
 
-    private static void TryDeleteDirectory(string path)
+    private static async Task TryCloseBrowserAsync(CdpClient? browserCdp)
     {
-        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { }
+        if (browserCdp is null) return;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await browserCdp.SendAsync("Browser.close", new { }, timeout.Token);
+        }
+        catch
+        {
+            // Chromium may close the browser-level socket before acknowledging Browser.close.
+        }
+        finally
+        {
+            try { await browserCdp.DisposeAsync(); } catch { }
+        }
+    }
+
+    private static async Task TryDeleteDirectoryAsync(string path)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 19) { await Task.Delay(100); }
+            catch (UnauthorizedAccessException) when (attempt < 19) { await Task.Delay(100); }
+            catch (IOException) { return; }
+            catch (UnauthorizedAccessException) { return; }
+        }
     }
 
     private static string Trim(string value, int max)
@@ -1120,6 +1183,7 @@ JSON.stringify((() => {
     }
 
     private sealed record CdpEvent(string Method, JsonElement Parameters);
+    private sealed record DevToolsVersion(string? WebSocketDebuggerUrl);
     private sealed record DevToolsTarget(string? Id, string? Type, string? Url, string? Title, string? WebSocketDebuggerUrl);
     private sealed record PageState(string? Url, string? Title, int Width, int Height, double Scale);
 
